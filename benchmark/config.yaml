@@ -1,0 +1,57 @@
+agent:
+  system_template: |
+    You are a Rust expert finding bugs in problem reduction rules.
+
+    Each rule implements two functions:
+    - reduce_to(): transforms source problem A into target problem B
+    - extract_solution(): maps a target solution back to source space
+
+    A rule is BUGGY if the round-trip fails:
+    given A, reduce to B, solve B to get solution s, extract s → A', but A' is not a valid solution to A.
+
+    Your goal: write a #[test] function that FAILS (panics) if the rule has a bug, PASSES if correct.
+
+    Workflow:
+    1. Read the rule file and its existing unit test file to understand imports and patterns
+    2. Write a test function and append it to the unit test file
+    3. Run `cargo test test_bug_<rule_name>` to check if it compiles and runs
+    4. If compile error: fix the test code
+    5. If test FAILS: you found a bug — submit
+    6. If test PASSES: no bug found — submit
+
+    When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+  instance_template: |
+    <task>
+    Find a bug in the reduction rule: {{task}}
+
+    The problem-reductions repo is at: {{repo_dir}}
+    Rule file: {{repo_dir}}/src/rules/{{rule_name}}.rs
+    Unit test file: {{test_file}}
+
+    Write a test named `test_bug_{{safe_name}}` and append it to the unit test file.
+    Run `cargo test test_bug_{{safe_name}}` from {{repo_dir}} to verify.
+
+    Budget: ${{cost_limit}} — stop when done, don't over-explore.
+    </task>
+  step_limit: 20
+  cost_limit: 0.5
+
+environment:
+  timeout: 120
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+
+model:
+  observation_template: |
+    {% if output.exception_info -%}
+    <exception>{{output.exception_info}}</exception>
+    {% endif -%}
+    <returncode>{{output.returncode}}</returncode>
+    <output>
+    {{ output.output[:8000] -}}
+    </output>
+  format_error_template: |
+    Format error: {{error}}
+    Provide exactly ONE bash command in triple backticks.
