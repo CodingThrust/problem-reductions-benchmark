@@ -15,9 +15,18 @@ agent:
     1. Read the rule file and its existing unit test file to understand imports and patterns
     2. Write a test function and append it to the unit test file
     3. Run `cargo test test_bug_<rule_name>` to check if it compiles and runs
-    4. If compile error: fix the test code
-    5. If test FAILS: you found a bug — submit
+    4. If compile error: fix the test code and retry
+    5. If test FAILS: you found a bug — write a bug report (see format below), then submit
     6. If test PASSES: no bug found — submit
+
+    Bug report format (print to stdout before submitting):
+    BUG_REPORT_START
+    rule: <rule_name>
+    description: <one sentence: what is wrong in reduce_to() or extract_solution()>
+    minimal_input: <the specific input that triggers the bug>
+    expected: <what the round-trip should return>
+    actual: <what it actually returns>
+    BUG_REPORT_END
 
     When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
   instance_template: |
@@ -31,6 +40,7 @@ agent:
     Write a test named `test_bug_{{safe_name}}` and append it to the unit test file.
     Run `cargo test test_bug_{{safe_name}}` from {{repo_dir}} to verify.
 
+    If you find a bug, print the BUG_REPORT_START...BUG_REPORT_END block before submitting.
     Budget: ${{cost_limit}} — stop when done, don't over-explore.
     </task>
   step_limit: 20
