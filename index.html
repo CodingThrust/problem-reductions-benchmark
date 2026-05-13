@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Problem-Reductions Bug-Finding Benchmark</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f9fafb; color: #111; }
+  header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 24px 40px; }
+  header h1 { font-size: 1.5rem; font-weight: 700; }
+  header p { color: #6b7280; margin-top: 4px; font-size: 0.9rem; }
+  main { max-width: 960px; margin: 40px auto; padding: 0 24px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 32px; }
+  .card h2 { font-size: 1rem; font-weight: 600; color: #374151; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th { text-align: left; padding: 8px 12px; color: #6b7280; font-weight: 500; border-bottom: 2px solid #e5e7eb; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: none; }
+  .rank { font-weight: 700; color: #6b7280; width: 40px; }
+  .rank-1 { color: #f59e0b; }
+  .rank-2 { color: #9ca3af; }
+  .rank-3 { color: #b45309; }
+  .model { font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.75rem; background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+  canvas { max-height: 340px; }
+  .note { font-size: 0.8rem; color: #9ca3af; margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Problem-Reductions Bug-Finding Benchmark</h1>
+  <p>Each model is given a $20 quota. Ranking is by bugs found per dollar (cost-efficiency).</p>
+</header>
+<main>
+  <div class="card">
+    <h2>Leaderboard</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th>Model</th>
+          <th>Bugs Found</th>
+          <th>Cost Used ($)</th>
+          <th>Bugs / $</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Cost vs Performance</h2>
+    <canvas id="chart"></canvas>
+    <p class="note">X axis: cost used ($20 budget). Y axis: bugs found. Top-left = most efficient.</p>
+  </div>
+</main>
+<script>
+const models = [
+  { name: "DeepSeek-V3",      bugs: 38, cost: 4.2  },
+  { name: "Claude 3.5 Sonnet",bugs: 41, cost: 11.8 },
+  { name: "GPT-4o",           bugs: 35, cost: 14.5 },
+  { name: "Gemini 1.5 Pro",   bugs: 29, cost: 8.1  },
+  { name: "Llama 3.1 405B",   bugs: 22, cost: 6.3  },
+  { name: "Mistral Large",    bugs: 18, cost: 5.0  },
+];
+
+// Sort by bugs/cost descending
+models.sort((a, b) => (b.bugs / b.cost) - (a.bugs / a.cost));
+
+const tbody = document.getElementById("tbody");
+models.forEach((m, i) => {
+  const eff = (m.bugs / m.cost).toFixed(2);
+  const rankClass = i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "";
+  tbody.innerHTML += `
+    <tr>
+      <td class="rank ${rankClass}">${i + 1}</td>
+      <td class="model">${m.name}${i === 0 ? ' <span class="badge">Top</span>' : ""}</td>
+      <td>${m.bugs}</td>
+      <td>$${m.cost.toFixed(2)}</td>
+      <td><strong>${eff}</strong></td>
+    </tr>`;
+});
+
+// Scatter chart
+const colors = ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4"];
+new Chart(document.getElementById("chart"), {
+  type: "scatter",
+  data: {
+    datasets: models.map((m, i) => ({
+      label: m.name,
+      data: [{ x: m.cost, y: m.bugs }],
+      backgroundColor: colors[i],
+      pointRadius: 8,
+      pointHoverRadius: 10,
+    }))
+  },
+  options: {
+    plugins: { legend: { position: "right" } },
+    scales: {
+      x: { title: { display: true, text: "Cost Used ($)" }, min: 0, max: 22 },
+      y: { title: { display: true, text: "Bugs Found" }, min: 0 }
+    }
+  }
+});
+</script>
+</body>
+</html>
