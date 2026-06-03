@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 """
 Benchmark runner using mini-SWE-agent as the harness.
 
@@ -89,18 +92,31 @@ def restore_test_file(test_file: str, original: str | None) -> None:
         Path(test_file).write_text(original, encoding="utf-8")
 
 
-def run_one(model_name: str, repo_dir: str, rule_name: str, cost_limit: float) -> dict:
+def extract_total_tokens(messages: list) -> int:
+    """Sum actual token usage from all model responses."""
+    total = 0
+    for msg in messages:
+        resp = msg.get("extra", {}).get("response")
+        if resp and hasattr(resp, "usage"):
+            total += getattr(resp.usage, "total_tokens", 0)
+    return total
+
+
+def run_one(model_name: str, repo_dir: str, rule_name: str, cost_limit: float, api_base: str | None = None) -> dict:
     safe_name = rule_name.replace("-", "_")
     test_file = find_test_file(repo_dir, rule_name)
     original = Path(test_file).read_text(encoding="utf-8") if test_file else None
 
-    config = yaml.safe_load(CONFIG_FILE.read_text())
-    # Inject per-instance values into instance_template via extra_template_vars
+    config = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8"))
     agent_cfg = config.get("agent", {})
     agent_cfg["cost_limit"] = cost_limit
 
+    model_kwargs = {"model_name": model_name}
+    if api_base:
+        model_kwargs["api_base"] = api_base
+
     agent = DefaultAgent(
-        LitellmModel(model_name=model_name),
+        LitellmModel(**model_kwargs),
         LocalEnvironment(),
         **agent_cfg,
     )
@@ -115,7 +131,8 @@ def run_one(model_name: str, repo_dir: str, rule_name: str, cost_limit: float) -
     try:
         agent.run(task=rule_name)
         cost = agent.cost
-        tokens_k = round(cost / AVG_COST_PER_MTOK * 1000, 2)
+        total_tokens = extract_total_tokens(agent.messages)
+        tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_MTOK * 1000, 2)
         bug_found = check_bug_found(repo_dir, rule_name)
         bug_report = parse_bug_report(agent.messages) if bug_found else None
         known = is_known_issue(rule_name) if bug_found else False
@@ -144,6 +161,7 @@ def list_rules(repo_dir: str) -> list[str]:
 def main():
     parser = argparse.ArgumentParser(description="mini-SWE-agent benchmark for problem-reductions")
     parser.add_argument("--model", default="anthropic/claude-sonnet-4-6", help="LiteLLM model name")
+    parser.add_argument("--api-base", default=None, help="Custom API base URL (e.g. https://api.openai-hk.com/v1)")
     parser.add_argument("--budget", type=float, default=20.0, help="Total USD budget")
     parser.add_argument("--per-rule", type=float, default=0.5, help="Per-rule cost limit ($)")
     parser.add_argument("--rules", nargs="*", help="Specific rule names (default: all)")
@@ -162,7 +180,7 @@ def main():
                 break
             limit = min(args.per_rule, remaining)
             print(f"  {rule_name} (limit ${limit:.2f})...", end=" ", flush=True)
-            r = run_one(args.model, repo_dir, rule_name, limit)
+            r = run_one(args.model, repo_dir, rule_name, limit, api_base=args.api_base)
             results.append(r)
             total_cost += r["cost"]
             total_tokens_k += r.get("tokens_k", 0)
