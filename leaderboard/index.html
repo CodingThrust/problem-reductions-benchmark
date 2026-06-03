@@ -31,7 +31,7 @@
 <body>
 <header>
   <h1>Problem-Reductions Bug-Finding Benchmark</h1>
-  <p>Each model is given a $20 quota. Ranking is by bugs found per dollar (cost-efficiency).</p>
+  <p>Each model is given a $20 quota. Ranking by <strong>bugs/Ktok</strong> (fair, model-agnostic) and <strong>bugs/$</strong> (practical).</p>
 </header>
 <main>
   <div class="card">
@@ -42,7 +42,9 @@
           <th class="rank">#</th>
           <th>Model</th>
           <th>Bugs Found</th>
-          <th>Cost Used ($)</th>
+          <th>Tokens (K)</th>
+          <th>Cost ($)</th>
+          <th>Bugs / Ktok</th>
           <th>Bugs / $</th>
         </tr>
       </thead>
@@ -52,33 +54,36 @@
   <div class="card">
     <h2>Cost vs Performance</h2>
     <canvas id="chart"></canvas>
-    <p class="note">X axis: cost used ($20 budget). Y axis: bugs found. Top-left = most efficient.</p>
+    <p class="note">X axis: tokens used (K). Y axis: bugs found. Top-left = most efficient. Ranked by bugs/Ktok (model-agnostic fair metric).</p>
   </div>
 </main>
 <script>
 const models = [
-  { name: "DeepSeek-V3",      bugs: 38, cost: 4.2  },
-  { name: "Claude 3.5 Sonnet",bugs: 41, cost: 11.8 },
-  { name: "GPT-4o",           bugs: 35, cost: 14.5 },
-  { name: "Gemini 1.5 Pro",   bugs: 29, cost: 8.1  },
-  { name: "Llama 3.1 405B",   bugs: 22, cost: 6.3  },
-  { name: "Mistral Large",    bugs: 18, cost: 5.0  },
+  { name: "DeepSeek-V3",       bugs: 38, cost: 4.2,  tokens_k: 700  },
+  { name: "Claude 3.5 Sonnet", bugs: 41, cost: 11.8, tokens_k: 1967 },
+  { name: "GPT-4o",            bugs: 35, cost: 14.5, tokens_k: 2417 },
+  { name: "Gemini 1.5 Pro",    bugs: 29, cost: 8.1,  tokens_k: 1350 },
+  { name: "Llama 3.1 405B",    bugs: 22, cost: 6.3,  tokens_k: 1050 },
+  { name: "Mistral Large",     bugs: 18, cost: 5.0,  tokens_k: 833  },
 ];
 
-// Sort by bugs/cost descending
-models.sort((a, b) => (b.bugs / b.cost) - (a.bugs / a.cost));
+// Sort by bugs/Ktok descending (primary fair metric)
+models.sort((a, b) => (b.bugs / b.tokens_k) - (a.bugs / a.tokens_k));
 
 const tbody = document.getElementById("tbody");
 models.forEach((m, i) => {
-  const eff = (m.bugs / m.cost).toFixed(2);
+  const effKtok = (m.bugs / m.tokens_k * 1000).toFixed(3);
+  const effDollar = (m.bugs / m.cost).toFixed(2);
   const rankClass = i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "";
   tbody.innerHTML += `
     <tr>
       <td class="rank ${rankClass}">${i + 1}</td>
       <td class="model">${m.name}${i === 0 ? ' <span class="badge">Top</span>' : ""}</td>
       <td>${m.bugs}</td>
+      <td>${m.tokens_k.toLocaleString()}</td>
       <td>$${m.cost.toFixed(2)}</td>
-      <td><strong>${eff}</strong></td>
+      <td><strong>${effKtok}</strong></td>
+      <td>${effDollar}</td>
     </tr>`;
 });
 
@@ -89,7 +94,7 @@ new Chart(document.getElementById("chart"), {
   data: {
     datasets: models.map((m, i) => ({
       label: m.name,
-      data: [{ x: m.cost, y: m.bugs }],
+      data: [{ x: m.tokens_k, y: m.bugs }],
       backgroundColor: colors[i],
       pointRadius: 8,
       pointHoverRadius: 10,
@@ -98,7 +103,7 @@ new Chart(document.getElementById("chart"), {
   options: {
     plugins: { legend: { position: "right" } },
     scales: {
-      x: { title: { display: true, text: "Cost Used ($)" }, min: 0, max: 22 },
+      x: { title: { display: true, text: "Tokens Used (K)" }, min: 0 },
       y: { title: { display: true, text: "Bugs Found" }, min: 0 }
     }
   }
