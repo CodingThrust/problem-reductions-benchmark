@@ -1,0 +1,93 @@
+# pred CLI Capability Audit
+
+**Date:** 2026-06-11
+**Repo:** `C:\Users\ASUS\Desktop\111\reduction\problem-reductions`
+**Commit:** `706856087e55f34bdc5fd3fa2a730aa74c05a675`
+**pred binary:** `C:\Users\ASUS\.cargo\bin\pred.exe`
+**pred version:** 0.5.0
+
+## Summary
+
+7/7 capabilities verified.
+
+## Required Capabilities for Bug Checker
+
+| Capability | Status | Notes |
+|------------|--------|-------|
+| `create` | OK Available | Creates valid JSON with type and data |
+| `reduce` | OK Available | Creates reduction bundle with source/target/path |
+| `solve` | OK Available | Returns solution and evaluation |
+| `solve_no_solution` | OK Available | Returns Or(false) for unsatisfiable |
+| `evaluate_valid` | OK Available | Valid config returns Max(2) |
+| `evaluate_invalid` | OK Available | Invalid config returns Max(None) |
+| `round_trip` | OK Available | Round-trip completes: source solution + intermediate target solution |
+
+## Test Details
+
+### `create`
+
+**Description:** Create MIS instance and output JSON
+
+**Result:** PASS
+
+Creates valid JSON with type and data
+
+### `reduce`
+
+**Description:** Reduce MIS to QUBO and output bundle
+
+**Result:** PASS
+
+Creates reduction bundle with source/target/path
+
+### `solve`
+
+**Description:** Solve MIS with brute-force and return solution + evaluation
+
+**Result:** PASS
+
+Returns solution and evaluation
+
+### `solve_no_solution`
+
+**Description:** Solve unsatisfiable instance returns Or(false)
+
+**Result:** PASS
+
+Returns Or(false) for unsatisfiable
+
+### `evaluate_valid`
+
+**Description:** Evaluate valid MIS config returns Max(2)
+
+**Result:** PASS
+
+Valid config returns Max(2)
+
+### `evaluate_invalid`
+
+**Description:** Evaluate invalid MIS config returns Max(None)
+
+**Result:** PASS
+
+Invalid config returns Max(None)
+
+### `round_trip`
+
+**Description:** MIS -> QUBO -> solve -> extract back to MIS
+
+**Result:** PASS
+
+Round-trip completes: source solution + intermediate target solution
+
+## Upstream Issues Filed
+
+None - all required capabilities are available in v0.5.0.
+
+## Notes
+
+- **pred extract is missing** from the v0.5.0 binary (exists in source but not compiled in released version).
+  However, `pred solve` on a reduction bundle already performs the full reduce -> solve -> extract round-trip internally,
+  so extract is not needed for the bug checker workflow.
+- `solve --solver brute-force` correctly returns `Or(false)` / `Max(None)` for unsatisfiable instances.
+- `evaluate` distinguishes valid vs invalid configurations via `Max(value)` vs `Max(None)`.
