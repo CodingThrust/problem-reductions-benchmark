@@ -69,9 +69,9 @@ def test_reduce(ctx: EnvContext) -> CapabilityTest:
 
 def test_solve_brute_force(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("solve", "Solve MIS with brute-force and return solution + evaluation")
-    returncode, source_json, _ = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
     if returncode != 0:
-        test.error = "Create failed"
+        test.error = f"Create failed: {stderr}"
         return test
     returncode, stdout, stderr = run_pred_command(ctx, ["solve", "-", "--solver", "brute-force", "--json"], stdin=source_json)
     if returncode != 0:
@@ -91,9 +91,9 @@ def test_solve_brute_force(ctx: EnvContext) -> CapabilityTest:
 
 def test_solve_no_solution(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("solve_no_solution", "Solve unsatisfiable instance returns Or(false)")
-    returncode, source_json, _ = run_pred_command(ctx, ["create", "KColoring", "--graph", "0-1", "--k", "1", "--json"])
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "KColoring", "--graph", "0-1", "--k", "1", "--json"])
     if returncode != 0:
-        test.error = "Create failed"
+        test.error = f"Create failed: {stderr}"
         return test
     returncode, stdout, stderr = run_pred_command(ctx, ["solve", "-", "--solver", "brute-force", "--json"], stdin=source_json)
     if returncode != 0:
@@ -112,9 +112,9 @@ def test_solve_no_solution(ctx: EnvContext) -> CapabilityTest:
 
 def test_evaluate_valid(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("evaluate_valid", "Evaluate valid MIS config returns Max(2)")
-    returncode, source_json, _ = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
     if returncode != 0:
-        test.error = "Create failed"
+        test.error = f"Create failed: {stderr}"
         return test
     returncode, stdout, stderr = run_pred_command(ctx, ["evaluate", "-", "--config", "1,0,1", "--json"], stdin=source_json)
     if returncode != 0:
@@ -132,9 +132,9 @@ def test_evaluate_valid(ctx: EnvContext) -> CapabilityTest:
 
 def test_evaluate_invalid(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("evaluate_invalid", "Evaluate invalid MIS config returns Max(None)")
-    returncode, source_json, _ = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
     if returncode != 0:
-        test.error = "Create failed"
+        test.error = f"Create failed: {stderr}"
         return test
     returncode, stdout, stderr = run_pred_command(ctx, ["evaluate", "-", "--config", "1,1,0", "--json"], stdin=source_json)
     if returncode != 0:
@@ -152,9 +152,9 @@ def test_evaluate_invalid(ctx: EnvContext) -> CapabilityTest:
 
 def test_round_trip(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("round_trip", "MIS -> QUBO -> solve -> extract back to MIS")
-    returncode, source_json, _ = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
     if returncode != 0:
-        test.error = "Create failed"
+        test.error = f"Create failed: {stderr}"
         return test
     returncode, bundle_json, stderr = run_pred_command(ctx, ["reduce", "-", "--to", "QUBO", "--json"], stdin=source_json)
     if returncode != 0:
@@ -285,7 +285,7 @@ def main():
         print(f"Result: {passed}/{total} tests passed")
 
         # Write audit document
-        doc_path = Path(__file__).parent.parent / "benchmark" / "docs" / "pred-capability-audit.md"
+        doc_path = Path(__file__).parent / "docs" / "pred-capability-audit.md"
         doc_path.parent.mkdir(parents=True, exist_ok=True)
         doc_path.write_text(generate_audit_doc(ctx, tests), encoding="utf-8")
         print(f"Audit document written to: {doc_path}")
