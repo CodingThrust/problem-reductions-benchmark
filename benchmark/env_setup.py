@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from benchmark.env_context import EnvContext
 
-PINNED_COMMIT = "706856087e55f34bdc5fd3fa2a730aa74c05a675"
+PINNED_COMMIT = "aa2d1a10cffa434871d12a4d6f411147fb7e08a8"
 
 
 def find_pred_binary() -> Path:

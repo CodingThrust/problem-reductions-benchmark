@@ -1,14 +1,14 @@
 # pred CLI Capability Audit
 
-**Date:** 2026-06-11
+**Date:** 2026-06-12
 **Repo:** `C:\Users\ASUS\Desktop\111\reduction\problem-reductions`
-**Commit:** `706856087e55f34bdc5fd3fa2a730aa74c05a675`
+**Commit:** `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`
 **pred binary:** `C:\Users\ASUS\.cargo\bin\pred.exe`
-**pred version:** 0.5.0
+**pred version:** 0.6.0
 
 ## Summary
 
-7/7 capabilities verified.
+8/8 capabilities verified.
 
 ## Required Capabilities for Bug Checker
 
@@ -20,6 +20,7 @@
 | `solve_no_solution` | OK Available | Returns Or(false) for unsatisfiable |
 | `evaluate_valid` | OK Available | Valid config returns Max(2) |
 | `evaluate_invalid` | OK Available | Invalid config returns Max(None) |
+| `extract` | OK Available | Lifts target-space config back to source-space solution |
 | `round_trip` | OK Available | Round-trip completes: source solution + intermediate target solution |
 
 ## Test Details
@@ -72,6 +73,14 @@ Valid config returns Max(2)
 
 Invalid config returns Max(None)
 
+### `extract`
+
+**Description:** Extract source-space solution from bundle + target config
+
+**Result:** PASS
+
+Lifts target-space config back to source-space solution
+
 ### `round_trip`
 
 **Description:** MIS -> QUBO -> solve -> extract back to MIS
@@ -82,12 +91,11 @@ Round-trip completes: source solution + intermediate target solution
 
 ## Upstream Issues Filed
 
-None - all required capabilities are available in v0.5.0.
+None - all required capabilities are available in v0.6.0.
 
 ## Notes
 
-- **pred extract is missing** from the v0.5.0 binary (exists in source but not compiled in released version).
-  However, `pred solve` on a reduction bundle already performs the full reduce -> solve -> extract round-trip internally,
-  so extract is not needed for the bug checker workflow.
+- `pred extract` is available in v0.6.0 (added in #1060).
 - `solve --solver brute-force` correctly returns `Or(false)` / `Max(None)` for unsatisfiable instances.
 - `evaluate` distinguishes valid vs invalid configurations via `Max(value)` vs `Max(None)`.
+- Built with `--no-default-features --features lp-solvers` on Windows (highs-sys requires CMake + VS2026).

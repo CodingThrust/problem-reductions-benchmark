@@ -150,6 +150,39 @@ def test_evaluate_invalid(ctx: EnvContext) -> CapabilityTest:
     return test
 
 
+def test_extract(ctx: EnvContext) -> CapabilityTest:
+    test = CapabilityTest("extract", "Extract source-space solution from bundle + target config")
+    returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
+    if returncode != 0:
+        test.error = f"Create failed: {stderr}"
+        return test
+    returncode, bundle_json, stderr = run_pred_command(ctx, ["reduce", "-", "--to", "QUBO", "--json"], stdin=source_json)
+    if returncode != 0:
+        test.error = f"Reduce failed: {stderr}"
+        return test
+    # Get a target-space solution by solving
+    returncode, solve_out, stderr = run_pred_command(ctx, ["solve", "-", "--solver", "brute-force", "--json"], stdin=bundle_json)
+    if returncode != 0:
+        test.error = f"Solve failed: {stderr}"
+        return test
+    target_config = ",".join(str(x) for x in json.loads(solve_out).get("intermediate", {}).get("solution", []))
+    if not target_config:
+        test.error = "No intermediate solution to extract from"
+        return test
+    returncode, stdout, stderr = run_pred_command(ctx, ["extract", "-", "--config", target_config, "--json"], stdin=bundle_json)
+    if returncode != 0:
+        test.error = f"Extract failed: {stderr}"
+        return test
+    try:
+        result = json.loads(stdout)
+        assert "solution" in result or "config" in result or "evaluation" in result
+        test.passed = True
+        test.output = "Lifts target-space config back to source-space solution"
+    except (ValueError, AssertionError) as e:
+        test.error = f"Invalid extract result: {e}"
+    return test
+
+
 def test_round_trip(ctx: EnvContext) -> CapabilityTest:
     test = CapabilityTest("round_trip", "MIS -> QUBO -> solve -> extract back to MIS")
     returncode, source_json, stderr = run_pred_command(ctx, ["create", "MIS", "--graph", "0-1,1-2", "--json"])
@@ -189,6 +222,7 @@ def run_audit(ctx: EnvContext) -> list[CapabilityTest]:
         test_solve_no_solution(ctx),
         test_evaluate_valid(ctx),
         test_evaluate_invalid(ctx),
+        test_extract(ctx),
         test_round_trip(ctx),
     ]
 
@@ -204,7 +238,7 @@ def generate_audit_doc(ctx: EnvContext, tests: list[CapabilityTest]) -> str:
 **Repo:** `{ctx.repo_path}`
 **Commit:** `{ctx.commit_hash}`
 **pred binary:** `{ctx.pred_binary}`
-**pred version:** 0.5.0
+**pred version:** 0.6.0
 
 ## Summary
 
@@ -233,15 +267,14 @@ def generate_audit_doc(ctx: EnvContext, tests: list[CapabilityTest]) -> str:
 
     doc += """## Upstream Issues Filed
 
-None - all required capabilities are available in v0.5.0.
+None - all required capabilities are available in v0.6.0.
 
 ## Notes
 
-- **pred extract is missing** from the v0.5.0 binary (exists in source but not compiled in released version).
-  However, `pred solve` on a reduction bundle already performs the full reduce -> solve -> extract round-trip internally,
-  so extract is not needed for the bug checker workflow.
+- `pred extract` is available in v0.6.0 (added in #1060).
 - `solve --solver brute-force` correctly returns `Or(false)` / `Max(None)` for unsatisfiable instances.
 - `evaluate` distinguishes valid vs invalid configurations via `Max(value)` vs `Max(None)`.
+- Built with `--no-default-features --features lp-solvers` on Windows (highs-sys requires CMake + VS2026).
 """
 
     return doc
