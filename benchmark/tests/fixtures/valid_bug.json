@@ -1,0 +1,47 @@
+{
+  "_comment": "Genuine unsound_extraction bug fixture. The bundle is real (MIS graph 0-1,1-2 -> MaximumClique). A hypothetically buggy extract_solution returns [1,1,0] (adjacent vertices 0 and 1 both selected), which is invalid for MIS. Verifier must accept this as a real bug.",
+  "rule": "MaximumIndependentSetToMaximumClique",
+  "source": {
+    "data": {
+      "graph": {
+        "edges": [[0, 1], [1, 2]],
+        "num_vertices": 3
+      },
+      "weights": [1, 1, 1]
+    },
+    "type": "MaximumIndependentSet",
+    "variant": {"graph": "SimpleGraph", "weight": "One"}
+  },
+  "bundle": {
+    "path": [
+      {"name": "MaximumIndependentSet", "variant": {"graph": "SimpleGraph", "weight": "One"}},
+      {"name": "MaximumClique", "variant": {"graph": "SimpleGraph", "weight": "One"}}
+    ],
+    "source": {
+      "data": {
+        "graph": {
+          "edges": [[0, 1], [1, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumIndependentSet",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    },
+    "target": {
+      "data": {
+        "graph": {
+          "edges": [[0, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumClique",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    }
+  },
+  "violation": "unsound_extraction",
+  "target_config": "1,0,0",
+  "claimed_source_solution": [1, 1, 0],
+  "note": "A buggy extract_solution maps target config [1,0,0] back to [1,1,0] in source space. But vertices 0 and 1 are adjacent in source graph, so [1,1,0] is not a valid independent set. This is a genuine bug."
+}

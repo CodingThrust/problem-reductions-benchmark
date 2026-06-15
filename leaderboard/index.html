@@ -24,8 +24,19 @@
   .rank-3 { color: #b45309; }
   .model { font-weight: 600; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.75rem; background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+  .bug-row { cursor: pointer; }
+  .bug-row:hover td { background: #f9fafb; }
+  .cert-panel { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-top: 8px; font-size: 0.82rem; display: none; }
+  .cert-panel.open { display: block; }
+  .cert-label { font-weight: 600; color: #374151; margin-bottom: 6px; }
+  .cert-note { color: #6b7280; margin-bottom: 8px; }
+  .cert-flow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .cert-chip { background: #eff6ff; color: #1d4ed8; border-radius: 4px; padding: 2px 8px; font-size: 0.78rem; }
+  .cert-chip.violation { background: #fef3c7; color: #b45309; }
   canvas { max-height: 340px; }
   .note { font-size: 0.8rem; color: #9ca3af; margin-top: 12px; }
+  .empty-state { text-align: center; padding: 40px; color: #9ca3af; }
+  .error-state { text-align: center; padding: 40px; color: #ef4444; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -48,7 +59,7 @@
           <th>Bugs / $</th>
         </tr>
       </thead>
-      <tbody id="tbody"></tbody>
+      <tbody id="tbody"><tr><td colspan="7" class="empty-state">Loading data...</td></tr></tbody>
     </table>
   </div>
   <div class="card">
@@ -58,56 +69,111 @@
   </div>
 </main>
 <script>
-const models = [
-  { name: "DeepSeek-V3",       bugs: 38, cost: 4.2,  tokens_k: 700  },
-  { name: "Claude 3.5 Sonnet", bugs: 41, cost: 11.8, tokens_k: 1967 },
-  { name: "GPT-4o",            bugs: 35, cost: 14.5, tokens_k: 2417 },
-  { name: "Gemini 1.5 Pro",    bugs: 29, cost: 8.1,  tokens_k: 1350 },
-  { name: "Llama 3.1 405B",    bugs: 22, cost: 6.3,  tokens_k: 1050 },
-  { name: "Mistral Large",     bugs: 18, cost: 5.0,  tokens_k: 833  },
-];
+const COLORS = ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"];
+let chartInstance = null;
 
-// Sort by bugs/Ktok descending (primary fair metric)
-models.sort((a, b) => (b.bugs / b.tokens_k) - (a.bugs / a.tokens_k));
+function renderTable(models) {
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
 
-const tbody = document.getElementById("tbody");
-models.forEach((m, i) => {
-  const effKtok = (m.bugs / m.tokens_k * 1000).toFixed(3);
-  const effDollar = (m.bugs / m.cost).toFixed(2);
-  const rankClass = i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "";
-  tbody.innerHTML += `
-    <tr>
-      <td class="rank ${rankClass}">${i + 1}</td>
-      <td class="model">${m.name}${i === 0 ? ' <span class="badge">Top</span>' : ""}</td>
-      <td>${m.bugs}</td>
-      <td>${m.tokens_k.toLocaleString()}</td>
-      <td>$${m.cost.toFixed(2)}</td>
-      <td><strong>${effKtok}</strong></td>
-      <td>${effDollar}</td>
-    </tr>`;
-});
-
-// Scatter chart
-const colors = ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4"];
-new Chart(document.getElementById("chart"), {
-  type: "scatter",
-  data: {
-    datasets: models.map((m, i) => ({
-      label: m.name,
-      data: [{ x: m.tokens_k, y: m.bugs }],
-      backgroundColor: colors[i],
-      pointRadius: 8,
-      pointHoverRadius: 10,
-    }))
-  },
-  options: {
-    plugins: { legend: { position: "right" } },
-    scales: {
-      x: { title: { display: true, text: "Tokens Used (K)" }, min: 0 },
-      y: { title: { display: true, text: "Bugs Found" }, min: 0 }
-    }
+  if (!models || models.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No results yet.</td></tr>';
+    return;
   }
-});
+
+  models.forEach((m, i) => {
+    const effKtok = m.efficiency_bugs_per_ktok.toFixed(4);
+    const effDollar = m.efficiency_bugs_per_dollar.toFixed(4);
+    const rankClass = i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "";
+    const modelShort = m.model.replace(/^.*\//, ""); // strip "anthropic/" prefix
+
+    // Model row
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="rank ${rankClass}">${i + 1}</td>
+      <td class="model">${modelShort}${i === 0 ? ' <span class="badge">Top</span>' : ""}
+        <span style="color:#9ca3af;font-size:0.75rem;font-weight:400"> @${m.library_commit || "?"}</span></td>
+      <td>${m.bugs_found}</td>
+      <td>${(m.total_tokens_k || 0).toLocaleString()}</td>
+      <td>$${(m.total_cost_usd || 0).toFixed(2)}</td>
+      <td><strong>${effKtok}</strong></td>
+      <td>${effDollar}</td>`;
+    tbody.appendChild(tr);
+
+    // Expandable bug certificate rows
+    const certs = m.bug_certificates || [];
+    certs.forEach((cert, ci) => {
+      const certTr = document.createElement("tr");
+      certTr.className = "bug-row";
+      certTr.style.cssText = "background:#fafaf9";
+      const certId = `cert-${i}-${ci}`;
+      certTr.innerHTML = `
+        <td></td>
+        <td colspan="6">
+          <span style="color:#9ca3af;margin-right:8px;">&#x25B6;</span>
+          Bug: <strong>${cert.rule || "?"}</strong>
+          <span style="color:#9ca3af;font-size:0.8rem;margin-left:8px;">${cert.source_type || ""} → ${cert.target_type || ""}</span>
+          <div class="cert-panel" id="${certId}">
+            <div class="cert-label">Certificate</div>
+            <div class="cert-flow">
+              <span class="cert-chip">rule: ${cert.rule || "?"}</span>
+              <span class="cert-chip violation">${cert.violation || "?"}</span>
+              <span class="cert-chip">${cert.source_type || "?"} → ${cert.target_type || "?"}</span>
+            </div>
+            ${cert.note ? `<div class="cert-note">${cert.note}</div>` : ""}
+          </div>
+        </td>`;
+      certTr.querySelector(".bug-row, tr").onclick = null;
+      certTr.onclick = () => {
+        const panel = document.getElementById(certId);
+        panel.classList.toggle("open");
+        const arrow = certTr.querySelector("span");
+        arrow.innerHTML = panel.classList.contains("open") ? "&#x25BC;" : "&#x25B6;";
+      };
+      tbody.appendChild(certTr);
+    });
+  });
+}
+
+function renderChart(models) {
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  if (!models || models.length === 0) return;
+
+  chartInstance = new Chart(document.getElementById("chart"), {
+    type: "scatter",
+    data: {
+      datasets: models.map((m, i) => ({
+        label: m.model.replace(/^.*\//, ""),
+        data: [{ x: m.total_tokens_k || 0, y: m.bugs_found }],
+        backgroundColor: COLORS[i % COLORS.length],
+        pointRadius: 8,
+        pointHoverRadius: 10,
+      }))
+    },
+    options: {
+      plugins: { legend: { position: "right" } },
+      scales: {
+        x: { title: { display: true, text: "Tokens Used (K)" }, min: 0 },
+        y: { title: { display: true, text: "Bugs Found" }, min: 0 }
+      }
+    }
+  });
+}
+
+// Load real data from results/index.json
+fetch("../results/index.json")
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(data => {
+    renderTable(data);
+    renderChart(data);
+  })
+  .catch(err => {
+    document.getElementById("tbody").innerHTML =
+      `<tr><td colspan="7" class="error-state">Could not load results/index.json: ${err.message}</td></tr>`;
+  });
 </script>
 </body>
 </html>

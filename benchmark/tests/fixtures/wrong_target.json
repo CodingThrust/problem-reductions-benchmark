@@ -1,0 +1,47 @@
+{
+  "_comment": "Tampered bundle: target problem was altered (extra edge added) so it no longer matches what pred reduce actually produces. Verifier must REJECT because re-deriving the target yields different data.",
+  "rule": "MaximumIndependentSetToMaximumClique",
+  "source": {
+    "data": {
+      "graph": {
+        "edges": [[0, 1], [1, 2]],
+        "num_vertices": 3
+      },
+      "weights": [1, 1, 1]
+    },
+    "type": "MaximumIndependentSet",
+    "variant": {"graph": "SimpleGraph", "weight": "One"}
+  },
+  "bundle": {
+    "path": [
+      {"name": "MaximumIndependentSet", "variant": {"graph": "SimpleGraph", "weight": "One"}},
+      {"name": "MaximumClique", "variant": {"graph": "SimpleGraph", "weight": "One"}}
+    ],
+    "source": {
+      "data": {
+        "graph": {
+          "edges": [[0, 1], [1, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumIndependentSet",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    },
+    "target": {
+      "data": {
+        "graph": {
+          "edges": [[0, 1], [0, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumClique",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    }
+  },
+  "violation": "unsound_extraction",
+  "target_config": "1,0,0",
+  "claimed_source_solution": [1, 1, 0],
+  "note": "Bundle target has been tampered: edge [0,1] was added to the MaximumClique target. Real pred reduce only produces edge [0,2]. Verifier should reject because the target does not match what pred actually computes."
+}

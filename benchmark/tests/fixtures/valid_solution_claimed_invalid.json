@@ -1,0 +1,47 @@
+{
+  "_comment": "False alarm: certificate claims [1,0,1] is invalid for source MIS, but pred evaluate shows it IS valid (Max(2)). Verifier must REJECT this certificate.",
+  "rule": "MaximumIndependentSetToMaximumClique",
+  "source": {
+    "data": {
+      "graph": {
+        "edges": [[0, 1], [1, 2]],
+        "num_vertices": 3
+      },
+      "weights": [1, 1, 1]
+    },
+    "type": "MaximumIndependentSet",
+    "variant": {"graph": "SimpleGraph", "weight": "One"}
+  },
+  "bundle": {
+    "path": [
+      {"name": "MaximumIndependentSet", "variant": {"graph": "SimpleGraph", "weight": "One"}},
+      {"name": "MaximumClique", "variant": {"graph": "SimpleGraph", "weight": "One"}}
+    ],
+    "source": {
+      "data": {
+        "graph": {
+          "edges": [[0, 1], [1, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumIndependentSet",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    },
+    "target": {
+      "data": {
+        "graph": {
+          "edges": [[0, 2]],
+          "num_vertices": 3
+        },
+        "weights": [1, 1, 1]
+      },
+      "type": "MaximumClique",
+      "variant": {"graph": "SimpleGraph", "weight": "One"}
+    }
+  },
+  "violation": "unsound_extraction",
+  "target_config": "1,0,1",
+  "claimed_source_solution": [1, 0, 1],
+  "note": "The certificate falsely claims that [1,0,1] is invalid. But vertices 0 and 2 are NOT adjacent in the source graph (edges are 0-1 and 1-2), so [1,0,1] is a perfectly valid independent set. Verifier must reject this false alarm."
+}
