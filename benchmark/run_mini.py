@@ -65,12 +65,21 @@ def extract_total_tokens(messages: list) -> int:
     return total
 
 
+def save_trajectory(messages: list, path: Path) -> None:
+    """Save agent message history as JSONL — one JSON object per line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
+
+
 def run_one(
     model_name: str,
     ctx: EnvContext,
     rule_name: str,
     cost_limit: float,
     api_base: str | None = None,
+    trajectory_dir: Path | None = None,
 ) -> dict:
     """Run one bug-hunting session for a single rule. Returns a result dict."""
     from minisweagent.agents.default import DefaultAgent
@@ -109,6 +118,9 @@ def run_one(
         total_tokens = extract_total_tokens(agent.messages)
         tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
         cert = parse_certificate(agent.messages)
+        if trajectory_dir is not None:
+            safe_model = model_name.replace("/", "_").replace(":", "_")
+            save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_{rule_name}.jsonl")
     except Exception as e:
         return {
             "rule": rule_name,
