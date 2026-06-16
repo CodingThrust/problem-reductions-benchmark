@@ -121,3 +121,35 @@ class TestWorkflowJobs:
         full_text = str(w)
         assert "build_index" in full_text or "build-index" in full_text, \
             "Workflow must invoke benchmark.build_index"
+
+
+# ── CI workflow tests (issue #11) ─────────────────────────────────────────────
+
+CI_WORKFLOW_PATH = WORKFLOW_PATH.parent / "ci.yml"
+
+
+def _ci_workflow() -> dict:
+    import yaml
+    return yaml.safe_load(CI_WORKFLOW_PATH.read_text(encoding="utf-8"))
+
+
+class TestCIWorkflow:
+    def test_ci_workflow_file_exists(self):
+        assert CI_WORKFLOW_PATH.exists(), f"Missing: {CI_WORKFLOW_PATH}"
+
+    def test_ci_triggers_on_push_and_pr(self):
+        w = _ci_workflow()
+        on = w.get("on") or w.get(True) or {}
+        assert "push" in on or "pull_request" in on, \
+            "CI workflow must trigger on push or pull_request"
+
+    def test_ci_runs_unit_tests(self):
+        w = _ci_workflow()
+        full = str(w)
+        assert "pytest" in full, "CI must run pytest"
+
+    def test_ci_runs_verify_calibration(self):
+        w = _ci_workflow()
+        full = str(w)
+        assert "verify" in full.lower() and ("calibrate" in full or "calibration" in full), \
+            "CI must run verify --calibrate or verify-calibration"

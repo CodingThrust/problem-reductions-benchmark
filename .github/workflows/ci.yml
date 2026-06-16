@@ -1,0 +1,25 @@
+name: CI — unit tests and verifier calibration
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r benchmark/requirements.txt
+
+      - name: Run unit tests (judgment + non-integration)
+        run: pytest -v -m "not integration"
+
+      - name: Run verifier calibration (known-answer fixture tests)
+        run: python -m benchmark.verify --calibrate
