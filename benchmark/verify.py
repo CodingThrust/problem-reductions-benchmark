@@ -21,11 +21,15 @@ FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
 PRED_BINARY = os.environ.get("PRED_BINARY", "pred")
 
 
+FLOAT_TOLERANCE = 1e-6
+
+
 @dataclass
 class Verdict:
     accepted: bool
     reason: str
     details: dict = field(default_factory=dict)
+    novelty: str | None = None  # "novel" | "known" | None (only set when accepted)
 
     def __str__(self) -> str:
         status = "ACCEPTED" if self.accepted else "REJECTED"
@@ -52,6 +56,18 @@ def _run_pred(args: list[str], stdin_file: str | None = None) -> tuple[int, str,
     return result.returncode, result.stdout, result.stderr
 
 
+def _is_strictly_better(extracted: float, candidate: float, is_max: bool) -> bool:
+    """True only if candidate is meaningfully better than extracted (beyond rounding noise)."""
+    if is_max:
+        return candidate - extracted > FLOAT_TOLERANCE
+    return extracted - candidate > FLOAT_TOLERANCE
+
+
+def _novelty_key(rule: str, source: dict) -> str:
+    """Canonical key for deduplicating bugs: (rule, normalized_source)."""
+    return json.dumps({"rule": rule, "source": _normalize(source)}, sort_keys=True)
+
+
 def _normalize(data: dict) -> dict:
     """Normalize a JSON object for structural comparison (sort keys, stable types)."""
     if isinstance(data, dict):
@@ -66,19 +82,19 @@ def _structures_match(a: dict, b: dict) -> bool:
     return _normalize(a) == _normalize(b)
 
 
-def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
-    """
-    Re-validate a counterexample certificate via pred.
-
-    Steps:
-    1. Re-derive the reduction bundle from the source instance.
-    2. Confirm the bundle target matches the certificate's claimed target.
-    3. For unsound_extraction: extract with target_config, check source solution is invalid.
-    4. For incomplete_reduction: re-solve bundle, confirm no solution; verify source has one.
-    5. For suboptimal_extraction: compare extracted evaluation vs claimed brute_force_solution.
-    """
+def verify(
+    cert: dict,
+    repo_dir: str | None = None,
+    known_bugs: list[dict] | None = None,
+) -> Verdict:
+    """Re-validate a certificate via pred and determine novelty against a known-bugs ledger."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        return _verify_in(cert, tmpdir)
+        verdict = _verify_in(cert, tmpdir)
+    if verdict.accepted:
+        key = _novelty_key(cert.get("rule", ""), cert.get("source", {}))
+        known_keys = {_novelty_key(b.get("rule", ""), b.get("source", {})) for b in (known_bugs or [])}
+        verdict.novelty = "known" if key in known_keys else "novel"
+    return verdict
 
 
 def _verify_in(cert: dict, tmpdir: str) -> Verdict:
@@ -313,13 +329,7 @@ def _check_suboptimal_extraction(cert: dict, source_file: str, bundle_file: str)
             f"could not parse numeric values: extracted={source_eval_str!r}, better={better_eval_result.get('result')!r}",
         )
 
-    if is_max and better_value > extracted_value:
-        return Verdict(
-            True,
-            f"confirmed suboptimal extraction: extracted {extracted_value} but better solution achieves {better_value}",
-            {"extracted_evaluation": source_eval_str, "better_evaluation": better_eval_result.get("result")},
-        )
-    elif not is_max and better_value < extracted_value:
+    if _is_strictly_better(extracted_value, better_value, is_max):
         return Verdict(
             True,
             f"confirmed suboptimal extraction: extracted {extracted_value} but better solution achieves {better_value}",

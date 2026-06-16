@@ -19,7 +19,7 @@ BUDGET   ?= 2.0
 PER_RULE ?= 0.5
 RESULTS  ?= results/results_mini.json
 
-.PHONY: test test-unit verify-calibration validate-results build-index demo audit install-deps help
+.PHONY: test test-unit verify-calibration verify-judgment validate-results build-index demo audit install-deps help
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -28,6 +28,10 @@ test:
 ## Run only unit tests — no real repo or pred binary required.
 test-unit:
 	pytest -v -m "not integration"
+
+## Test verifier robust equality and novelty filter (issue #5).
+verify-judgment:
+	pytest -v -m "judgment"
 
 ## Test the verifier against the fixture certificates — no AI, no API keys needed.
 ## Must pass before any real session is run.
