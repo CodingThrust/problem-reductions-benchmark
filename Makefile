@@ -2,6 +2,8 @@
 # Run from the repo root (next to benchmark/ and leaderboard/).
 #
 # Key targets:
+#   test                 Run full pytest suite (unit + integration)
+#   test-unit            Run only unit tests (no real repo/pred needed)
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   validate-results     Schema-check all results/*.json files
 #   demo                 Run a tiny real session and rebuild the leaderboard index
@@ -17,7 +19,15 @@ BUDGET   ?= 2.0
 PER_RULE ?= 0.5
 RESULTS  ?= results/results_mini.json
 
-.PHONY: verify-calibration validate-results build-index demo install-deps help
+.PHONY: test test-unit verify-calibration validate-results build-index demo audit install-deps help
+
+## Run the full test suite (unit + integration tests that need real repo).
+test:
+	pytest -v
+
+## Run only unit tests — no real repo or pred binary required.
+test-unit:
+	pytest -v -m "not integration"
 
 ## Test the verifier against the fixture certificates — no AI, no API keys needed.
 ## Must pass before any real session is run.
@@ -56,6 +66,8 @@ install-deps:
 
 help:
 	@echo "Targets:"
+	@echo "  test                Run full pytest suite"
+	@echo "  test-unit           Run unit tests only (no real repo needed)"
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
 	@echo "  validate-results    Schema-check results/*.json"
 	@echo "  build-index         Rebuild results/index.json"
