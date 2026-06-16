@@ -62,6 +62,8 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
             "efficiency_bugs_per_ktok": data["efficiency_bugs_per_ktok"],
             "efficiency_bugs_per_dollar": data["efficiency_bugs_per_dollar"],
             "rules_tested": data["rules_tested"],
+            "error_count": sum(1 for r in data.get("results", []) if str(r.get("result", "")).startswith("error:")),
+            "skip_count": sum(1 for r in data.get("results", []) if r.get("result") == "skipped_budget"),
             "results_file": path.name,
             "bug_certificates": bug_certs,
         }
