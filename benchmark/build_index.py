@@ -36,17 +36,22 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
                 continue
 
         # Per-bug certificate list for the leaderboard drilldown
-        bug_certs = [
-            {
-                "rule": r["rule"],
+        safe_model = data["model"].replace("/", "_").replace(":", "_")
+        bug_certs = []
+        for r in data.get("results", []):
+            if r.get("result") != "bug_found" or not r.get("certificate"):
+                continue
+            rule = r["rule"]
+            traj_rel = f"trajectories/{safe_model}_{rule}.jsonl"
+            traj_abs = results_dir / traj_rel
+            bug_certs.append({
+                "rule": rule,
                 "violation": r.get("certificate", {}).get("violation"),
                 "note": r.get("certificate", {}).get("note", ""),
                 "source_type": r.get("certificate", {}).get("source", {}).get("type"),
                 "target_type": r.get("certificate", {}).get("bundle", {}).get("target", {}).get("type"),
-            }
-            for r in data.get("results", [])
-            if r.get("result") == "bug_found" and r.get("certificate")
-        ]
+                "trajectory_file": traj_rel if traj_abs.exists() else None,
+            })
 
         entry = {
             "model": data["model"],

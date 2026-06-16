@@ -193,3 +193,86 @@ class TestBuildIndexErrors:
         entries = build_index(tmp_path)
         assert len(entries) == 1
         assert entries[0]["model"] == "good-model"
+
+
+# ── E. build_index(): trajectory_file field (issue #6) ───────────────────────
+
+class TestTrajectoryFile:
+    def _cert_result(self, rule="r1") -> dict:
+        return {
+            "rule": rule,
+            "result": "bug_found",
+            "cost": 0.1,
+            "tokens_k": 10.0,
+            "certificate": {
+                "rule": rule,
+                "violation": "unsound_extraction",
+                "source": {"type": "MaximumIndependentSet"},
+                "bundle": {"target": {"type": "MaximumClique"}},
+            },
+        }
+
+    def test_trajectory_file_set_when_present(self, tmp_path):
+        """When trajectory file exists, bug_certificate includes its relative path."""
+        model = "fake/model-a"
+        safe_model = model.replace("/", "_").replace(":", "_")
+        rule = "rule_x"
+        traj_dir = tmp_path / "trajectories"
+        traj_dir.mkdir()
+        traj_file = traj_dir / f"{safe_model}_{rule}.jsonl"
+        traj_file.write_text('{"cmd": "pred reduce"}', encoding="utf-8")
+
+        data = make_results_dict(model=model, bugs_found=1, results=[self._cert_result(rule)])
+        (tmp_path / "run.json").write_text(json.dumps(data), encoding="utf-8")
+
+        entries = build_index(tmp_path)
+        cert = entries[0]["bug_certificates"][0]
+        assert cert["trajectory_file"] == f"trajectories/{safe_model}_{rule}.jsonl"
+
+    def test_trajectory_file_null_when_missing(self, tmp_path):
+        """When no trajectory file exists, bug_certificate has trajectory_file=None."""
+        model = "fake/model-a"
+        rule = "rule_x"
+        data = make_results_dict(model=model, bugs_found=1, results=[self._cert_result(rule)])
+        (tmp_path / "run.json").write_text(json.dumps(data), encoding="utf-8")
+
+        entries = build_index(tmp_path)
+        cert = entries[0]["bug_certificates"][0]
+        assert cert["trajectory_file"] is None
+
+    def test_zero_bug_model_in_index(self, tmp_path):
+        """A model with bugs_found=0 still appears in the index."""
+        data = make_results_dict(model="zero-model", bugs_found=0,
+                                 efficiency_bugs_per_ktok=0.0, efficiency_bugs_per_dollar=0.0)
+        (tmp_path / "zero.json").write_text(json.dumps(data), encoding="utf-8")
+        entries = build_index(tmp_path)
+        assert any(e["model"] == "zero-model" for e in entries)
+
+    def test_dual_metric_opposite_order(self, tmp_path):
+        """
+        model-A: high bugs/Ktok, low bugs/$
+        model-B: low bugs/Ktok, high bugs/$
+        build_index sorts by bugs/Ktok → A first.
+        Swapping sort key to bugs/$ would put B first.
+        This test confirms the data is stored correctly for both metrics.
+        """
+        a = make_results_dict(
+            model="model-A",
+            efficiency_bugs_per_ktok=0.10,
+            efficiency_bugs_per_dollar=0.01,
+            bugs_found=2,
+        )
+        b = make_results_dict(
+            model="model-B",
+            efficiency_bugs_per_ktok=0.02,
+            efficiency_bugs_per_dollar=0.50,
+            bugs_found=1,
+        )
+        (tmp_path / "a.json").write_text(json.dumps(a), encoding="utf-8")
+        (tmp_path / "b.json").write_text(json.dumps(b), encoding="utf-8")
+        entries = build_index(tmp_path)
+        # Default sort: bugs/Ktok → A first
+        assert entries[0]["model"] == "model-A"
+        # If sorted by bugs/$, B would be first
+        by_dollar = sorted(entries, key=lambda e: e["efficiency_bugs_per_dollar"], reverse=True)
+        assert by_dollar[0]["model"] == "model-B"
