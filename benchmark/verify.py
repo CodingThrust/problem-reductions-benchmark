@@ -149,6 +149,8 @@ def _verify_in(cert: dict, tmpdir: str) -> Verdict:
         return _check_incomplete_reduction(cert, source_file, bundle_file)
     elif violation == "suboptimal_extraction":
         return _check_suboptimal_extraction(cert, source_file, bundle_file)
+    elif violation == "solve_mismatch":
+        return _check_solve_mismatch(cert, source_file, bundle_file)
     else:
         return Verdict(False, f"unknown violation type: {violation!r}")
 
@@ -340,6 +342,62 @@ def _check_suboptimal_extraction(cert: dict, source_file: str, bundle_file: str)
             False,
             f"extraction is already optimal: extracted={extracted_value}, claimed better={better_value}",
             {"extracted_evaluation": source_eval_str, "better_evaluation": better_eval_result.get("result")},
+        )
+
+
+def _check_solve_mismatch(cert: dict, source_file: str, bundle_file: str) -> Verdict:
+    """
+    Solve mismatch: pred solve on source and bundle return different evaluations.
+    The verifier solves both sides itself — no target_config or solution data from the AI.
+    """
+    try:
+        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=source_file)
+    except subprocess.TimeoutExpired:
+        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
+
+    if rc != 0:
+        return Verdict(False, f"pred solve (source) failed: {stderr.strip()[:200]}")
+    try:
+        source_solve = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred solve (source) returned invalid JSON: {e}")
+
+    try:
+        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=bundle_file)
+    except subprocess.TimeoutExpired:
+        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
+
+    if rc != 0:
+        return Verdict(False, f"pred solve (bundle) failed: {stderr.strip()[:200]}")
+    try:
+        bundle_solve = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred solve (bundle) returned invalid JSON: {e}")
+
+    eval_source = source_solve.get("evaluation", "")
+    eval_bundle = bundle_solve.get("evaluation", "")
+
+    src_val = _parse_numeric_result(eval_source)
+    bnd_val = _parse_numeric_result(eval_bundle)
+
+    # Compare numerically if both parseable, else compare strings
+    mismatch = False
+    if src_val is not None and bnd_val is not None:
+        mismatch = abs(src_val - bnd_val) > FLOAT_TOLERANCE
+    else:
+        mismatch = eval_source != eval_bundle
+
+    if mismatch:
+        return Verdict(
+            True,
+            f"confirmed solve_mismatch: source evaluation {eval_source!r} != bundle evaluation {eval_bundle!r}",
+            {"source_evaluation": eval_source, "bundle_evaluation": eval_bundle},
+        )
+    else:
+        return Verdict(
+            False,
+            f"evaluations match — no bug: source={eval_source!r}, bundle={eval_bundle!r}",
+            {"source_evaluation": eval_source, "bundle_evaluation": eval_bundle},
         )
 
 

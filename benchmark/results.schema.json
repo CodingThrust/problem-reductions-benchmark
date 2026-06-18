@@ -79,7 +79,7 @@
               "rule": {"type": "string"},
               "violation": {
                 "type": "string",
-                "enum": ["unsound_extraction", "incomplete_reduction", "suboptimal_extraction"]
+                "enum": ["unsound_extraction", "incomplete_reduction", "suboptimal_extraction", "solve_mismatch"]
               },
               "source": {"type": "object"},
               "bundle": {"type": "object"},
