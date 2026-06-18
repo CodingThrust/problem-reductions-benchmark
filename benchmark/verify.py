@@ -151,6 +151,8 @@ def _verify_in(cert: dict, tmpdir: str) -> Verdict:
         return _check_suboptimal_extraction(cert, source_file, bundle_file)
     elif violation == "solve_mismatch":
         return _check_solve_mismatch(cert, source_file, bundle_file)
+    elif violation == "order_reversal":
+        return _check_order_reversal(cert, source_file, bundle_file, tmpdir)
     else:
         return Verdict(False, f"unknown violation type: {violation!r}")
 
@@ -408,6 +410,99 @@ def _check_solve_mismatch(cert: dict, source_file: str, bundle_file: str) -> Ver
             f"evaluations match — no bug: source={eval_source!r}, bundle={eval_bundle!r}",
             {"source_evaluation": eval_source, "bundle_evaluation": eval_bundle},
         )
+
+
+def _check_order_reversal(cert: dict, source_file: str, bundle_file: str, tmpdir: str) -> Verdict:
+    """
+    Order reversal: two target configs c_lo, c_hi where obj_B(c_lo) < obj_B(c_hi)
+    but obj_A(extract(c_lo)) > obj_A(extract(c_hi)).
+    Proves the reduction does not preserve ordering — solver-free.
+    """
+    c_lo = cert.get("target_config_lo")
+    c_hi = cert.get("target_config_hi")
+
+    if not c_lo:
+        return Verdict(False, "order_reversal certificate missing target_config_lo")
+    if not c_hi:
+        return Verdict(False, "order_reversal certificate missing target_config_hi")
+
+    # Extract source solutions for both configs
+    rc, stdout, stderr = _run_pred(["extract", "-", "--config", c_lo, "--json"], stdin_file=bundle_file)
+    if rc != 0:
+        return Verdict(False, f"pred extract (c_lo) failed: {stderr.strip()[:200]}")
+    try:
+        extract_lo = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred extract (c_lo) returned invalid JSON: {e}")
+
+    rc, stdout, stderr = _run_pred(["extract", "-", "--config", c_hi, "--json"], stdin_file=bundle_file)
+    if rc != 0:
+        return Verdict(False, f"pred extract (c_hi) failed: {stderr.strip()[:200]}")
+    try:
+        extract_hi = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred extract (c_hi) returned invalid JSON: {e}")
+
+    obj_a_lo_str = extract_lo.get("evaluation", "")
+    obj_a_hi_str = extract_hi.get("evaluation", "")
+    obj_a_lo = _parse_numeric_result(obj_a_lo_str)
+    obj_a_hi = _parse_numeric_result(obj_a_hi_str)
+
+    # Evaluate target configs against the target problem
+    target_data = cert.get("bundle", {}).get("target")
+    if not target_data:
+        return Verdict(False, "bundle has no target field")
+    target_file = os.path.join(tmpdir, "target.json")
+    _write_json(target_data, target_file)
+
+    rc, stdout, stderr = _run_pred(["evaluate", "-", "--config", c_lo, "--json"], stdin_file=target_file)
+    if rc != 0:
+        return Verdict(False, f"pred evaluate target (c_lo) failed: {stderr.strip()[:200]}")
+    try:
+        obj_b_lo_str = json.loads(stdout).get("result", "")
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred evaluate (c_lo) returned invalid JSON: {e}")
+
+    rc, stdout, stderr = _run_pred(["evaluate", "-", "--config", c_hi, "--json"], stdin_file=target_file)
+    if rc != 0:
+        return Verdict(False, f"pred evaluate target (c_hi) failed: {stderr.strip()[:200]}")
+    try:
+        obj_b_hi_str = json.loads(stdout).get("result", "")
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred evaluate (c_hi) returned invalid JSON: {e}")
+
+    obj_b_lo = _parse_numeric_result(obj_b_lo_str)
+    obj_b_hi = _parse_numeric_result(obj_b_hi_str)
+
+    if obj_a_lo is None or obj_a_hi is None or obj_b_lo is None or obj_b_hi is None:
+        return Verdict(False, f"could not parse numeric values: "
+                       f"obj_B(c_lo)={obj_b_lo_str!r}, obj_B(c_hi)={obj_b_hi_str!r}, "
+                       f"obj_A(c_lo)={obj_a_lo_str!r}, obj_A(c_hi)={obj_a_hi_str!r}")
+
+    # Determine direction from c_hi extraction (assume maximization if starts with Max)
+    is_max = obj_a_hi_str.lower().startswith("max")
+
+    # c_lo must be strictly lower in target space
+    b_lo_is_lower = _is_strictly_better(obj_b_lo, obj_b_hi, is_max)  # hi > lo by tolerance
+    if not b_lo_is_lower:
+        return Verdict(False,
+            f"target values not strictly ordered: obj_B(c_lo)={obj_b_lo_str!r}, obj_B(c_hi)={obj_b_hi_str!r}",
+            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str})
+
+    # Order is reversed if extract(c_lo) is strictly better than extract(c_hi) in source space
+    reversed_ = _is_strictly_better(obj_a_hi, obj_a_lo, is_max)  # lo > hi
+    if reversed_:
+        return Verdict(True,
+            f"confirmed order_reversal: obj_B(c_lo)={obj_b_lo_str} < obj_B(c_hi)={obj_b_hi_str} "
+            f"but obj_A(extract(c_lo))={obj_a_lo_str} > obj_A(extract(c_hi))={obj_a_hi_str}",
+            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str,
+             "obj_a_lo": obj_a_lo_str, "obj_a_hi": obj_a_hi_str})
+    else:
+        return Verdict(False,
+            f"order preserved — no bug: obj_B(c_lo)={obj_b_lo_str}, obj_B(c_hi)={obj_b_hi_str}, "
+            f"obj_A(extract(c_lo))={obj_a_lo_str}, obj_A(extract(c_hi))={obj_a_hi_str}",
+            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str,
+             "obj_a_lo": obj_a_lo_str, "obj_a_hi": obj_a_hi_str})
 
 
 # ─── Calibration mode ────────────────────────────────────────────────────────
