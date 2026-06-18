@@ -1,6 +1,7 @@
 {
-  "_comment": "Genuine unsound_extraction bug fixture. The bundle is real (MIS graph 0-1,1-2 -> MaximumClique). A hypothetically buggy extract_solution returns [1,1,0] (adjacent vertices 0 and 1 both selected), which is invalid for MIS. Verifier must accept this as a real bug.",
+  "_comment": "Genuine suboptimal_extraction bug fixture. Target config [1,0,0] extracts solution [1,0,0] with value Max(1), but [1,0,1] achieves Max(2) — strictly better. Verifier must accept this as a real suboptimality.",
   "rule": "MaximumIndependentSetToMaximumClique",
+  "violation": "suboptimal_extraction",
   "source": {
     "data": {
       "graph": {
@@ -40,8 +41,8 @@
       "variant": {"graph": "SimpleGraph", "weight": "One"}
     }
   },
-  "violation": "unsound_extraction",
+  "violation": "suboptimal_extraction",
   "target_config": "1,0,0",
-  "claimed_source_solution": [1, 1, 0],
-  "note": "A buggy extract_solution maps target config [1,0,0] back to [1,1,0] in source space. But vertices 0 and 1 are adjacent in source graph, so [1,1,0] is not a valid independent set. This is a genuine bug."
+  "brute_force_solution": [1, 0, 1],
+  "note": "target_config [1,0,0] extracts solution of size 1, but [1,0,1] achieves size 2. This is a genuine suboptimality."
 }

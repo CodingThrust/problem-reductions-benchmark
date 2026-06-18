@@ -159,21 +159,15 @@ def _check_unsound_extraction(cert: dict, source_file: str, bundle_file: str, tm
     """
     Unsound extraction: a valid target solution maps back to an INVALID source solution.
 
-    The AI claims extract_solution(target_config) returned claimed_source_solution, which is invalid.
-    We verify:
-    1. The claimed_source_solution is actually invalid when evaluated against the source.
-    2. The target_config is a valid (non-None) target solution — so it really should have a valid extraction.
+    Verifier re-derives the extracted solution via pred extract — never trusts
+    the AI-supplied claimed_source_solution.
     """
     target_config = cert.get("target_config")
-    claimed_source_solution = cert.get("claimed_source_solution")
 
     if not target_config:
         return Verdict(False, "unsound_extraction certificate missing target_config")
-    if claimed_source_solution is None:
-        return Verdict(False, "unsound_extraction certificate missing claimed_source_solution")
 
-    # Step 1: verify the claimed target_config is actually a valid target solution
-    # (if the target solution itself is invalid, this isn't evidence of a reduction bug)
+    # Step 1: verify target_config is a valid target solution
     target_data = cert.get("bundle", {}).get("target")
     if target_data:
         target_file = os.path.join(tmpdir, "target.json")
@@ -192,15 +186,31 @@ def _check_unsound_extraction(cert: dict, source_file: str, bundle_file: str, tm
                         {"target_evaluation": tgt_result},
                     )
             except json.JSONDecodeError:
-                pass  # skip target validation if target type isn't evaluable this way
+                pass
 
-    # Step 2: evaluate the claimed source solution — must be INVALID
-    config_str = ",".join(str(x) for x in claimed_source_solution)
+    # Step 2: run pred extract to get the real extracted source solution
+    rc, stdout, stderr = _run_pred(
+        ["extract", "-", "--config", target_config, "--json"], stdin_file=bundle_file
+    )
+    if rc != 0:
+        return Verdict(False, f"pred extract failed: {stderr.strip()[:200]}")
+
+    try:
+        extract_result = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return Verdict(False, f"pred extract returned invalid JSON: {e}")
+
+    extracted_solution = extract_result.get("solution")
+    if extracted_solution is None:
+        return Verdict(False, "pred extract returned no solution field")
+
+    # Step 3: evaluate the extracted source solution — must be INVALID
+    config_str = ",".join(str(x) for x in extracted_solution)
     rc, stdout, stderr = _run_pred(
         ["evaluate", "-", "--config", config_str, "--json"], stdin_file=source_file
     )
     if rc != 0:
-        return Verdict(False, f"pred evaluate (claimed source solution) failed: {stderr.strip()[:200]}")
+        return Verdict(False, f"pred evaluate (extracted solution) failed: {stderr.strip()[:200]}")
 
     try:
         eval_result = json.loads(stdout)
@@ -208,18 +218,17 @@ def _check_unsound_extraction(cert: dict, source_file: str, bundle_file: str, tm
         return Verdict(False, f"pred evaluate returned invalid JSON: {e}")
 
     result_value = eval_result.get("result", "")
-    # Invalid solutions: Max(None) for optimization, Or(false) for decision
     if "None" in result_value or "false" in result_value.lower():
         return Verdict(
             True,
-            f"confirmed unsound extraction: claimed source solution {claimed_source_solution} is invalid ({result_value})",
-            {"claimed_source_solution": claimed_source_solution, "evaluation": result_value},
+            f"confirmed unsound extraction: extracted source solution {extracted_solution} is invalid ({result_value})",
+            {"extracted_solution": extracted_solution, "evaluation": result_value},
         )
     else:
         return Verdict(
             False,
-            f"claimed source solution is actually valid: {result_value} — not a bug",
-            {"claimed_source_solution": claimed_source_solution, "evaluation": result_value},
+            f"extracted source solution is actually valid: {result_value} — not a bug",
+            {"extracted_solution": extracted_solution, "evaluation": result_value},
         )
 
 

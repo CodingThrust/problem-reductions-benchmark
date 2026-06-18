@@ -18,6 +18,7 @@ Test categories:
 
 import json
 import pytest
+from unittest.mock import patch
 
 from benchmark.verify import (
     Verdict,
@@ -27,6 +28,16 @@ from benchmark.verify import (
     verify,
 )
 from benchmark.tests.conftest import MIS_SOURCE, MIS_TO_CLIQUE_BUNDLE
+
+
+def _mock_unsound_bug_responses():
+    """Mock responses for an unsound_extraction bug: extract returns invalid solution."""
+    return [
+        (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),           # pred reduce
+        (0, json.dumps({"result": "Max(1)"}), ""),            # pred evaluate target_config (valid)
+        (0, json.dumps({"solution": [1, 1, 0], "evaluation": "Max(None)"}), ""),  # pred extract
+        (0, json.dumps({"result": "Max(None)"}), ""),         # pred evaluate extracted
+    ]
 
 
 # ── A. Pure-logic helpers ─────────────────────────────────────────────────────
@@ -148,16 +159,17 @@ class TestMissingFields:
         assert "target_config" in v.reason
 
     def test_unsound_missing_claimed_source_solution(self):
+        # claimed_source_solution is no longer required — verifier runs pred extract itself
         cert = {
             "source": MIS_SOURCE,
             "bundle": MIS_TO_CLIQUE_BUNDLE,
             "violation": "unsound_extraction",
             "target_config": "1,0,0",
-            # claimed_source_solution intentionally omitted
+            # claimed_source_solution intentionally omitted — should not block verification
         }
-        v = verify(cert)
-        assert not v.accepted
-        assert "claimed_source_solution" in v.reason
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()):
+            v = verify(cert)
+        assert v.accepted, f"missing claimed_source_solution should not block verification, got: {v.reason}"
 
     def test_suboptimal_missing_target_config(self):
         cert = {
@@ -191,55 +203,122 @@ class TestBundleIntegrity:
         assert not v.accepted
         assert "does not match" in v.reason
 
-    def test_correct_bundle_passes_integrity(self, valid_unsound_cert):
+    def test_correct_bundle_passes_integrity(self):
         """A real (unmodified) bundle must survive the integrity check."""
-        # The unsound cert uses a real bundle — integrity should pass
-        # (the cert itself is a genuine bug, so accepted=True)
-        v = verify(valid_unsound_cert)
-        assert v.accepted  # if integrity failed, this would be False
-
-
-# ── D. unsound_extraction ─────────────────────────────────────────────────────
-
-class TestUnsoundExtraction:
-    def test_genuine_bug_accepted(self, valid_unsound_cert):
-        """[1,1,0] on graph 0-1,1-2 is invalid (adjacent) → real bug → accepted."""
-        v = verify(valid_unsound_cert)
-        assert v.accepted
-        assert "invalid" in v.reason
-        assert "Max(None)" in v.reason
-
-    def test_false_alarm_rejected(self, false_alarm_cert):
-        """[1,0,1] on graph 0-1,1-2 is valid → not a bug → rejected."""
-        v = verify(false_alarm_cert)
-        assert not v.accepted
-        assert "valid" in v.reason
-
-    def test_verdict_details_on_acceptance(self, valid_unsound_cert):
-        """Accepted verdict must carry details with evaluation and solution."""
-        v = verify(valid_unsound_cert)
-        assert v.accepted
-        assert "evaluation" in v.details
-        assert "claimed_source_solution" in v.details
-
-    def test_invalid_target_config_rejected(self):
-        """If target_config itself is not a valid target solution, reject."""
-        # For MaximumClique on the complement graph (edges: [0,2]),
-        # config [1,1,0] tries to select vertices 0 and 1, but 0-1 is NOT an edge
-        # in the complement graph, so this is not a valid clique.
         cert = {
             "rule": "MaximumIndependentSetToMaximumClique",
             "violation": "unsound_extraction",
             "source": MIS_SOURCE,
             "bundle": MIS_TO_CLIQUE_BUNDLE,
-            "target_config": "1,1,0",   # invalid clique (0 and 1 not adjacent in complement)
+            "target_config": "1,0,0",
+        }
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()):
+            v = verify(cert)
+        # If bundle integrity failed, reason would mention "does not match"
+        assert "does not match" not in v.reason
+
+
+# ── D. unsound_extraction ─────────────────────────────────────────────────────
+
+class TestUnsoundExtraction:
+    def test_genuine_bug_accepted(self):
+        """Mocked: extract returns invalid solution → real bug → accepted."""
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,0,0",
             "claimed_source_solution": [1, 1, 0],
         }
-        v = verify(cert)
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()):
+            v = verify(cert)
+        assert v.accepted
+        assert "invalid" in v.reason
+
+    def test_false_alarm_rejected(self):
+        """Mocked: extract returns valid solution → not a bug → rejected."""
+        responses = [
+            (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),           # pred reduce
+            (0, json.dumps({"result": "Max(2)"}), ""),            # pred evaluate target_config
+            (0, json.dumps({"solution": [1, 0, 1], "evaluation": "Max(2)"}), ""),  # pred extract
+            (0, json.dumps({"result": "Max(2)"}), ""),            # pred evaluate extracted
+        ]
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,0,1",
+            "claimed_source_solution": [1, 0, 1],
+        }
+        with patch("benchmark.verify._run_pred", side_effect=responses):
+            v = verify(cert)
         assert not v.accepted
-        # Either rejected due to invalid target_config or invalid source solution —
-        # either way it should not be accepted as a real bug
+        assert "valid" in v.reason
+
+    def test_verdict_details_on_acceptance(self):
+        """Accepted verdict must carry details with evaluation and extracted_solution."""
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,0,0",
+            "claimed_source_solution": [1, 1, 0],
+        }
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()):
+            v = verify(cert)
+        assert v.accepted
+        assert "evaluation" in v.details
+        assert "extracted_solution" in v.details
+
+    def test_invalid_target_config_rejected(self):
+        """If target_config is not a valid target solution, reject."""
+        responses = [
+            (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),           # pred reduce
+            (0, json.dumps({"result": "Max(None)"}), ""),         # pred evaluate target_config → invalid
+        ]
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,1,0",
+            "claimed_source_solution": [1, 1, 0],
+        }
+        with patch("benchmark.verify._run_pred", side_effect=responses):
+            v = verify(cert)
         assert not v.accepted
+
+    def test_unsound_uses_pred_extract(self):
+        """Verifier must call pred extract — not trust claimed_source_solution."""
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,0,0",
+            "claimed_source_solution": [0, 0, 0],  # wrong — verifier should ignore this
+        }
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()) as mock_pred:
+            verify(cert)
+        called_verbs = [c.args[0][0] for c in mock_pred.call_args_list]
+        assert "extract" in called_verbs, "verifier must call pred extract"
+
+    def test_unsound_wrong_claimed_but_real_bug(self):
+        """AI provides wrong claimed_source_solution — verifier ignores it and uses pred extract."""
+        cert = {
+            "rule": "MaximumIndependentSetToMaximumClique",
+            "violation": "unsound_extraction",
+            "source": MIS_SOURCE,
+            "bundle": MIS_TO_CLIQUE_BUNDLE,
+            "target_config": "1,0,0",
+            "claimed_source_solution": [0, 0, 0],  # wrong
+        }
+        with patch("benchmark.verify._run_pred", side_effect=_mock_unsound_bug_responses()):
+            v = verify(cert)
+        assert v.accepted, f"Real bug should be accepted even with wrong claimed_source_solution, got: {v.reason}"
 
 
 # ── E. incomplete_reduction ───────────────────────────────────────────────────
