@@ -239,7 +239,11 @@ def _check_incomplete_reduction(cert: dict, source_file: str, bundle_file: str) 
     Incomplete reduction: source has a valid solution but the reduction target has none.
     """
     # First confirm the source has a solution
-    rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=source_file)
+    try:
+        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=source_file)
+    except subprocess.TimeoutExpired:
+        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
+
     if rc != 0:
         return Verdict(False, f"pred solve (source) failed: {stderr.strip()[:200]}")
 
@@ -257,7 +261,11 @@ def _check_incomplete_reduction(cert: dict, source_file: str, bundle_file: str) 
         )
 
     # Now confirm the target (bundle) has no solution
-    rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=bundle_file)
+    try:
+        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=bundle_file)
+    except subprocess.TimeoutExpired:
+        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
+
     if rc != 0:
         return Verdict(False, f"pred solve (bundle) failed: {stderr.strip()[:200]}")
 
