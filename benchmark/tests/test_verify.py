@@ -331,14 +331,20 @@ class TestIncompleteReduction:
     """
 
     def test_when_target_has_solution_rejected(self):
-        """MIS→MaximumClique: both have solutions → not an incomplete reduction."""
+        """Both source and target have solutions → not an incomplete reduction."""
         cert = {
             "rule": "MaximumIndependentSetToMaximumClique",
             "violation": "incomplete_reduction",
             "source": MIS_SOURCE,
             "bundle": MIS_TO_CLIQUE_BUNDLE,
         }
-        v = verify(cert)
+        responses = [
+            (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),                         # reduce
+            (0, json.dumps({"evaluation": "Max(2)", "solution": [1,0,1]}), ""),# solve source → has sol
+            (0, json.dumps({"evaluation": "Max(2)", "solution": [1,0,1]}), ""),# solve bundle → has sol
+        ]
+        with patch("benchmark.verify._run_pred", side_effect=responses):
+            v = verify(cert)
         assert not v.accepted
         assert "has a solution" in v.reason
 

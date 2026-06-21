@@ -8,7 +8,9 @@ Categories:
   III. Novelty key (_novelty_key)
   IV.  Novelty filter — verify() with known_bugs (integration, needs pred)
 """
+import json
 import pytest
+from unittest.mock import patch
 
 from benchmark.verify import (
     FLOAT_TOLERANCE,
@@ -82,7 +84,11 @@ class TestNoveltyKey:
         assert _novelty_key("MaximumClique", MIS_SOURCE) != _novelty_key("MaximumCliqueToSAT", MIS_SOURCE)
 
 
-# ── IV. Novelty filter (integration — needs pred) ─────────────────────────────
+# ── IV. Novelty filter ────────────────────────────────────────────────────────
+# MIS→MaximumClique is a correct reduction — pred extract always returns a valid
+# solution, so a real unsound_extraction bug cannot be demonstrated against it.
+# These tests mock _run_pred to simulate buggy extraction and focus on the
+# novelty-filter logic itself.
 
 _UNSOUND_CERT = {
     "rule": "MaximumIndependentSetToMaximumClique",
@@ -94,21 +100,43 @@ _UNSOUND_CERT = {
 }
 
 
-@pytest.mark.integration
+def _mock_bug_responses():
+    """reduce → bundle; evaluate target → valid; extract → invalid [1,1,0]; evaluate source → None."""
+    return [
+        (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),
+        (0, json.dumps({"result": "Max(1)"}), ""),
+        (0, json.dumps({"solution": [1, 1, 0], "evaluation": "Max(None)"}), ""),
+        (0, json.dumps({"result": "Max(None)"}), ""),
+    ]
+
+
+def _mock_no_bug_responses():
+    """reduce → bundle; evaluate target → valid; extract → valid [1,0,0]; evaluate source → Max(1)."""
+    return [
+        (0, json.dumps(MIS_TO_CLIQUE_BUNDLE), ""),
+        (0, json.dumps({"result": "Max(1)"}), ""),
+        (0, json.dumps({"solution": [1, 0, 0], "evaluation": "Max(1)"}), ""),
+        (0, json.dumps({"result": "Max(1)"}), ""),
+    ]
+
+
 class TestNoveltyFilter:
     def test_novel_when_not_in_ledger(self):
-        v = verify(_UNSOUND_CERT, known_bugs=[])
+        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
+            v = verify(_UNSOUND_CERT, known_bugs=[])
         assert v.accepted
         assert v.novelty == "novel"
 
     def test_known_when_in_ledger(self):
-        v = verify(_UNSOUND_CERT, known_bugs=[_UNSOUND_CERT])
+        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
+            v = verify(_UNSOUND_CERT, known_bugs=[_UNSOUND_CERT])
         assert v.accepted
         assert v.novelty == "known"
 
     def test_rejected_has_none_novelty(self):
         false_alarm = {**_UNSOUND_CERT, "claimed_source_solution": [1, 0, 1]}
-        v = verify(false_alarm)
+        with patch("benchmark.verify._run_pred", side_effect=_mock_no_bug_responses()):
+            v = verify(false_alarm)
         assert not v.accepted
         assert v.novelty is None
 
@@ -116,12 +144,14 @@ class TestNoveltyFilter:
         """Known bug with reordered source keys still counts as known."""
         reordered_source = {k: MIS_SOURCE[k] for k in reversed(list(MIS_SOURCE.keys()))}
         known = [{**_UNSOUND_CERT, "source": reordered_source}]
-        v = verify(_UNSOUND_CERT, known_bugs=known)
+        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
+            v = verify(_UNSOUND_CERT, known_bugs=known)
         assert v.accepted
         assert v.novelty == "known"
 
     def test_rule_name_substring_not_duplicate(self):
         """Bug for 'MaximumClique' in ledger must NOT mark 'MaximumCliqueToSAT' cert as known."""
         known = [{"rule": "MaximumClique", "source": MIS_SOURCE}]
-        v = verify({**_UNSOUND_CERT, "rule": "MaximumCliqueToSAT"}, known_bugs=known)
+        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
+            v = verify({**_UNSOUND_CERT, "rule": "MaximumCliqueToSAT"}, known_bugs=known)
         assert v.novelty != "known"

@@ -240,7 +240,7 @@ def _check_incomplete_reduction(cert: dict, source_file: str, bundle_file: str) 
     """
     # First confirm the source has a solution
     try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=source_file)
+        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=source_file)
     except subprocess.TimeoutExpired:
         return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
 
@@ -262,7 +262,7 @@ def _check_incomplete_reduction(cert: dict, source_file: str, bundle_file: str) 
 
     # Now confirm the target (bundle) has no solution
     try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=bundle_file)
+        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=bundle_file)
     except subprocess.TimeoutExpired:
         return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
 
@@ -370,7 +370,7 @@ def _check_solve_mismatch(cert: dict, source_file: str, bundle_file: str) -> Ver
     The verifier solves both sides itself — no target_config or solution data from the AI.
     """
     try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=source_file)
+        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=source_file)
     except subprocess.TimeoutExpired:
         return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
 
@@ -382,7 +382,7 @@ def _check_solve_mismatch(cert: dict, source_file: str, bundle_file: str) -> Ver
         return Verdict(False, f"pred solve (source) returned invalid JSON: {e}")
 
     try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--solver", "brute-force", "--json"], stdin_file=bundle_file)
+        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=bundle_file)
     except subprocess.TimeoutExpired:
         return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
 
