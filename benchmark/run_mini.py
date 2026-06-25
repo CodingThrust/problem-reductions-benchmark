@@ -6,15 +6,13 @@ emits counterexample certificates. Independent checker validates each certificat
 
 import argparse
 import json
-import subprocess
-import tempfile
 from pathlib import Path
 
 import yaml
 
 from benchmark.env_context import EnvContext
 from benchmark.env_setup import setup_env
-from benchmark.verify import verify
+from benchmark.verify import count_bugs, verify
 
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
 SKIP_RULES = {"mod", "traits", "graph_helpers", "analysis", "cost", "registry", "graph"}
@@ -26,20 +24,6 @@ AVG_COST_PER_KTOK = 6.0
 def list_rules(repo_dir: str) -> list[str]:
     rules_dir = Path(repo_dir) / "src" / "rules"
     return [f.stem for f in sorted(rules_dir.glob("*.rs")) if f.stem not in SKIP_RULES]
-
-
-def is_known_issue(rule_name: str) -> bool:
-    """Check if a bug for this rule is already reported on GitHub."""
-    result = subprocess.run(
-        ["gh", "issue", "list", "--repo", "CodingThrust/problem-reductions",
-         "--search", rule_name, "--json", "title", "--limit", "5"],
-        capture_output=True, text=True, timeout=15,
-    )
-    if result.returncode != 0:
-        return False
-    issues = json.loads(result.stdout or "[]")
-    normalized = rule_name.replace("_", "-").lower()
-    return any(normalized in i["title"].lower() or rule_name.lower() in i["title"].lower() for i in issues)
 
 
 def parse_certificate(messages: list) -> dict | None:
@@ -155,13 +139,11 @@ def run_one(
             "certificate": cert,
         }
 
-    # Check novelty
-    known = is_known_issue(rule_name)
-    result = "known_issue" if known else "bug_found"
-
+    # A confirmed certificate on a fixed library commit is a bug, full stop —
+    # novelty against external trackers is not part of the score.
     return {
         "rule": rule_name,
-        "result": result,
+        "result": "bug_found",
         "cost": cost,
         "tokens_k": tokens_k,
         "steps": agent.n_calls,
@@ -185,7 +167,7 @@ def main() -> None:
     ctx = setup_env(args.repo_dir)
     rules = args.rules if args.rules else list_rules(str(ctx.repo_path))
 
-    results, total_cost, total_tokens_k, bugs_found = [], 0.0, 0.0, 0
+    results, total_cost, total_tokens_k = [], 0.0, 0.0
 
     for rule_name in rules:
         remaining = args.budget - total_cost
@@ -201,12 +183,10 @@ def main() -> None:
         total_cost += r.get("cost", 0)
         total_tokens_k += r.get("tokens_k", 0)
 
-        is_new_bug = r["result"] == "bug_found"
-        status = "BUG FOUND" if is_new_bug else r["result"]
+        status = "BUG FOUND" if r["result"] == "bug_found" else r["result"]
         print(f"{status} (${r.get('cost', 0):.4f}, {r.get('tokens_k', 0):.1f}K tok)")
-        if is_new_bug:
-            bugs_found += 1
 
+    bugs_found = count_bugs(results)  # one rule = one bug
     efficiency_per_ktok = round(bugs_found / total_tokens_k, 4) if total_tokens_k else 0
     summary = {
         "model": args.model,

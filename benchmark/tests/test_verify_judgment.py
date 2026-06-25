@@ -1,12 +1,15 @@
 """
-Tests for issue #5: robust equality + novelty filter.
-All tests marked @pytest.mark.judgment — run via `make verify-judgment`.
+Tests for robust certificate judgment: float tolerance, reordered-JSON equality,
+and accept/reject behavior of verify(). Run via `make verify-judgment`.
 
 Categories:
   I.   Float tolerance (_is_strictly_better)
   II.  Reordered JSON (_normalize / _structures_match)
-  III. Novelty key (_novelty_key)
-  IV.  Novelty filter — verify() with known_bugs (integration, needs pred)
+  III. verify() accept/reject (integration, mocked pred)
+
+Novelty is no longer part of the score: on a fixed library commit a confirmed
+certificate is a bug, and the count is deduplicated per rule at the counting layer
+(see benchmark.verify.count_bugs).
 """
 import json
 import pytest
@@ -16,7 +19,6 @@ from benchmark.verify import (
     FLOAT_TOLERANCE,
     _is_strictly_better,
     _normalize,
-    _novelty_key,
     _structures_match,
     verify,
 )
@@ -65,30 +67,11 @@ class TestReorderedJSON:
         assert _structures_match(a, b)
 
 
-# ── III. Novelty key ──────────────────────────────────────────────────────────
-
-class TestNoveltyKey:
-    def test_same_rule_same_source_equal_key(self):
-        assert _novelty_key("RuleA", MIS_SOURCE) == _novelty_key("RuleA", MIS_SOURCE)
-
-    def test_different_rule_different_key(self):
-        assert _novelty_key("RuleA", MIS_SOURCE) != _novelty_key("RuleB", MIS_SOURCE)
-
-    def test_reordered_source_same_key(self):
-        """Source with different key order → same novelty key."""
-        reordered = {k: MIS_SOURCE[k] for k in reversed(list(MIS_SOURCE.keys()))}
-        assert _novelty_key("RuleA", MIS_SOURCE) == _novelty_key("RuleA", reordered)
-
-    def test_rule_name_substring_different_key(self):
-        """'MaximumClique' in ledger must NOT match 'MaximumCliqueToSAT'."""
-        assert _novelty_key("MaximumClique", MIS_SOURCE) != _novelty_key("MaximumCliqueToSAT", MIS_SOURCE)
-
-
-# ── IV. Novelty filter ────────────────────────────────────────────────────────
+# ── III. verify() accept/reject ───────────────────────────────────────────────
 # MIS→MaximumClique is a correct reduction — pred extract always returns a valid
 # solution, so a real unsound_extraction bug cannot be demonstrated against it.
-# These tests mock _run_pred to simulate buggy extraction and focus on the
-# novelty-filter logic itself.
+# These tests mock _run_pred to simulate buggy / sound extraction and focus on the
+# accept/reject decision itself.
 
 _UNSOUND_CERT = {
     "rule": "MaximumIndependentSetToMaximumClique",
@@ -120,38 +103,14 @@ def _mock_no_bug_responses():
     ]
 
 
-class TestNoveltyFilter:
-    def test_novel_when_not_in_ledger(self):
+class TestVerifyDecision:
+    def test_real_bug_accepted(self):
         with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
-            v = verify(_UNSOUND_CERT, known_bugs=[])
+            v = verify(_UNSOUND_CERT)
         assert v.accepted
-        assert v.novelty == "novel"
 
-    def test_known_when_in_ledger(self):
-        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
-            v = verify(_UNSOUND_CERT, known_bugs=[_UNSOUND_CERT])
-        assert v.accepted
-        assert v.novelty == "known"
-
-    def test_rejected_has_none_novelty(self):
+    def test_false_alarm_rejected(self):
         false_alarm = {**_UNSOUND_CERT, "claimed_source_solution": [1, 0, 1]}
         with patch("benchmark.verify._run_pred", side_effect=_mock_no_bug_responses()):
             v = verify(false_alarm)
         assert not v.accepted
-        assert v.novelty is None
-
-    def test_reordered_source_in_ledger_recognized(self):
-        """Known bug with reordered source keys still counts as known."""
-        reordered_source = {k: MIS_SOURCE[k] for k in reversed(list(MIS_SOURCE.keys()))}
-        known = [{**_UNSOUND_CERT, "source": reordered_source}]
-        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
-            v = verify(_UNSOUND_CERT, known_bugs=known)
-        assert v.accepted
-        assert v.novelty == "known"
-
-    def test_rule_name_substring_not_duplicate(self):
-        """Bug for 'MaximumClique' in ledger must NOT mark 'MaximumCliqueToSAT' cert as known."""
-        known = [{"rule": "MaximumClique", "source": MIS_SOURCE}]
-        with patch("benchmark.verify._run_pred", side_effect=_mock_bug_responses()):
-            v = verify({**_UNSOUND_CERT, "rule": "MaximumCliqueToSAT"}, known_bugs=known)
-        assert v.novelty != "known"

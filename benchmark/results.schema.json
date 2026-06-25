@@ -57,7 +57,7 @@
           },
           "result": {
             "type": "string",
-            "enum": ["bug_found", "known_issue", "no_certificate", "rejected", "no_bug", "error"],
+            "enum": ["bug_found", "no_certificate", "rejected", "no_bug", "error"],
             "description": "Outcome for this rule"
           },
           "cost": {

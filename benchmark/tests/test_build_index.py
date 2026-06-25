@@ -19,6 +19,14 @@ from benchmark.build_index import build_index, _validate
 from benchmark.tests.conftest import make_results_dict
 
 
+def bug_rows(n: int) -> list[dict]:
+    """n distinct bug_found rows — build_index recomputes bugs_found from these."""
+    return [
+        {"rule": f"rule_{i}", "result": "bug_found", "cost": 0.1, "tokens_k": 10.0}
+        for i in range(n)
+    ]
+
+
 # ── A. _validate() ────────────────────────────────────────────────────────────
 
 class TestValidate:
@@ -64,14 +72,31 @@ class TestBuildIndexNormal:
     def test_single_file_produces_one_entry(self, tmp_path):
         data = make_results_dict(
             model="anthropic/claude-sonnet-4-6",
-            bugs_found=2,
-            efficiency_bugs_per_ktok=0.05,
+            results=bug_rows(2),
         )
         (tmp_path / "run1.json").write_text(json.dumps(data), encoding="utf-8")
         entries = build_index(tmp_path)
         assert len(entries) == 1
         assert entries[0]["model"] == "anthropic/claude-sonnet-4-6"
         assert entries[0]["bugs_found"] == 2
+
+    def test_bugs_found_recomputed_from_results_not_trusted(self, tmp_path):
+        """A self-reported bugs_found is ignored; the count is derived from results."""
+        data = make_results_dict(bugs_found=999, results=bug_rows(3))
+        (tmp_path / "run.json").write_text(json.dumps(data), encoding="utf-8")
+        entries = build_index(tmp_path)
+        assert entries[0]["bugs_found"] == 3
+
+    def test_duplicate_rule_rows_count_once(self, tmp_path):
+        """Many bug_found rows on the same rule count as a single bug (no inflation)."""
+        dupes = [
+            {"rule": "same_rule", "result": "bug_found", "cost": 0.1, "tokens_k": 1.0}
+            for _ in range(50)
+        ]
+        data = make_results_dict(bugs_found=50, results=dupes)
+        (tmp_path / "run.json").write_text(json.dumps(data), encoding="utf-8")
+        entries = build_index(tmp_path)
+        assert entries[0]["bugs_found"] == 1
 
     def test_index_json_is_skipped(self, tmp_path):
         """index.json must never be treated as a results file."""
@@ -81,16 +106,12 @@ class TestBuildIndexNormal:
         entries = build_index(tmp_path)
         assert len(entries) == 1  # index.json not counted
 
-    def test_sorted_by_bugs_per_ktok_descending(self, tmp_path):
-        """Higher efficiency must appear first."""
-        efficient = make_results_dict(
-            model="model-A", efficiency_bugs_per_ktok=0.10, bugs_found=5
-        )
-        slow = make_results_dict(
-            model="model-B", efficiency_bugs_per_ktok=0.02, bugs_found=1
-        )
-        (tmp_path / "a.json").write_text(json.dumps(efficient), encoding="utf-8")
-        (tmp_path / "b.json").write_text(json.dumps(slow), encoding="utf-8")
+    def test_sorted_by_bugs_found_descending(self, tmp_path):
+        """More bugs found must appear first (primary ranking)."""
+        more = make_results_dict(model="model-A", results=bug_rows(5))
+        fewer = make_results_dict(model="model-B", results=bug_rows(1))
+        (tmp_path / "a.json").write_text(json.dumps(more), encoding="utf-8")
+        (tmp_path / "b.json").write_text(json.dumps(fewer), encoding="utf-8")
         entries = build_index(tmp_path)
         assert entries[0]["model"] == "model-A"
         assert entries[1]["model"] == "model-B"
@@ -248,31 +269,26 @@ class TestTrajectoryFile:
         entries = build_index(tmp_path)
         assert any(e["model"] == "zero-model" for e in entries)
 
-    def test_dual_metric_opposite_order(self, tmp_path):
+    def test_efficiency_breaks_ties_between_equal_bug_counts(self, tmp_path):
         """
+        Both models find 2 bugs (a tie on the primary metric).
         model-A: high bugs/Ktok, low bugs/$
         model-B: low bugs/Ktok, high bugs/$
-        build_index sorts by bugs/Ktok → A first.
-        Swapping sort key to bugs/$ would put B first.
-        This test confirms the data is stored correctly for both metrics.
+        Default sort (bugs_found, then bugs/Ktok) → A first.
+        Sorting the tie by bugs/$ would put B first.
         """
         a = make_results_dict(
-            model="model-A",
-            efficiency_bugs_per_ktok=0.10,
-            efficiency_bugs_per_dollar=0.01,
-            bugs_found=2,
+            model="model-A", results=bug_rows(2),
+            total_tokens_k=20.0, total_cost_usd=200.0,  # ktok=0.1, $=0.01
         )
         b = make_results_dict(
-            model="model-B",
-            efficiency_bugs_per_ktok=0.02,
-            efficiency_bugs_per_dollar=0.50,
-            bugs_found=1,
+            model="model-B", results=bug_rows(2),
+            total_tokens_k=100.0, total_cost_usd=4.0,  # ktok=0.02, $=0.5
         )
         (tmp_path / "a.json").write_text(json.dumps(a), encoding="utf-8")
         (tmp_path / "b.json").write_text(json.dumps(b), encoding="utf-8")
         entries = build_index(tmp_path)
-        # Default sort: bugs/Ktok → A first
-        assert entries[0]["model"] == "model-A"
-        # If sorted by bugs/$, B would be first
+        assert entries[0]["bugs_found"] == entries[1]["bugs_found"] == 2  # tie on primary
+        assert entries[0]["model"] == "model-A"  # ktok tiebreak
         by_dollar = sorted(entries, key=lambda e: e["efficiency_bugs_per_dollar"], reverse=True)
         assert by_dollar[0]["model"] == "model-B"

@@ -29,7 +29,6 @@ class Verdict:
     accepted: bool
     reason: str
     details: dict = field(default_factory=dict)
-    novelty: str | None = None  # "novel" | "known" | None (only set when accepted)
 
     def __str__(self) -> str:
         status = "ACCEPTED" if self.accepted else "REJECTED"
@@ -63,9 +62,14 @@ def _is_strictly_better(extracted: float, candidate: float, is_max: bool) -> boo
     return extracted - candidate > FLOAT_TOLERANCE
 
 
-def _novelty_key(rule: str, source: dict) -> str:
-    """Canonical key for deduplicating bugs: (rule, normalized_source)."""
-    return json.dumps({"rule": rule, "source": _normalize(source)}, sort_keys=True)
+def count_bugs(results: list[dict]) -> int:
+    """Count distinct rules with at least one confirmed bug.
+
+    One rule = one bug, regardless of how many certificates (or violation types)
+    target it. This is the leaderboard's atomic unit and the only guard against
+    inflating the count by resubmitting many counterexamples for the same rule.
+    """
+    return len({r.get("rule") for r in results if r.get("result") == "bug_found"})
 
 
 def _normalize(data: dict) -> dict:
@@ -82,19 +86,15 @@ def _structures_match(a: dict, b: dict) -> bool:
     return _normalize(a) == _normalize(b)
 
 
-def verify(
-    cert: dict,
-    repo_dir: str | None = None,
-    known_bugs: list[dict] | None = None,
-) -> Verdict:
-    """Re-validate a certificate via pred and determine novelty against a known-bugs ledger."""
+def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
+    """Re-validate a certificate deterministically via pred. Never trusts the AI's claim.
+
+    A bug counts once per rule (see the leaderboard's counting rule); this function
+    only decides whether *this* certificate witnesses a real bug — deduplication by
+    rule happens at the counting layer.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
-        verdict = _verify_in(cert, tmpdir)
-    if verdict.accepted:
-        key = _novelty_key(cert.get("rule", ""), cert.get("source", {}))
-        known_keys = {_novelty_key(b.get("rule", ""), b.get("source", {})) for b in (known_bugs or [])}
-        verdict.novelty = "known" if key in known_keys else "novel"
-    return verdict
+        return _verify_in(cert, tmpdir)
 
 
 def _verify_in(cert: dict, tmpdir: str) -> Verdict:

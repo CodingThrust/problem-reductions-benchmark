@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from benchmark.runner import AgentRunner
+from benchmark.verify import count_bugs
 
 
 class BudgetExhausted(Exception):
@@ -148,7 +149,7 @@ class Scheduler:
 
     def _write_results(self, model: str) -> None:
         rows = self._completed[model]
-        bugs = sum(1 for r in rows if r.get("result") == "bug_found")
+        bugs = count_bugs(rows)  # one rule = one bug
         cost = self._spent[model]
         tokens_k = sum(r.get("tokens_k", 0.0) for r in rows)
         safe_model = model.replace("/", "_").replace(":", "_")

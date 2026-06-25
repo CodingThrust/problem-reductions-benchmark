@@ -24,8 +24,10 @@ Three violation types:
 
 Every certificate is independently re-verified by `pred` — the AI's claim is never trusted directly.
 
-**Primary metric: bugs/Ktok** (bugs found per 1000 tokens) — model-agnostic, works regardless of pricing.
-**Secondary metric: bugs/$** (bugs found per USD spent) — practical cost-efficiency ranking.
+**Primary metric: bugs found** — the number of *distinct rules* with at least one confirmed bug, on a pinned library commit. One rule = one bug, no matter how many counterexamples (or violation types) target it. This count is fully verifiable and cannot be inflated by resubmitting certificates.
+**Secondary metrics: bugs/Ktok and bugs/$** — token- and cost-efficiency. These have a self-reported denominator (tokens/cost), so they rank ties and serve as reference, not as the headline.
+
+Provenance is intentionally *not* scored: on a fixed commit, a `pred`-confirmed certificate is a bug regardless of who or what produced it.
 
 ## How to add a model
 
@@ -81,7 +83,7 @@ Key `make` targets:
 |--------|-------------|
 | `make test-unit` | All unit tests, no API key needed |
 | `make verify-calibration` | Test verifier against 3 known fixtures |
-| `make verify-judgment` | Robust equality + novelty filter tests |
+| `make verify-judgment` | Robust equality + accept/reject judgment tests |
 | `make validate-results` | Schema-check all `results/*.json` |
 | `make build-index` | Rebuild `results/index.json` |
 | `make demo` | Run a tiny real session + rebuild index |
@@ -90,9 +92,10 @@ Key `make` targets:
 
 | Metric | Formula | When to use |
 |--------|---------|-------------|
-| `bugs/Ktok` | bugs ÷ tokens(K) | **Primary ranking** — fair across all models regardless of price |
-| `bugs/$` | bugs ÷ USD spent | Secondary ranking — practical cost-efficiency |
+| `bugs_found` | distinct rules with a confirmed bug | **Primary ranking** — fully verifiable, cannot be inflated |
+| `bugs/Ktok` | bugs ÷ tokens(K) | Tiebreak / efficiency reference — self-reported denominator |
+| `bugs/$` | bugs ÷ USD spent | Tiebreak / cost-efficiency reference — self-reported denominator |
 
-Use `bugs/Ktok` when comparing models with different pricing tiers. Use `bugs/$` when optimizing for budget.
+Rank by `bugs_found`. Among models that find the same number of bugs, `bugs/Ktok` breaks the tie (use `bugs/$` when optimizing for budget). The efficiency metrics divide by tokens/cost, which the submitter self-reports — treat them as informative, not authoritative.
 
 Models that don't publish pricing can still compete on `bugs/Ktok`.

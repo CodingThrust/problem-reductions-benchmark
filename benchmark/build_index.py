@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+from benchmark.verify import count_bugs
+
 
 def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict]:
     """Read all results JSON files, validate if schema provided, return index entries."""
@@ -53,14 +55,22 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
                 "trajectory_file": traj_rel if traj_abs.exists() else None,
             })
 
+        # Recompute the count from the per-rule results (one rule = one bug) rather
+        # than trusting the self-reported bugs_found field — this is the anti-inflation
+        # guard for open submissions.
+        results = data.get("results", [])
+        bugs_found = count_bugs(results)
+        tokens_k = data["total_tokens_k"]
+        cost = data["total_cost_usd"]
+
         entry = {
             "model": data["model"],
             "library_commit": data.get("library_commit", "unknown")[:7],
-            "bugs_found": data["bugs_found"],
-            "total_cost_usd": data["total_cost_usd"],
-            "total_tokens_k": data["total_tokens_k"],
-            "efficiency_bugs_per_ktok": data["efficiency_bugs_per_ktok"],
-            "efficiency_bugs_per_dollar": data["efficiency_bugs_per_dollar"],
+            "bugs_found": bugs_found,
+            "total_cost_usd": cost,
+            "total_tokens_k": tokens_k,
+            "efficiency_bugs_per_ktok": round(bugs_found / tokens_k, 4) if tokens_k else 0,
+            "efficiency_bugs_per_dollar": round(bugs_found / cost, 4) if cost else 0,
             "rules_tested": data["rules_tested"],
             "error_count": sum(1 for r in data.get("results", []) if str(r.get("result", "")).startswith("error:")),
             "skip_count": sum(1 for r in data.get("results", []) if r.get("result") == "skipped_budget"),
@@ -69,8 +79,9 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
         }
         entries.append(entry)
 
-    # Sort by primary fair metric (bugs/Ktok) descending
-    entries.sort(key=lambda e: e["efficiency_bugs_per_ktok"], reverse=True)
+    # Primary ranking: absolute bugs found (one rule = one bug). Ties broken by
+    # token-efficiency, which is now a reference metric rather than the headline.
+    entries.sort(key=lambda e: (e["bugs_found"], e["efficiency_bugs_per_ktok"]), reverse=True)
     return entries
 
 

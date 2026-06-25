@@ -37,7 +37,7 @@ LLM Agent
                          └─ accepted → 写入 results/*.json → Leaderboard
 ```
 
-**核心指标**：`bugs / K tokens`（每千 token 找到的 bug 数）—— 比 `bugs / $` 更能跨模型比较，因为不同模型定价差异大。
+**核心指标**：`bugs_found` —— 在固定 commit 上，**有 ≥1 个确认 bug 的不同 rule 数**（一条 rule 只记一个，无论提交多少反例）。该指标完全可验证、不可灌水。`bugs / K tokens` 和 `bugs / $` 为效率参考指标（分母是自报 token/成本），仅用于并列时打破平手。
 
 ---
 
@@ -195,8 +195,8 @@ for line in sys.stdin:
 
 访问 https://ferrari-72.github.io/problem-reductions-benchmark/ 展示：
 - 当前已有 DeepSeek (`deepseek/deepseek-chat`) 的真实跑分
-- `efficiency_bugs_per_ktok` 是横向对比不同模型的核心指标
-- 表格按该指标排序，新提交的模型会自动出现
+- `bugs_found`（去重后的 rule 数）是横向对比不同模型的核心指标
+- 表格按 `bugs_found` 排序，并列时用 `efficiency_bugs_per_ktok` 打破平手；新提交的模型会自动出现
 
 ### 4.4 独立 Verifier（Zero Trust）
 

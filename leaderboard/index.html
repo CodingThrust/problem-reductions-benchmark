@@ -85,10 +85,12 @@ function setMetric(metric) {
   currentMetric = metric;
   document.getElementById("btn-ktok").classList.toggle("active", metric === "ktok");
   document.getElementById("btn-dollar").classList.toggle("active", metric === "dollar");
-  const sorted = [...allModels].sort((a, b) => {
-    const key = metric === "ktok" ? "efficiency_bugs_per_ktok" : "efficiency_bugs_per_dollar";
-    return b[key] - a[key];
-  });
+  // Primary ranking is absolute bugs found (one rule = one bug); the ktok/$ toggle
+  // only breaks ties between models that found the same number of bugs.
+  const key = metric === "ktok" ? "efficiency_bugs_per_ktok" : "efficiency_bugs_per_dollar";
+  const sorted = [...allModels].sort((a, b) =>
+    (b.bugs_found - a.bugs_found) || (b[key] - a[key])
+  );
   renderTable(sorted);
 }
 

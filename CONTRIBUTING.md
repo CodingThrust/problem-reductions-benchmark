@@ -45,7 +45,7 @@ Additional fields by violation type:
 # Test the verifier against 3 canonical fixture certificates (no AI needed)
 make verify-calibration
 
-# Run robust equality and novelty filter tests
+# Run robust equality and accept/reject judgment tests
 make verify-judgment
 
 # Full unit test suite
