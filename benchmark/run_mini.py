@@ -178,6 +178,7 @@ def main() -> None:
     parser.add_argument("--per-rule", type=float, default=0.5, help="Per-rule cost limit ($)")
     parser.add_argument("--rules", nargs="*", help="Specific rule names (default: all)")
     parser.add_argument("--output", default="results/results_mini.json")
+    parser.add_argument("--trajectory-dir", default=None, help="Directory to save per-rule JSONL trajectories")
     parser.add_argument("--repo-dir", required=True, help="Local problem-reductions clone (pinned commit required)")
     args = parser.parse_args()
 
@@ -194,7 +195,8 @@ def main() -> None:
         limit = min(args.per_rule, remaining)
         print(f"  {rule_name} (limit ${limit:.2f})...", end=" ", flush=True)
 
-        r = run_one(args.model, ctx, rule_name, limit, api_base=args.api_base)
+        r = run_one(args.model, ctx, rule_name, limit, api_base=args.api_base,
+                    trajectory_dir=Path(args.trajectory_dir) if args.trajectory_dir else None)
         results.append(r)
         total_cost += r.get("cost", 0)
         total_tokens_k += r.get("tokens_k", 0)

@@ -12,7 +12,7 @@ agent:
     Your tool is `pred`. Key commands:
       pred create <PROBLEM> [options] --json       # create a problem instance
       pred reduce <file.json> --to <TARGET> --json # reduce source to target (produces a bundle)
-      pred solve <bundle.json> --solver brute-force --json  # solve (finds all/optimal solutions)
+      pred solve <bundle.json> --json                        # solve (finds optimal solution)
       pred evaluate <file.json> --config <vals> --json      # check if a config is valid
       pred extract <bundle.json> --config <vals> --json     # map target config back to source
       pred list --rules --json                    # list all available reduction rules
@@ -23,7 +23,7 @@ agent:
     1. Read the rule source at {{rule_file}} to understand what reduce_to() and extract_solution() do
     2. Construct a small source problem instance with pred create
     3. Reduce it with pred reduce to get a bundle
-    4. Solve the bundle with pred solve --solver brute-force to get the target solution
+    4. Solve the bundle with pred solve to get the target solution
     5. Extract back with pred extract using the target solution config
     6. Evaluate the extracted source solution with pred evaluate
     7. If evaluation returns Max(None) or Or(false): you found an unsound_extraction bug!
@@ -82,7 +82,7 @@ agent:
     If no bug found, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     </task>
 
-  step_limit: 20
+  step_limit: 35
   cost_limit: 0.5
 
 environment:
