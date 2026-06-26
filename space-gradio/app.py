@@ -135,22 +135,19 @@ def build_ui() -> gr.Blocks:
                 "<sub>**Budget reach** = how far the $20 got (rules reached / total). "
                 "**Bugs/Ktok** = bugs per 1000 tokens.</sub>"
             )
-            with gr.Row():
-                with gr.Column(scale=3):
-                    gr.ScatterPlot(
-                        value=scatter, x="Tokens (K)", y="Bugs", color="Model",
-                        title="Bugs vs. tokens (up-and-left is better)",
-                        tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
-                    )
-                with gr.Column(scale=2):
-                    gr.Markdown("#### 🔎 Inspect a model's bugs")
-                    model_pick = gr.Dropdown(choices=list(cert_map), label="Model", value=None)
-                    detail = gr.Markdown("*Pick a model to see its confirmed bugs.*")
-                    model_pick.change(
-                        lambda m: _cert_markdown(m, cert_map.get(m, [])) if m else
-                        "*Pick a model to see its confirmed bugs.*",
-                        inputs=model_pick, outputs=detail,
-                    )
+            gr.ScatterPlot(
+                value=scatter, x="Tokens (K)", y="Bugs", color="Model",
+                title="Bugs vs. tokens (up-and-left is better)",
+                tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
+            )
+            gr.Markdown("#### 🔎 Inspect a model's bugs")
+            model_pick = gr.Dropdown(choices=list(cert_map), label="Model", value=None)
+            detail = gr.Markdown("*Pick a model to see its confirmed bugs.*")
+            model_pick.change(
+                lambda m: _cert_markdown(m, cert_map.get(m, [])) if m else
+                "*Pick a model to see its confirmed bugs.*",
+                inputs=model_pick, outputs=detail,
+            )
 
         with gr.Tab(f"📋 Tasks ({len(tasks_df)})"):
             if tasks_err:
