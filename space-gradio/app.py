@@ -4,7 +4,7 @@ import os
 
 import gradio as gr
 import pandas as pd
-from gradio_leaderboard import ColumnFilter, Leaderboard, SelectColumns
+from gradio_leaderboard import Leaderboard, SelectColumns
 
 import leaderboard as lb
 
@@ -12,11 +12,12 @@ _RESULTS_PATH = os.path.join(os.path.dirname(__file__), "data", "results.json")
 _PINNED_TAG = "v0.6.0"
 _DATA_UPDATED = datetime.date.fromtimestamp(os.path.getmtime(_RESULTS_PATH)).isoformat()
 
-_CITATION = """@misc{problem_reductions_benchmark,
-  title  = {Problem-Reductions Bug-Finding Benchmark},
-  author = {Pan, Xiwei},
-  year   = {2026},
-  url    = {https://huggingface.co/spaces/isPANN/problem-reductions-benchmarks}
+# TODO: replace placeholder citation once the benchmark has a canonical reference.
+_CITATION = """@misc{TODO_citation_key,
+  title  = {TODO},
+  author = {TODO},
+  year   = {TODO},
+  url    = {TODO}
 }"""
 
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
@@ -111,9 +112,12 @@ def build_ui() -> gr.Blocks:
                 for r in lb.ranked_rows(results)}
 
     with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
-        gr.Markdown(f"# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
-                    f"### Same **${lb.RANKED_BUDGET}** — who finds the most bugs?\n"
-                    f"pinned @ `{_PINNED_TAG}` · data updated {_DATA_UPDATED}")
+        gr.Markdown(
+            "# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
+            f"### Same **${lb.RANKED_BUDGET}** for every model — who finds the most bugs?\n"
+            f"<sub>tasks pinned @ `{_PINNED_TAG}` · one rule = one bug, every bug re-verified by "
+            f"`pred` · data updated {_DATA_UPDATED}</sub>"
+        )
 
         with gr.Tab("🏆 Leaderboard"):
             if banner:
@@ -121,28 +125,32 @@ def build_ui() -> gr.Blocks:
             Leaderboard(
                 value=table,
                 search_columns=["Model"],
-                filter_columns=[ColumnFilter("Bugs", type="slider", label="Min bugs found")],
                 select_columns=SelectColumns(
                     default_selection=list(table.columns),
                     cant_deselect=["Rank", "Model", "Bugs"],
-                    label="Columns",
+                    label="Show columns",
                 ),
             )
-            gr.ScatterPlot(
-                value=scatter, x="Tokens (K)", y="Bugs", color="Model",
-                title="Bugs vs. tokens — efficiency frontier (up-and-left is better)",
-                tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
+            gr.Markdown(
+                "<sub>**Budget reach** = how far the $20 got (rules reached / total). "
+                "**Bugs/Ktok** = bugs per 1000 tokens.</sub>"
             )
-            with gr.Accordion("🔎 Inspect a model's confirmed bugs", open=False):
-                model_pick = gr.Dropdown(
-                    choices=list(cert_map), label="Model", value=None,
-                )
-                detail = gr.Markdown("*Pick a model to see its confirmed bugs.*")
-                model_pick.change(
-                    lambda m: _cert_markdown(m, cert_map.get(m, [])) if m else
-                    "*Pick a model to see its confirmed bugs.*",
-                    inputs=model_pick, outputs=detail,
-                )
+            with gr.Row():
+                with gr.Column(scale=3):
+                    gr.ScatterPlot(
+                        value=scatter, x="Tokens (K)", y="Bugs", color="Model",
+                        title="Bugs vs. tokens (up-and-left is better)",
+                        tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
+                    )
+                with gr.Column(scale=2):
+                    gr.Markdown("#### 🔎 Inspect a model's bugs")
+                    model_pick = gr.Dropdown(choices=list(cert_map), label="Model", value=None)
+                    detail = gr.Markdown("*Pick a model to see its confirmed bugs.*")
+                    model_pick.change(
+                        lambda m: _cert_markdown(m, cert_map.get(m, [])) if m else
+                        "*Pick a model to see its confirmed bugs.*",
+                        inputs=model_pick, outputs=detail,
+                    )
 
         with gr.Tab(f"📋 Tasks ({len(tasks_df)})"):
             if tasks_err:
