@@ -32,7 +32,16 @@ def _leaderboard_view(results: list[dict], total: int):
     })
     banner = ("⚠️ Showing placeholder data — real $20 runs pending."
               if lb.has_placeholder(results) else "")
-    return display, banner
+    return display, banner, df
+
+
+def _scatter_df(frame: pd.DataFrame) -> pd.DataFrame:
+    """Points for the bugs-vs-tokens efficiency scatter."""
+    return pd.DataFrame({
+        "Tokens (K)": frame["total_tokens_k"],
+        "Bugs": frame["bugs_found"],
+        "Model": frame["model"].str.replace(r"^.*/", "", regex=True),
+    })
 
 
 def _tasks_state():
@@ -83,7 +92,8 @@ def build_ui() -> gr.Blocks:
 
     results = lb.load_results(_RESULTS_PATH)
     _ranked = lb.ranked_rows(results)
-    table, banner = _leaderboard_view(results, total)
+    table, banner, frame = _leaderboard_view(results, total)
+    scatter = _scatter_df(frame)
 
     with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
         gr.Markdown(f"# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
@@ -106,6 +116,12 @@ def build_ui() -> gr.Blocks:
                 return _cert_markdown(r.get("model", "?"), r.get("bug_certificates", []))
 
             lb_table.select(_on_select, inputs=None, outputs=detail_panel)
+
+            gr.ScatterPlot(
+                value=scatter, x="Tokens (K)", y="Bugs", color="Model",
+                title="Bugs vs. tokens — efficiency frontier (up-and-left is better)",
+                tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
+            )
 
         with gr.Tab(f"📋 Tasks ({len(tasks_df)})"):
             if tasks_err:
