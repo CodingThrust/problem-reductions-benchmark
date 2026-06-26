@@ -84,12 +84,8 @@ def load_tasks(repo_id: str = DATASET_REPO, token: str | None = None,
         from huggingface_hub import hf_hub_download
         path = hf_hub_download(repo_id=repo_id, filename=TASKS_FILE,
                                repo_type="dataset", token=token)
-    rows = _read_jsonl(path)
-    df = pd.DataFrame(rows)
-    for col in _TASK_COLUMNS:
-        if col not in df.columns:
-            df[col] = None
-    return df[_TASK_COLUMNS]
+    df = pd.DataFrame(_read_jsonl(path))
+    return df.reindex(columns=_TASK_COLUMNS)  # selects, orders, fills any missing column
 
 
 def filter_tasks(df: pd.DataFrame, source: str | None = None,

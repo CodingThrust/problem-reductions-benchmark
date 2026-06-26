@@ -53,9 +53,9 @@ def build_space(out_dir: Path) -> list[str]:
     # Flatten the leaderboard to the bundle root: it fetches "../results/index.json"
     # from leaderboard/, but at root it must fetch "results/index.json".
     html = leaderboard.read_text(encoding="utf-8")
+    if "../results/" not in html:
+        raise ValueError("leaderboard HTML has no '../results/' fetch path to rewrite — path changed?")
     flattened = html.replace("../results/", "results/")
-    if "../results/" in flattened:
-        raise ValueError("failed to rewrite all ../results/ fetch paths in leaderboard HTML")
 
     if out_dir.exists():
         shutil.rmtree(out_dir)

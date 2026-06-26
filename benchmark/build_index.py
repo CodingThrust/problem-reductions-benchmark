@@ -38,9 +38,10 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
                 continue
 
         # Per-bug certificate list for the leaderboard drilldown
+        results = data.get("results", [])
         safe_model = data["model"].replace("/", "_").replace(":", "_")
         bug_certs = []
-        for r in data.get("results", []):
+        for r in results:
             if r.get("result") != "bug_found" or not r.get("certificate"):
                 continue
             rule = r["rule"]
@@ -58,7 +59,6 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
         # Recompute the count from the per-rule results (one rule = one bug) rather
         # than trusting the self-reported bugs_found field — this is the anti-inflation
         # guard for open submissions.
-        results = data.get("results", [])
         bugs_found = count_bugs(results)
         tokens_k = data["total_tokens_k"]
         cost = data["total_cost_usd"]
@@ -72,8 +72,8 @@ def build_index(results_dir: Path, schema_path: Path | None = None) -> list[dict
             "efficiency_bugs_per_ktok": round(bugs_found / tokens_k, 4) if tokens_k else 0,
             "efficiency_bugs_per_dollar": round(bugs_found / cost, 4) if cost else 0,
             "rules_tested": data["rules_tested"],
-            "error_count": sum(1 for r in data.get("results", []) if str(r.get("result", "")).startswith("error:")),
-            "skip_count": sum(1 for r in data.get("results", []) if r.get("result") == "skipped_budget"),
+            "error_count": sum(1 for r in results if str(r.get("result", "")).startswith("error:")),
+            "skip_count": sum(1 for r in results if r.get("result") == "skipped_budget"),
             "results_file": path.name,
             "bug_certificates": bug_certs,
         }

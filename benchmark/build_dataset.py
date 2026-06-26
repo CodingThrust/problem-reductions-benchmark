@@ -24,7 +24,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Non-rule files in src/rules/ (helpers / module glue / test scaffolding), never a task.
+# Non-rule files in src/rules/: helpers / module glue / test scaffolding. These cannot rely
+# on the "implements ReduceTo" check alone — e.g. traits.rs defines the ReductionResult trait
+# and helper files reference it, so they pass the substring check but are not tasks.
 NON_RULE_STEMS = {
     "mod", "traits", "graph_helpers", "analysis", "cost", "registry", "graph",
     "ilp_helpers", "test_helpers",
@@ -172,7 +174,9 @@ def main() -> None:
 
     repo = Path(args.repo_dir).resolve()
     rows = build_dataset(repo)
-    commit, tag = _pin(repo)
+    # rows already carry the pin (build_dataset called _pin); reuse it instead of re-spawning git.
+    commit = rows[0]["library_commit"] if rows else _pin(repo)[0]
+    tag = rows[0]["library_tag"] if rows else _pin(repo)[1]
 
     if args.pred:
         n = _pred_reduction_count(args.pred)

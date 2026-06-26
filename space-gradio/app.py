@@ -20,16 +20,16 @@ def _reach_bar(frac: float, total: int, tested: int) -> str:
 def _leaderboard_view(results: list[dict], total: int):
     df = lb.leaderboard_frame(results, total)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    display = df.assign(
-        Rank=df["rank"].map(lambda r: medals.get(r, str(r))),
-        Model=df["model"].str.replace(r"^.*/", "", regex=True),
-        Bugs=df["bugs_found"],
-        **{"Budget reach": df.apply(
-            lambda r: _reach_bar(r["budget_reach"], total, int(r["rules_tested"])), axis=1)},
-        **{"Spent ($)": df["total_cost_usd"].map(lambda c: f"${c:.2f}")},
-        **{"Tokens (K)": df["total_tokens_k"].round(0).astype(int)},
-        **{"Bugs/Ktok": df["efficiency_bugs_per_ktok"].map(lambda x: f"{x:.4f}")},
-    )[["Rank", "Model", "Bugs", "Budget reach", "Spent ($)", "Tokens (K)", "Bugs/Ktok"]]
+    display = pd.DataFrame({
+        "Rank": df["rank"].map(lambda r: medals.get(r, str(r))),
+        "Model": df["model"].str.replace(r"^.*/", "", regex=True),
+        "Bugs": df["bugs_found"],
+        "Budget reach": df.apply(
+            lambda r: _reach_bar(r["budget_reach"], total, int(r["rules_tested"])), axis=1),
+        "Spent ($)": df["total_cost_usd"].map(lambda c: f"${c:.2f}"),
+        "Tokens (K)": df["total_tokens_k"].round(0).astype(int),
+        "Bugs/Ktok": df["efficiency_bugs_per_ktok"].map(lambda x: f"{x:.4f}"),
+    })
     banner = ("⚠️ Showing placeholder data — real $20 runs pending."
               if lb.has_placeholder(results) else "")
     return display, banner
@@ -47,13 +47,11 @@ def _reshape_tasks(df: pd.DataFrame) -> pd.DataFrame:
     """Reshape raw task df into the tidied display columns for the Tasks tab."""
     if df.empty:
         return pd.DataFrame(columns=["Rule", "Source → Target", "Summary", "Overhead (vars)"])
-    overhead = df["overhead_num_vars"] if "overhead_num_vars" in df.columns else pd.Series(
-        [None] * len(df), index=df.index)
     return pd.DataFrame({
         "Rule": df["rule"].values,
         "Source → Target": (df["source"] + " → " + df["target"]).values,
         "Summary": df["summary"].values,
-        "Overhead (vars)": overhead.values,
+        "Overhead (vars)": df["overhead_num_vars"].values,
     })
 
 
@@ -81,9 +79,8 @@ def _cert_markdown(model_name: str, certs: list[dict]) -> str:
 
 def build_ui() -> gr.Blocks:
     tasks_df, tasks_err = _tasks_state()
-    total = (lb.TOTAL_TASKS_DEFAULT
-             if (tasks_err or len(tasks_df) == 0)
-             else len(tasks_df))
+    # tasks_err always comes with an empty df, so .empty covers both failure and zero-rows.
+    total = lb.TOTAL_TASKS_DEFAULT if tasks_df.empty else len(tasks_df)
 
     results = lb.load_results(_RESULTS_PATH)
     _ranked = lb.ranked_rows(results)

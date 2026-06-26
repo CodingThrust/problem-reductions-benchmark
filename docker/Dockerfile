@@ -16,12 +16,13 @@ ARG PR_REF=v0.6.0
 
 # ---- Stage 1: compile pred from the pinned problem-reductions tag ----
 FROM rust:1-slim-bookworm AS pred-build
-ARG PR_REF
-# git + ca-certificates to clone; build-essential (g++/make) + cmake to compile
-# the bundled HiGHS C++ solver; clang/libclang for bindgen's FFI generation.
+# Toolchain layer is independent of the ref — keep it before ARG so a ref bump
+# reuses the cached apt install. git + ca-certificates to clone; build-essential
+# (g++/make) + cmake for the bundled HiGHS C++ solver; clang/libclang for bindgen.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git ca-certificates build-essential cmake clang libclang-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
+ARG PR_REF
 WORKDIR /src
 RUN git clone --depth 1 --branch "${PR_REF}" \
     https://github.com/CodingThrust/problem-reductions.git .
@@ -37,15 +38,15 @@ RUN CARGO_PROFILE_RELEASE_LTO=off \
 
 # ---- Stage 2: runtime — pred + the stdlib-only verifier ----
 FROM python:3.12-slim-bookworm AS runtime
+# Runtime libs pred may dynamically link (HiGHS uses OpenMP / libstdc++) — ref-independent,
+# so keep before ARG to preserve the cache across ref bumps.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 ARG PR_REF
 LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
       org.opencontainers.image.description="pred (problem-reductions ${PR_REF}) + zero-trust certificate verifier" \
       org.opencontainers.image.licenses="MIT" \
       problem_reductions_ref="${PR_REF}"
-
-# Runtime libs pred may dynamically link (HiGHS solver uses OpenMP / libstdc++).
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pred-build /src/target/release/pred /usr/local/bin/pred
 ENV PRED_BINARY=pred PYTHONUNBUFFERED=1
