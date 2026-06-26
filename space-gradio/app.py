@@ -22,6 +22,21 @@ _CITATION = """@misc{TODO_citation_key,
 
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
 
+# gradio_leaderboard renders its search + column controls as big bordered boxes that
+# only fill the left half and shove the table below the fold. Flatten them into a thin,
+# full-width strip so the table + chart sit near the top.
+_CSS = """
+#lb-board { gap: 6px !important; }
+#lb-board .block, #lb-board .form {
+  border: none !important; box-shadow: none !important;
+  background: transparent !important; padding: 2px 0 !important;
+  max-width: 100% !important;
+}
+#lb-board .wrap { max-width: 100% !important; }
+#lb-board textarea, #lb-board input[type="text"] { min-height: 36px !important; }
+#lb-board label span { font-size: 12px !important; margin-bottom: 2px !important; }
+"""
+
 
 def _short(model: str) -> str:
     return model.split("/")[-1]
@@ -111,7 +126,7 @@ def build_ui() -> gr.Blocks:
     cert_map = {_short(r["model"]): r.get("bug_certificates", [])
                 for r in lb.ranked_rows(results)}
 
-    with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
+    with gr.Blocks(theme=THEME, css=_CSS, title="Problem-Reductions Bug-Finding Benchmark") as ui:
         gr.Markdown(
             "# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
             f"### Same **${lb.RANKED_BUDGET}** for every model — who finds the most bugs?\n"
@@ -124,6 +139,7 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown(f"**{banner}**")
             Leaderboard(
                 value=table,
+                elem_id="lb-board",
                 search_columns=["Model"],
                 select_columns=SelectColumns(
                     default_selection=list(table.columns),
