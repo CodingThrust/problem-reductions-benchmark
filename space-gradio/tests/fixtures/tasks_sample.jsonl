@@ -1,0 +1,3 @@
+{"rule": "bmf_ilp", "source": "BMF", "target": "ILP<bool>", "summary": "Reduction from BMF to ILP.", "overhead_num_vars": "rows*rank", "overhead_num_constraints": "3*rows", "rule_source": "//! ...", "library_tag": "v0.6.0"}
+{"rule": "sat_ksat", "source": "Satisfiability", "target": "KSatisfiability<K>", "summary": "SAT to k-SAT.", "overhead_num_vars": "n", "overhead_num_constraints": "m", "rule_source": "//! ...", "library_tag": "v0.6.0"}
+{"rule": "spinglass_maxcut", "source": "SpinGlass", "target": "MaxCut", "summary": "SpinGlass to MaxCut.", "overhead_num_vars": "v", "overhead_num_constraints": "e", "rule_source": "//! ...", "library_tag": "v0.6.0"}

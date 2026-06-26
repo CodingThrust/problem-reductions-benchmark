@@ -56,3 +56,48 @@ def leaderboard_frame(results: list[dict], total: int) -> pd.DataFrame:
             "efficiency_bugs_per_ktok": r.get("efficiency_bugs_per_ktok", 0.0),
         })
     return pd.DataFrame(rows, columns=_FRAME_COLUMNS)
+
+
+DATASET_REPO = "isPANN/problem-reductions-benchmarks"
+TASKS_FILE = "problem_reductions_bugs.jsonl"
+
+_TASK_COLUMNS = ["rule", "source", "target", "summary",
+                 "overhead_num_vars", "overhead_num_constraints"]
+
+
+def _read_jsonl(path: str) -> list[dict]:
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def load_tasks(repo_id: str = DATASET_REPO, token: str | None = None,
+               local_file: str | None = None) -> pd.DataFrame:
+    """Load the 253-task set. Prefer a local file (dev/tests); else pull from the HF dataset."""
+    import os
+    path = local_file or os.environ.get("TASKS_FILE")
+    if not path:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(repo_id=repo_id, filename=TASKS_FILE,
+                               repo_type="dataset", token=token)
+    rows = _read_jsonl(path)
+    df = pd.DataFrame(rows)
+    for col in _TASK_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    return df[_TASK_COLUMNS]
+
+
+def filter_tasks(df: pd.DataFrame, source: str | None = None,
+                 target: str | None = None, query: str | None = None) -> pd.DataFrame:
+    out = df
+    if source:
+        out = out[out["source"].str.contains(source, case=False, na=False)]
+    if target:
+        out = out[out["target"].str.contains(target, case=False, na=False)]
+    if query:
+        mask = out.apply(
+            lambda row: query.lower() in " ".join(str(v) for v in row.values).lower(),
+            axis=1,
+        )
+        out = out[mask]
+    return out

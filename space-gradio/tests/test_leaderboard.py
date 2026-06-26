@@ -54,3 +54,27 @@ def test_load_results_reads_bundled_file():
     rows = lb.load_results(str(path))
     assert len(rows) >= 1
     assert all("model" in r for r in rows)
+
+
+def _tasks_fixture():
+    return str(Path(__file__).parent / "fixtures" / "tasks_sample.jsonl")
+
+def test_load_tasks_from_local_file():
+    df = lb.load_tasks(local_file=_tasks_fixture())
+    assert len(df) == 3
+    assert set(["rule", "source", "target", "summary"]).issubset(df.columns)
+    assert "bmf_ilp" in list(df["rule"])
+
+def test_filter_tasks_by_source():
+    df = lb.load_tasks(local_file=_tasks_fixture())
+    out = lb.filter_tasks(df, source="BMF")
+    assert list(out["rule"]) == ["bmf_ilp"]
+
+def test_filter_tasks_by_query_matches_any_text():
+    df = lb.load_tasks(local_file=_tasks_fixture())
+    out = lb.filter_tasks(df, query="maxcut")   # case-insensitive, matches target/summary
+    assert list(out["rule"]) == ["spinglass_maxcut"]
+
+def test_filter_tasks_empty_filters_returns_all():
+    df = lb.load_tasks(local_file=_tasks_fixture())
+    assert len(lb.filter_tasks(df)) == 3
