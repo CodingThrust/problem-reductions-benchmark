@@ -1,0 +1,12 @@
+# Generated HF Space bundle (rebuild with `make space`)
+space/site/
+
+# Generated HF Dataset bundle (rebuild with `build_dataset.py`)
+dataset/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/

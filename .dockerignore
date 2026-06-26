@@ -1,0 +1,11 @@
+.git
+.github
+__pycache__
+*.pyc
+space/
+dataset/
+results/trajectories/
+leaderboard/
+*.md
+.gitignore
+.worktrees

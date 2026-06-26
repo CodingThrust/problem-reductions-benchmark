@@ -19,7 +19,7 @@ BUDGET   ?= 2.0
 PER_RULE ?= 0.5
 RESULTS  ?= results/results_mini.json
 
-.PHONY: test test-unit verify-calibration verify-judgment validate-results build-index demo audit install-deps help
+.PHONY: test test-unit verify-calibration verify-judgment validate-results build-index space space-serve demo audit install-deps help
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -29,7 +29,7 @@ test:
 test-unit:
 	pytest -v -m "not integration"
 
-## Test verifier robust equality and novelty filter (issue #5).
+## Test verifier robust equality and accept/reject judgment.
 verify-judgment:
 	pytest -v -m "judgment"
 
@@ -46,6 +46,14 @@ validate-results:
 ## Rebuild results/index.json from whatever is in results/*.json.
 build-index:
 	python -m benchmark.build_index --results-dir results
+
+## Rebuild the index, then assemble the static HF Space bundle into space/site/.
+space: build-index
+	python -m benchmark.build_space
+
+## Serve the built Space bundle locally for preview (Ctrl-C to stop).
+space-serve:
+	python -m http.server --directory space/site 8000
 
 ## Run a tiny real bug-hunting session (2 rules, small budget) then rebuild the index.
 ## Requires ANTHROPIC_API_KEY and REPO_DIR to be set.
@@ -75,6 +83,8 @@ help:
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
 	@echo "  validate-results    Schema-check results/*.json"
 	@echo "  build-index         Rebuild results/index.json"
+	@echo "  space               Build the static HF Space bundle (space/site/)"
+	@echo "  space-serve         Preview the Space bundle at localhost:8000"
 	@echo "  demo                Run a tiny real session + rebuild index"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
