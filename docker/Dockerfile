@@ -62,3 +62,36 @@ RUN pred --version
 #   docker run --rm -v "$PWD:/w" problem-reductions-benchmark:v0.6.0 /w/cert.json
 ENTRYPOINT ["python", "-m", "benchmark.verify"]
 CMD ["--calibrate"]
+
+# ---- Stage 3: runner — the budgeted bug-finding agent → submission.json ----
+# Adds the agent stack (mini-swe-agent + litellm) and the problem-reductions *source*
+# the agent reads (rule files), on top of the runtime image (pred + benchmark code).
+#
+# Build:   docker build -f docker/Dockerfile --target runner -t problem-reductions-runner:v0.6.0 .
+# Run (API key passed at run time, never baked in):
+#   docker run --rm \
+#     -e MODEL_NAME=anthropic/claude-sonnet-4-6 \
+#     -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+#     -e BUDGET_USD=20 \
+#     -v "$PWD/out:/out" \
+#     problem-reductions-runner:v0.6.0
+#   # → ./out/submission.json
+FROM runtime AS runner
+ARG PR_REF
+# Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.
+RUN pip install --no-cache-dir -r /app/benchmark/requirements.txt
+# The agent reads rule sources from REPO_DIR/src/rules — copy just the source tree
+# (not target/) from the build stage. pred itself is a self-contained binary on PATH.
+COPY --from=pred-build /src/src /app/pr-src/src
+COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
+RUN mkdir -p /out
+ENV REPO_DIR=/app/pr-src \
+    BUDGET_USD=20 \
+    PER_RULE_BUDGET=0.5 \
+    OUTPUT=/out/submission.json
+VOLUME ["/out"]
+# Smoke-check the runner wiring at build time (no API/pred calls).
+RUN python -m benchmark.run_submission --fake --model fake/smoke --max-rules 1 \
+    --output /tmp/smoke.json && rm -f /tmp/smoke.json
+ENTRYPOINT ["python", "-m", "benchmark.run_submission"]
+CMD []

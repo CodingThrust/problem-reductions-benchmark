@@ -18,8 +18,11 @@ MODEL    ?= anthropic/claude-sonnet-4-6
 BUDGET   ?= 2.0
 PER_RULE ?= 0.5
 RESULTS  ?= results/results_mini.json
+IMAGE    ?= problem-reductions-runner:v0.6.0
+SUBS_DIR ?= submissions
+SCORED   ?= results/scored
 
-.PHONY: test test-unit verify-calibration verify-judgment validate-results build-index space space-serve demo audit install-deps help
+.PHONY: test test-unit verify-calibration verify-judgment validate-results build-index space space-serve demo audit install-deps help runner-build runner-smoke submission score-local
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -68,6 +71,33 @@ demo:
 	@echo ""
 	@echo "Demo complete. Open leaderboard/index.html (served from repo root) to view results."
 
+## Build the dockerized submission runner image (compiles pred + bundles the agent).
+runner-build:
+	docker build -f docker/Dockerfile --target runner -t $(IMAGE) .
+
+## Smoke-test the runner wiring with FakeRunner — no API key, no pred needed.
+runner-smoke:
+	python -m benchmark.run_submission --fake --model fake/smoke \
+	  --repo-dir $(REPO_DIR) --max-rules 2 --output /tmp/submission.smoke.json
+	@echo "Wrote /tmp/submission.smoke.json"
+
+## Run the real budgeted runner via Docker → ./out/submission.json.
+## Requires ANTHROPIC_API_KEY (or the key matching MODEL) in the environment.
+submission:
+	mkdir -p out
+	docker run --rm \
+	  -e MODEL_NAME=$(MODEL) \
+	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	  -e BUDGET_USD=20 \
+	  -v "$(PWD)/out:/out" \
+	  $(IMAGE)
+	@echo "Submission → ./out/submission.json"
+
+## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
+## Writes scored results + leaderboard.json into SCORED.
+score-local:
+	python -m benchmark.backend_score --local $(SUBS_DIR) $(SCORED)
+
 ## Audit pred CLI capabilities against the pinned library commit.
 audit:
 	python -m benchmark.pred_audit $(REPO_DIR)
@@ -86,6 +116,10 @@ help:
 	@echo "  space               Build the static HF Space bundle (space/site/)"
 	@echo "  space-serve         Preview the Space bundle at localhost:8000"
 	@echo "  demo                Run a tiny real session + rebuild index"
+	@echo "  runner-build        Build the dockerized submission runner image"
+	@echo "  runner-smoke        Smoke-test the runner (FakeRunner, no API)"
+	@echo "  submission          Run the real runner via Docker → out/submission.json"
+	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
 	@echo ""

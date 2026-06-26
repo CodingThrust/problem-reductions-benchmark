@@ -2,14 +2,22 @@
 import datetime
 import os
 
+import json
+
 import gradio as gr
 import pandas as pd
 from gradio_leaderboard import Leaderboard, SelectColumns
 
 import leaderboard as lb
+import submit as sub
 
 _RESULTS_PATH = os.path.join(os.path.dirname(__file__), "data", "results.json")
 _PINNED_TAG = "v0.6.0"
+
+# Submissions dataset + write token come from Space secrets. Without a token the Submit
+# tab degrades to the manual hf-upload / PR fallback.
+_SUBMISSIONS_DATASET = os.environ.get("SUBMISSIONS_DATASET", "isPANN/problem-reductions-submissions")
+_HF_WRITE_TOKEN = os.environ.get("HF_TOKEN")
 _DATA_UPDATED = datetime.date.fromtimestamp(os.path.getmtime(_RESULTS_PATH)).isoformat()
 
 # TODO: replace placeholder citation once the benchmark has a canonical reference.
@@ -107,6 +115,71 @@ def _cert_markdown(model_name: str, certs: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_MANUAL_FALLBACK = (
+    "**Manual submission (no auto-queue configured).** Upload your `submission.json` to "
+    f"the submissions dataset and the backend will pick it up:\n\n"
+    "```bash\n"
+    f"hf upload {_SUBMISSIONS_DATASET} submission.json \\\n"
+    "  submissions/<your-handle>/<model>.json --repo-type dataset\n"
+    "```\n"
+    "…or open a PR adding it to the GitHub repo. Every certificate is re-verified by "
+    "`pred` before it counts."
+)
+
+
+def _load_upload(file_path):
+    """Read an uploaded submission file. Returns (data | None, error_markdown)."""
+    if not file_path:
+        return None, "⚠️ Upload a `submission.json` first."
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            return json.load(f), ""
+    except (OSError, json.JSONDecodeError) as e:
+        return None, f"❌ Could not read the file as JSON: {e}"
+
+
+def _summary_md(summary: dict) -> str:
+    return (
+        f"- **Model:** `{summary.get('model')}`\n"
+        f"- **Budget cap:** ${summary.get('budget_cap')}\n"
+        f"- **Rules attempted:** {summary.get('rules_tested')}\n"
+        f"- **Spend:** ${summary.get('total_cost_usd')}\n"
+        f"- **Claimed distinct-rule bugs:** {summary.get('claimed_distinct_bugs')} "
+        f"(from {summary.get('certificate_rows')} certificate row(s))\n\n"
+        "<sub>These are the model's *claims*. The backend re-verifies every certificate "
+        "with `pred`; only confirmed, distinct-rule bugs are ranked.</sub>"
+    )
+
+
+def _validate_view(file_path) -> str:
+    data, err = _load_upload(file_path)
+    if err:
+        return err
+    ok, errors, summary = sub.validate_submission(data)
+    if not ok:
+        return "❌ **Not ready to submit:**\n" + "\n".join(f"- {e}" for e in errors)
+    return "✅ **Looks valid.**\n\n" + _summary_md(summary)
+
+
+def _submit_view(file_path, contact) -> str:
+    data, err = _load_upload(file_path)
+    if err:
+        return err
+    ok, errors, summary = sub.validate_submission(data)
+    if not ok:
+        return "❌ **Cannot submit — fix these first:**\n" + "\n".join(f"- {e}" for e in errors)
+    try:
+        path = sub.push_submission(data, _SUBMISSIONS_DATASET, _HF_WRITE_TOKEN,
+                                   submitted_by=(contact or None))
+    except RuntimeError as e:
+        return f"ℹ️ {e}\n\n{_MANUAL_FALLBACK}"
+    except Exception as e:  # network/permission — show the fallback so the user isn't stuck
+        return f"❌ Upload failed: {e}\n\n{_MANUAL_FALLBACK}"
+    return (f"✅ **Submitted as PENDING** → `{_SUBMISSIONS_DATASET}/{path}`.\n\n"
+            "The backend will re-verify every certificate with `pred` and post the "
+            "confirmed score to the leaderboard.")
+
+
 def _tasks_state():
     try:
         return lb.load_tasks(), ""
@@ -179,6 +252,34 @@ def build_ui() -> gr.Blocks:
                     ),
                 )
 
+        with gr.Tab("🚀 Submit"):
+            gr.Markdown(
+                "### Submit a run\n"
+                f"Run the dockerized runner at the fixed **${lb.RANKED_BUDGET}** budget "
+                f"against problem-reductions `{_PINNED_TAG}`, then upload the "
+                "`submission.json` it produces.\n\n"
+                "```bash\n"
+                "docker run --rm \\\n"
+                "  -e MODEL_NAME=anthropic/claude-sonnet-4-6 \\\n"
+                "  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \\\n"
+                f"  -e BUDGET_USD={lb.RANKED_BUDGET} \\\n"
+                '  -v "$PWD/out:/out" \\\n'
+                "  problem-reductions-runner:v0.6.0\n"
+                "# → ./out/submission.json\n"
+                "```\n"
+                "Self-reported counts are advisory — **every certificate is re-verified "
+                "by `pred`** on the backend before it counts."
+            )
+            up = gr.File(label="submission.json", file_types=[".json"], type="filepath")
+            contact = gr.Textbox(label="Contact / handle (optional)",
+                                 placeholder="HF username or email — kept for attribution")
+            with gr.Row():
+                validate_btn = gr.Button("Validate", variant="secondary")
+                submit_btn = gr.Button("Submit", variant="primary")
+            submit_out = gr.Markdown()
+            validate_btn.click(_validate_view, inputs=up, outputs=submit_out)
+            submit_btn.click(_submit_view, inputs=[up, contact], outputs=submit_out)
+
         with gr.Tab("ℹ️ About"):
             gr.Markdown(
                 f"**Metric.** Every model gets the same **${lb.RANKED_BUDGET}** API budget; "
@@ -187,10 +288,11 @@ def build_ui() -> gr.Blocks:
                 "how many of the tasks the run reached before the money ran out.\n\n"
                 "**Zero trust.** Every claimed bug is independently re-derived with `pred` "
                 f"(problem-reductions `{_PINNED_TAG}`); the model's claim is never trusted.\n\n"
-                "**Submit a model.** Run the benchmark at the fixed **$20** budget against "
-                f"problem-reductions `{_PINNED_TAG}`, then open a PR adding your `results.json` "
-                "to the GitHub repo — every certificate is re-verified by `pred` before it "
-                "counts.\n\n"
+                "**Submit a model.** Run the dockerized runner at the fixed **$20** budget "
+                f"against problem-reductions `{_PINNED_TAG}`, then upload the `submission.json` "
+                "on the **🚀 Submit** tab. The backend re-verifies every certificate with "
+                "`pred` and posts the confirmed, distinct-rule score to the leaderboard — "
+                "your self-reported count is never trusted.\n\n"
                 "**Links.** "
                 "[Task dataset](https://huggingface.co/datasets/isPANN/problem-reductions-benchmarks) · "
                 "[GitHub](https://github.com/Ferrari-72/problem-reductions-benchmark)"
