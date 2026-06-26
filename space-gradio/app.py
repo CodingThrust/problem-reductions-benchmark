@@ -1,15 +1,29 @@
 """Gradio leaderboard — fixed-$20 bug-finding race. Thin view over leaderboard.py."""
+import datetime
 import os
 
 import gradio as gr
 import pandas as pd
+from gradio_leaderboard import ColumnFilter, Leaderboard, SelectColumns
 
 import leaderboard as lb
 
 _RESULTS_PATH = os.path.join(os.path.dirname(__file__), "data", "results.json")
 _PINNED_TAG = "v0.6.0"
+_DATA_UPDATED = datetime.date.fromtimestamp(os.path.getmtime(_RESULTS_PATH)).isoformat()
+
+_CITATION = """@misc{problem_reductions_benchmark,
+  title  = {Problem-Reductions Bug-Finding Benchmark},
+  author = {Pan, Xiwei},
+  year   = {2026},
+  url    = {https://huggingface.co/spaces/isPANN/problem-reductions-benchmarks}
+}"""
 
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
+
+
+def _short(model: str) -> str:
+    return model.split("/")[-1]
 
 
 def _reach_bar(frac: float, total: int, tested: int) -> str:
@@ -22,7 +36,7 @@ def _leaderboard_view(results: list[dict], total: int):
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     display = pd.DataFrame({
         "Rank": df["rank"].map(lambda r: medals.get(r, str(r))),
-        "Model": df["model"].str.replace(r"^.*/", "", regex=True),
+        "Model": df["model"].map(_short),
         "Bugs": df["bugs_found"],
         "Budget reach": df.apply(
             lambda r: _reach_bar(r["budget_reach"], total, int(r["rules_tested"])), axis=1),
@@ -40,16 +54,8 @@ def _scatter_df(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({
         "Tokens (K)": frame["total_tokens_k"],
         "Bugs": frame["bugs_found"],
-        "Model": frame["model"].str.replace(r"^.*/", "", regex=True),
+        "Model": frame["model"].map(_short),
     })
-
-
-def _tasks_state():
-    try:
-        return lb.load_tasks(), ""
-    except Exception as e:  # network/token failure — Tasks tab degrades gracefully
-        return pd.DataFrame(columns=["rule", "source", "target", "summary"]), \
-            f"⚠️ Could not load the task dataset: {e}"
 
 
 def _reshape_tasks(df: pd.DataFrame) -> pd.DataFrame:
@@ -85,56 +91,71 @@ def _cert_markdown(model_name: str, certs: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _tasks_state():
+    try:
+        return lb.load_tasks(), ""
+    except Exception as e:  # network/token failure — Tasks tab degrades gracefully
+        return pd.DataFrame(columns=["rule", "source", "target", "summary"]), \
+            f"⚠️ Could not load the task dataset: {e}"
+
+
 def build_ui() -> gr.Blocks:
     tasks_df, tasks_err = _tasks_state()
     # tasks_err always comes with an empty df, so .empty covers both failure and zero-rows.
     total = lb.TOTAL_TASKS_DEFAULT if tasks_df.empty else len(tasks_df)
 
     results = lb.load_results(_RESULTS_PATH)
-    _ranked = lb.ranked_rows(results)
     table, banner, frame = _leaderboard_view(results, total)
     scatter = _scatter_df(frame)
+    cert_map = {_short(r["model"]): r.get("bug_certificates", [])
+                for r in lb.ranked_rows(results)}
 
     with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
         gr.Markdown(f"# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
-                    f"### Same **${lb.RANKED_BUDGET}** — who finds the most bugs? "
-                    f"· pinned @ `{_PINNED_TAG}`")
+                    f"### Same **${lb.RANKED_BUDGET}** — who finds the most bugs?\n"
+                    f"pinned @ `{_PINNED_TAG}` · data updated {_DATA_UPDATED}")
 
         with gr.Tab("🏆 Leaderboard"):
             if banner:
                 gr.Markdown(f"**{banner}**")
-            lb_table = gr.Dataframe(value=table, interactive=False, wrap=True)
-            detail_panel = gr.Markdown(
-                "*Select a row to see that model's confirmed bugs.*"
+            Leaderboard(
+                value=table,
+                search_columns=["Model"],
+                filter_columns=[ColumnFilter("Bugs", type="slider", label="Min bugs found")],
+                select_columns=SelectColumns(
+                    default_selection=list(table.columns),
+                    cant_deselect=["Rank", "Model", "Bugs"],
+                    label="Columns",
+                ),
             )
-
-            def _on_select(evt: gr.SelectData):
-                idx = evt.index[0]
-                if idx < 0 or idx >= len(_ranked):
-                    return "*Row index out of range.*"
-                r = _ranked[idx]
-                return _cert_markdown(r.get("model", "?"), r.get("bug_certificates", []))
-
-            lb_table.select(_on_select, inputs=None, outputs=detail_panel)
-
             gr.ScatterPlot(
                 value=scatter, x="Tokens (K)", y="Bugs", color="Model",
                 title="Bugs vs. tokens — efficiency frontier (up-and-left is better)",
                 tooltip=["Model", "Bugs", "Tokens (K)"], height=340,
             )
+            with gr.Accordion("🔎 Inspect a model's confirmed bugs", open=False):
+                model_pick = gr.Dropdown(
+                    choices=list(cert_map), label="Model", value=None,
+                )
+                detail = gr.Markdown("*Pick a model to see its confirmed bugs.*")
+                model_pick.change(
+                    lambda m: _cert_markdown(m, cert_map.get(m, [])) if m else
+                    "*Pick a model to see its confirmed bugs.*",
+                    inputs=model_pick, outputs=detail,
+                )
 
         with gr.Tab(f"📋 Tasks ({len(tasks_df)})"):
             if tasks_err:
                 gr.Markdown(f"**{tasks_err}**")
             else:
-                query = gr.Textbox(label="Search tasks", placeholder="e.g. ILP, MaxCut, clique")
-                tasks_view = gr.Dataframe(
-                    value=_reshape_tasks(tasks_df), interactive=False, wrap=True
-                )
-                query.change(
-                    lambda q: _reshape_tasks(lb.filter_tasks(tasks_df, query=q or None)),
-                    inputs=query,
-                    outputs=tasks_view,
+                Leaderboard(
+                    value=_reshape_tasks(tasks_df),
+                    search_columns=["Rule", "Source → Target"],
+                    select_columns=SelectColumns(
+                        default_selection=["Rule", "Source → Target", "Overhead (vars)"],
+                        cant_deselect=["Rule", "Source → Target"],
+                        label="Columns",
+                    ),
                 )
 
         with gr.Tab("ℹ️ About"):
@@ -145,10 +166,17 @@ def build_ui() -> gr.Blocks:
                 "how many of the tasks the run reached before the money ran out.\n\n"
                 "**Zero trust.** Every claimed bug is independently re-derived with `pred` "
                 f"(problem-reductions `{_PINNED_TAG}`); the model's claim is never trusted.\n\n"
+                "**Submit a model.** Run the benchmark at the fixed **$20** budget against "
+                f"problem-reductions `{_PINNED_TAG}`, then open a PR adding your `results.json` "
+                "to the GitHub repo — every certificate is re-verified by `pred` before it "
+                "counts.\n\n"
                 "**Links.** "
                 "[Task dataset](https://huggingface.co/datasets/isPANN/problem-reductions-benchmarks) · "
                 "[GitHub](https://github.com/Ferrari-72/problem-reductions-benchmark)"
             )
+            gr.Markdown("**How to cite**")
+            gr.Code(value=_CITATION, language=None, label="BibTeX")
+
     return ui
 
 

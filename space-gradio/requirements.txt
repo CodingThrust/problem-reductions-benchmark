@@ -1,3 +1,4 @@
 # gradio is provided by the Space SDK (sdk_version in README.md), not pinned here
+gradio_leaderboard
 pandas>=2.0
 huggingface_hub>=0.25
