@@ -2,6 +2,7 @@
 import os
 
 import gradio as gr
+import pandas as pd
 
 import leaderboard as lb
 
@@ -16,9 +17,8 @@ def _reach_bar(frac: float, total: int, tested: int) -> str:
     return f"{'▓' * filled}{'░' * (10 - filled)} {tested}/{total}"
 
 
-def _leaderboard_view():
+def _leaderboard_view(total: int):
     results = lb.load_results(_RESULTS_PATH)
-    total = _task_total()
     df = lb.leaderboard_frame(results, total)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     display = df.assign(
@@ -36,25 +36,18 @@ def _leaderboard_view():
     return display, banner
 
 
-def _task_total() -> int:
-    try:
-        return len(lb.load_tasks())
-    except Exception:
-        return lb.TOTAL_TASKS_DEFAULT
-
-
 def _tasks_state():
     try:
         return lb.load_tasks(), ""
     except Exception as e:  # network/token failure — Tasks tab degrades gracefully
-        import pandas as pd
         return pd.DataFrame(columns=["rule", "source", "target", "summary"]), \
             f"⚠️ Could not load the task dataset: {e}"
 
 
 def build_ui() -> gr.Blocks:
-    table, banner = _leaderboard_view()
     tasks_df, tasks_err = _tasks_state()
+    total = len(tasks_df) if not tasks_err else lb.TOTAL_TASKS_DEFAULT
+    table, banner = _leaderboard_view(total)
 
     with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
         gr.Markdown(f"# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
