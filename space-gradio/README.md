@@ -6,6 +6,7 @@ colorTo: purple
 sdk: gradio
 app_file: app.py
 pinned: false
+python_version: "3.10"
 short_description: Fixed-$20 budget bug-finding race over problem-reduction rules
 tags:
 - leaderboard

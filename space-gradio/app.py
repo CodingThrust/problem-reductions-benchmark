@@ -17,8 +17,7 @@ def _reach_bar(frac: float, total: int, tested: int) -> str:
     return f"{'▓' * filled}{'░' * (10 - filled)} {tested}/{total}"
 
 
-def _leaderboard_view(total: int):
-    results = lb.load_results(_RESULTS_PATH)
+def _leaderboard_view(results: list[dict], total: int):
     df = lb.leaderboard_frame(results, total)
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     display = df.assign(
@@ -29,7 +28,7 @@ def _leaderboard_view(total: int):
             lambda r: _reach_bar(r["budget_reach"], total, int(r["rules_tested"])), axis=1)},
         **{"Spent ($)": df["total_cost_usd"].map(lambda c: f"${c:.2f}")},
         **{"Tokens (K)": df["total_tokens_k"].round(0).astype(int)},
-        **{"Bugs/Ktok": df["efficiency_bugs_per_ktok"]},
+        **{"Bugs/Ktok": df["efficiency_bugs_per_ktok"].map(lambda x: f"{x:.4f}")},
     )[["Rank", "Model", "Bugs", "Budget reach", "Spent ($)", "Tokens (K)", "Bugs/Ktok"]]
     banner = ("⚠️ Showing placeholder data — real $20 runs pending."
               if lb.has_placeholder(results) else "")
@@ -44,10 +43,51 @@ def _tasks_state():
             f"⚠️ Could not load the task dataset: {e}"
 
 
+def _reshape_tasks(df: pd.DataFrame) -> pd.DataFrame:
+    """Reshape raw task df into the tidied display columns for the Tasks tab."""
+    if df.empty:
+        return pd.DataFrame(columns=["Rule", "Source → Target", "Summary", "Overhead (vars)"])
+    overhead = df["overhead_num_vars"] if "overhead_num_vars" in df.columns else pd.Series(
+        [None] * len(df), index=df.index)
+    return pd.DataFrame({
+        "Rule": df["rule"].values,
+        "Source → Target": (df["source"] + " → " + df["target"]).values,
+        "Summary": df["summary"].values,
+        "Overhead (vars)": overhead.values,
+    })
+
+
+def _cert_markdown(model_name: str, certs: list[dict]) -> str:
+    """Render bug certificates as markdown for the detail panel."""
+    if not certs:
+        return f"No confirmed bugs for **{model_name}** within the budget."
+    lines = [f"### Confirmed bugs for **{model_name}**\n"]
+    for c in certs:
+        rule = c.get("rule", "?")
+        violation = c.get("violation", "?")
+        note = c.get("note", "")
+        source_type = c.get("source_type", "?")
+        target_type = c.get("target_type", "?")
+        traj = c.get("trajectory_file")
+        entry = (f"- **Rule:** `{rule}` | **Violation:** `{violation}` | "
+                 f"`{source_type} → {target_type}`")
+        if note:
+            entry += f"  \n  Note: {note}"
+        if traj:
+            entry += f"  \n  [Trajectory]({traj})"
+        lines.append(entry)
+    return "\n".join(lines)
+
+
 def build_ui() -> gr.Blocks:
     tasks_df, tasks_err = _tasks_state()
-    total = len(tasks_df) if not tasks_err else lb.TOTAL_TASKS_DEFAULT
-    table, banner = _leaderboard_view(total)
+    total = (lb.TOTAL_TASKS_DEFAULT
+             if (tasks_err or len(tasks_df) == 0)
+             else len(tasks_df))
+
+    results = lb.load_results(_RESULTS_PATH)
+    _ranked = lb.ranked_rows(results)
+    table, banner = _leaderboard_view(results, total)
 
     with gr.Blocks(theme=THEME, title="Problem-Reductions Bug-Finding Benchmark") as ui:
         gr.Markdown(f"# 🐛 Problem-Reductions Bug-Finding Benchmark\n"
@@ -57,16 +97,33 @@ def build_ui() -> gr.Blocks:
         with gr.Tab("🏆 Leaderboard"):
             if banner:
                 gr.Markdown(f"**{banner}**")
-            gr.Dataframe(value=table, interactive=False, wrap=True)
+            lb_table = gr.Dataframe(value=table, interactive=False, wrap=True)
+            detail_panel = gr.Markdown(
+                "*Select a row to see that model's confirmed bugs.*"
+            )
+
+            def _on_select(evt: gr.SelectData):
+                idx = evt.index[0]
+                if idx < 0 or idx >= len(_ranked):
+                    return "*Row index out of range.*"
+                r = _ranked[idx]
+                return _cert_markdown(r.get("model", "?"), r.get("bug_certificates", []))
+
+            lb_table.select(_on_select, inputs=None, outputs=detail_panel)
 
         with gr.Tab(f"📋 Tasks ({len(tasks_df)})"):
             if tasks_err:
                 gr.Markdown(f"**{tasks_err}**")
             else:
                 query = gr.Textbox(label="Search tasks", placeholder="e.g. ILP, MaxCut, clique")
-                tasks_view = gr.Dataframe(value=tasks_df, interactive=False, wrap=True)
-                query.change(lambda q: lb.filter_tasks(tasks_df, query=q or None),
-                             inputs=query, outputs=tasks_view)
+                tasks_view = gr.Dataframe(
+                    value=_reshape_tasks(tasks_df), interactive=False, wrap=True
+                )
+                query.change(
+                    lambda q: _reshape_tasks(lb.filter_tasks(tasks_df, query=q or None)),
+                    inputs=query,
+                    outputs=tasks_view,
+                )
 
         with gr.Tab("ℹ️ About"):
             gr.Markdown(

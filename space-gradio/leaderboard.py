@@ -1,5 +1,6 @@
 """Pure data layer for the leaderboard — NO gradio imports (unit-testable)."""
 import json
+import os
 
 import pandas as pd
 
@@ -35,16 +36,21 @@ def split_results(results: list[dict]) -> tuple[list[dict], list[dict]]:
     return ranked, demo
 
 
-def leaderboard_frame(results: list[dict], total: int) -> pd.DataFrame:
-    """Ranked table: bugs_found desc, tie-break efficiency_bugs_per_ktok desc."""
+def ranked_rows(results: list[dict]) -> list[dict]:
+    """Full ranked result dicts (budget_cap==20 only), sorted bugs_found desc
+    then efficiency_bugs_per_ktok desc.  Includes ``model`` and ``bug_certificates``."""
     ranked, _ = split_results(results)
-    ranked = sorted(
+    return sorted(
         ranked,
         key=lambda r: (r.get("bugs_found", 0), r.get("efficiency_bugs_per_ktok", 0.0)),
         reverse=True,
     )
+
+
+def leaderboard_frame(results: list[dict], total: int) -> pd.DataFrame:
+    """Ranked table: bugs_found desc, tie-break efficiency_bugs_per_ktok desc."""
     rows = []
-    for i, r in enumerate(ranked, start=1):
+    for i, r in enumerate(ranked_rows(results), start=1):
         rows.append({
             "rank": i,
             "model": r.get("model", "?"),
@@ -73,7 +79,6 @@ def _read_jsonl(path: str) -> list[dict]:
 def load_tasks(repo_id: str = DATASET_REPO, token: str | None = None,
                local_file: str | None = None) -> pd.DataFrame:
     """Load the 253-task set. Prefer a local file (dev/tests); else pull from the HF dataset."""
-    import os
     path = local_file or os.environ.get("TASKS_FILE")
     if not path:
         from huggingface_hub import hf_hub_download

@@ -45,6 +45,31 @@ def test_leaderboard_frame_tiebreak_by_ktok():
     df = lb.leaderboard_frame(rows, total=253)
     assert list(df["model"]) == ["hi", "lo"]   # equal bugs → higher ktok first
 
+def test_ranked_rows_order_matches_leaderboard_frame():
+    """ranked_rows order must exactly match leaderboard_frame model column order."""
+    results = _results()
+    rows = lb.ranked_rows(results)
+    df = lb.leaderboard_frame(results, total=253)
+    assert [r["model"] for r in rows] == list(df["model"])
+
+def test_ranked_rows_carries_bug_certificates():
+    certs_a = [{"rule": "r1", "violation": "v1", "note": "n",
+                "source_type": "S", "target_type": "T", "trajectory_file": None}]
+    results = [
+        {"model": "m-a", "budget_cap": 20, "bugs_found": 3, "rules_tested": 30,
+         "total_cost_usd": 19.8, "total_tokens_k": 420.0, "efficiency_bugs_per_ktok": 0.0071,
+         "bug_certificates": certs_a},
+        {"model": "m-b", "budget_cap": 20, "bugs_found": 1, "rules_tested": 10,
+         "total_cost_usd": 5.0, "total_tokens_k": 100.0, "efficiency_bugs_per_ktok": 0.01,
+         "bug_certificates": []},
+    ]
+    rows = lb.ranked_rows(results)
+    # Every returned dict must have bug_certificates key
+    assert all("bug_certificates" in r for r in rows)
+    # Highest bugs comes first; certificates preserved
+    assert rows[0]["model"] == "m-a"
+    assert rows[0]["bug_certificates"] == certs_a
+
 def test_has_placeholder():
     assert lb.has_placeholder([{"placeholder": True}]) is True
     assert lb.has_placeholder([{"model": "x"}]) is False
