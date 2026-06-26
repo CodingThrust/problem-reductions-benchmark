@@ -67,7 +67,7 @@ def leaderboard_frame(results: list[dict], total: int) -> pd.DataFrame:
 DATASET_REPO = "isPANN/problem-reductions-benchmarks"
 TASKS_FILE = "problem_reductions_bugs.jsonl"
 
-_TASK_COLUMNS = ["rule", "source", "target", "summary",
+_TASK_COLUMNS = ["rule", "source", "target",
                  "overhead_num_vars", "overhead_num_constraints"]
 
 

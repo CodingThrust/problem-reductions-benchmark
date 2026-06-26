@@ -87,7 +87,7 @@ def _tasks_fixture():
 def test_load_tasks_from_local_file():
     df = lb.load_tasks(local_file=_tasks_fixture())
     assert len(df) == 3
-    assert set(["rule", "source", "target", "summary"]).issubset(df.columns)
+    assert set(["rule", "source", "target"]).issubset(df.columns)
     assert "bmf_ilp" in list(df["rule"])
 
 def test_filter_tasks_by_source():
@@ -97,7 +97,7 @@ def test_filter_tasks_by_source():
 
 def test_filter_tasks_by_query_matches_any_text():
     df = lb.load_tasks(local_file=_tasks_fixture())
-    out = lb.filter_tasks(df, query="maxcut")   # case-insensitive, matches target/summary
+    out = lb.filter_tasks(df, query="maxcut")   # case-insensitive, matches target
     assert list(out["rule"]) == ["spinglass_maxcut"]
 
 def test_filter_tasks_empty_filters_returns_all():

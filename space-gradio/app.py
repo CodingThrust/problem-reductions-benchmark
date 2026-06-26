@@ -46,11 +46,10 @@ def _tasks_state():
 def _reshape_tasks(df: pd.DataFrame) -> pd.DataFrame:
     """Reshape raw task df into the tidied display columns for the Tasks tab."""
     if df.empty:
-        return pd.DataFrame(columns=["Rule", "Source → Target", "Summary", "Overhead (vars)"])
+        return pd.DataFrame(columns=["Rule", "Source → Target", "Overhead (vars)"])
     return pd.DataFrame({
         "Rule": df["rule"].values,
         "Source → Target": (df["source"] + " → " + df["target"]).values,
-        "Summary": df["summary"].values,
         "Overhead (vars)": df["overhead_num_vars"].values,
     })
 

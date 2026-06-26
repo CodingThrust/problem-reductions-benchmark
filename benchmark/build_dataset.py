@@ -3,7 +3,7 @@ Build the benchmark task dataset from a pinned problem-reductions commit.
 
 Each row is ONE reduction-rule file (the unit the agent is pointed at) frozen as a
 self-contained task: the rule's Rust source snapshot plus the metadata parsed from
-it (source/target problem types, overhead, doc summary) and the library pin. The
+it (source/target problem types, overhead) and the library pin. The
 dataset is the published benchmark — load_dataset() gives the full task set without
 needing the (Rust) problem-reductions repo. Reproduction still needs `pred` built at
 the same pin; that environment is shipped separately (see the dataset card).
@@ -32,7 +32,6 @@ NON_RULE_STEMS = {
     "ilp_helpers", "test_helpers",
 }
 
-_SUMMARY_RE = re.compile(r"^//!\s?(.*)$", re.MULTILINE)
 _SOURCE_RE = re.compile(r"type\s+Source\s*=\s*([^;]+);")
 _TARGET_RE = re.compile(r"type\s+Target\s*=\s*([^;]+);")
 _NUM_VARS_RE = re.compile(r'num_vars\s*=\s*"([^"]*)"')
@@ -56,12 +55,6 @@ def _pin(repo: Path) -> tuple[str, str]:
     return commit, tag
 
 
-def _summary(src: str) -> str:
-    """First doc-comment line, e.g. 'Reduction from BMF to ILP.'"""
-    m = _SUMMARY_RE.search(src)
-    return m.group(1).strip() if m else ""
-
-
 def parse_rule(stem: str, src: str, commit: str, tag: str) -> dict:
     sources = [s.strip() for s in _SOURCE_RE.findall(src)]
     targets = [t.strip() for t in _TARGET_RE.findall(src)]
@@ -73,7 +66,6 @@ def parse_rule(stem: str, src: str, commit: str, tag: str) -> dict:
         "source": sources[0] if sources else None,
         "target": targets[0] if targets else None,
         "reductions": reductions,
-        "summary": _summary(src),
         "overhead_num_vars": nv.group(1) if nv else None,
         "overhead_num_constraints": nc.group(1) if nc else None,
         "rule_source": src,
@@ -149,7 +141,6 @@ source solution).
 | `rule` | task id (rule source filename stem) |
 | `source` / `target` | reduction's source and target problem types |
 | `reductions` | all `(source, target)` impls in the file |
-| `summary` | rule's doc summary |
 | `overhead_num_vars` / `overhead_num_constraints` | declared reduction overhead |
 | `rule_source` | full Rust source snapshot (self-contained) |
 | `rule_file` | path in the library |
