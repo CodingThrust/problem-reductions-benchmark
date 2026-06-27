@@ -4,6 +4,16 @@ Date: 2026-06-27
 Branch: `score-by-distinct-rule-bugs`
 Status: approved-by-default (user delegated autonomous build; no model API available for live testing)
 
+> **Superseded in two areas** (this remains the historical design of record):
+> 1. **Verification** is now a single round-trip check — a reduction is buggy on `a` iff
+>    `solve(a) != solve(reduce(a))` (compared by value/feasibility), with an optional
+>    `target_config` witness. The earlier 5-violation taxonomy was dropped; the violation
+>    is now a *derived* label. See `benchmark/verify.py` and `CONTRIBUTING.md`.
+> 2. **Budget** is no longer enforced via LiteLLM's dollar figure. Spend is recomputed from
+>    token usage × the submitter-supplied price (`benchmark/cost.py`), so mini-swe-agent's
+>    `cost_limit` uses our number; a scheduler `safety_margin` + per-call `max_tokens` back
+>    it up. See `benchmark/run_mini.py` and `SUBMISSION.md`.
+
 ## Goal
 
 Two halves of one pipeline:

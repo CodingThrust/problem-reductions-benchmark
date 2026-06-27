@@ -12,17 +12,13 @@ A reduction rule maps problem A → problem B. A **bug** is a round-trip failure
 A  →(reduce)→  B  →(solve)→  s  →(extract)→  A'
 ```
 
-If `A'` is an invalid solution to `A`, the rule has a bug. The AI finds these by constructing **counterexample certificates** — JSON objects that describe the violation and the evidence.
+The rule is correct on an instance `a` only if solving it directly agrees with solving it through the reduction, compared by **value** (optimization) or **feasibility** (decision):
 
-Three violation types:
+```
+solve(a)  ==  solve(reduce(a))
+```
 
-| Type | Meaning |
-|------|---------|
-| `unsound_extraction` | A valid target solution extracts back to an invalid source solution |
-| `incomplete_reduction` | Source has a solution but the reduced target has none |
-| `suboptimal_extraction` | Extracted source solution is not optimal; a better one exists |
-
-Every certificate is independently re-verified by `pred` — the AI's claim is never trusted directly.
+A mismatch is a bug. The AI finds these by constructing **counterexample certificates** — a JSON object naming the source instance `a` and the rule; the backend re-derives the bundle and round-trips it with `pred`, so the AI's claim is never trusted directly. The mismatch is reported with a derived label (`optimum_not_preserved`, `feasibility_not_preserved`, or `spurious_solution`); an optional `target_config` witness can additionally expose extraction bugs on a specific target solution (`unsound_extraction` / `suboptimal_extraction`).
 
 **Primary metric: bugs found** — the number of *distinct rules* with at least one confirmed bug, on a pinned library commit. One rule = one bug, no matter how many counterexamples (or violation types) target it. This count is fully verifiable and cannot be inflated by resubmitting certificates.
 **Secondary metrics: bugs/Ktok and bugs/$** — token- and cost-efficiency. These have a self-reported denominator (tokens/cost), so they rank ties and serve as reference, not as the headline.
@@ -82,8 +78,8 @@ Key `make` targets:
 | Target | Description |
 |--------|-------------|
 | `make test-unit` | All unit tests, no API key needed |
-| `make verify-calibration` | Test verifier against 3 known fixtures |
-| `make verify-judgment` | Robust equality + accept/reject judgment tests |
+| `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
+| `make verify-judgment` | Pred-free sanity tests (docs, CI, observability) |
 | `make validate-results` | Schema-check all `results/*.json` |
 | `make build-index` | Rebuild `results/index.json` |
 | `make demo` | Run a tiny real session + rebuild index |

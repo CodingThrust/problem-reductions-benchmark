@@ -19,54 +19,42 @@ agent:
 
     On Windows, pred cannot read from stdin. Always write JSON to a file first, then pass the filename.
 
-    Workflow:
-    1. Read the rule source at {{rule_file}} to understand what reduce_to() and extract_solution() do
-    2. Construct a small source problem instance with pred create
-    3. Reduce it with pred reduce to get a bundle
-    4. Solve the bundle with pred solve to get the target solution
-    5. Extract back with pred extract using the target solution config
-    6. Evaluate the extracted source solution with pred evaluate
-    7. If evaluation returns Max(None) or Or(false): you found an unsound_extraction bug!
-    8. For optimization problems: also check if the extracted solution is suboptimal vs brute-force
+    The single test for a bug (round-trip): solving the source directly must agree with
+    solving it THROUGH the reduction, compared by VALUE (optimization) or feasibility
+    (decision). `pred solve <bundle>` already does the whole round-trip — it solves the
+    target, extracts back to the source, and reports the source-space value — so you just
+    compare it against `pred solve <source>`:
+      pred solve source.json --json        # direct answer, e.g. {"evaluation": "Max(7)"}
+      pred reduce source.json --to <TARGET> --json -o bundle.json
+      pred solve bundle.json --json        # round-trip answer, e.g. {"evaluation": "Max(3)"}
+    Different evaluations (Max(7) vs Max(3), or Or(true) vs Or(false), or one infeasible) =
+    a genuine bug in the reduction.
 
-    When you find a bug, emit a certificate in this exact format and then stop:
+    Workflow:
+    1. Read the rule source at {{rule_file}} to learn what reduce_to()/extract_solution() do
+       and which target type it reduces to.
+    2. Construct a small source instance with pred create (tiny — minimal witnesses only).
+    3. Compare `pred solve source` with `pred solve bundle` as above.
+    4. (Optional, stronger) If a SPECIFIC valid target solution extracts to an invalid or
+       worse source solution, note its config — pass it as `target_config` below; this
+       catches extraction bugs a solver's own optimum would hide.
+
+    When the two evaluations disagree, emit a certificate in this format and then stop:
 
     CERTIFICATE_START
     {
       "rule": "<rule_name>",
-      "violation": "unsound_extraction",
       "source": <paste the source JSON from pred create>,
       "bundle": <paste the bundle JSON from pred reduce>,
-      "target_config": "<comma-separated config used in pred extract>",
-      "claimed_source_solution": [<values from the extract result's "solution" field>],
-      "note": "<one sentence: what went wrong>"
+      "target_config": "<optional: comma-separated target solution that mis-extracts>",
+      "note": "<one sentence: source solves to X but the round-trip yields Y>"
     }
     CERTIFICATE_END
 
-    For incomplete_reduction (source has solution but target has none):
-    CERTIFICATE_START
-    {
-      "rule": "<rule_name>",
-      "violation": "incomplete_reduction",
-      "source": <source JSON>,
-      "bundle": <bundle JSON>,
-      "note": "<one sentence: what went wrong>"
-    }
-    CERTIFICATE_END
-
-    For suboptimal_extraction (optimization problem: extracted is suboptimal):
-    CERTIFICATE_START
-    {
-      "rule": "<rule_name>",
-      "violation": "suboptimal_extraction",
-      "source": <source JSON>,
-      "bundle": <bundle JSON>,
-      "target_config": "<config used in pred extract>",
-      "claimed_source_solution": [<extracted solution values>],
-      "brute_force_solution": [<better solution values>],
-      "note": "<one sentence: what went wrong>"
-    }
-    CERTIFICATE_END
+    Only `rule`, `source`, and the target type (from `bundle`) are required; `target_config`
+    is optional. The verifier re-derives everything from `source` with pred and never trusts
+    your claim — a wrong or non-minimal certificate is simply rejected, so report only what
+    you have actually reproduced.
 
     If you find no bug, just run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
 

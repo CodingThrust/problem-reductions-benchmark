@@ -41,17 +41,23 @@ LLM Agent
 
 ---
 
-## 二、5 种 Violation 类型
+## 二、判定 bug 的唯一标准：round-trip
 
-| 类型 | 含义 | 需要 Solver | AI 需提供 |
-|------|------|:-----------:|-----------|
-| `unsound_extraction` | extract 出的解不合法 | 否 | `target_config` |
-| `incomplete_reduction` | source 有解但 target 无解 | 是 | 无 |
-| `suboptimal_extraction` | 提取出的解比最优差 | 否 | `target_config` + `brute_force_solution` |
-| `solve_mismatch` | source/target 的 evaluation 不一致 | 是 | 无 |
-| `order_reversal` | 目标空间排序与源空间排序相反 | 否 | `target_config_lo` + `target_config_hi` |
+一条 rule A→B 在实例 `a` 上正确,当且仅当**直接求解**与**经 reduction 求解**结果一致(优化问题比**值**,判定问题比**可行性**):
 
-**Solver-free 优先**：`unsound_extraction`、`suboptimal_extraction`、`order_reversal` 不依赖 `pred solve`，可以处理大实例；另两种受超时保护，超时返回 `rejected`，不崩溃。
+```
+solve(a)  ==  solve(reduce(a))
+```
+
+`pred solve <bundle>` 本身就做完了整个 round-trip(解 target → extract 回 source → 在 source 空间求值),所以只需把它和 `pred solve <source>` 比较。不一致即真 bug,verifier 自己重跑 `pred`,**从不信 AI 的声明**。不一致会被打上派生标签:
+
+| 标签 | 含义 |
+|------|------|
+| `optimum_not_preserved` | 两边都可行,但 round-trip 的值不同 |
+| `feasibility_not_preserved` | source 有解,但 round-trip 无解 |
+| `spurious_solution` | round-trip 声称有解,但 source 实际无解 |
+
+可选地,certificate 带一个 `target_config`(某个具体的 target 解)还能额外抓到**抽取层** bug——`unsound_extraction`(合法 target 解 extract 回非法 source 解)和 `suboptimal_extraction`(最优 target 解 extract 回次优 source 解),这些是求解器自己的最优解掩盖不掉的。只比**值**、不比**具体解**,所以多最优解不会误判。
 
 ---
 
@@ -200,24 +206,24 @@ for line in sys.stdin:
 
 ### 4.4 独立 Verifier（Zero Trust）
 
-核心设计亮点：verifier **不信任** AI 提供的任何值，完全自己重跑：
+核心设计亮点：verifier **不信任** AI 提供的任何值,完全自己重跑——它从 `source` 用 `pred reduce` 重新推导 bundle,再用 `pred solve` 做 round-trip:
 
 ```
-# unsound_extraction: verifier 自己重新 extract，再 evaluate
-# incomplete_reduction: verifier 自己 solve source 和 bundle
-# solve_mismatch: verifier 自己 solve 两边，比较结果
+# 直接解 source           → pred solve source        → 比较
+# 经 reduction round-trip → pred solve reduce(source) → 值/可行性不一致即 bug
+# 若带 target_config，再独立 extract + evaluate，抓抽取层 bug
 ```
 
-AI 无法"捏造" bug 凭证——即使提供假的 `claimed_source_solution`，verifier 也会独立验证并拒绝。
+AI 无法"捏造" bug 凭证——certificate 里写什么值都会被忽略,verifier 全部重算后判定,错误或非最小的凭证直接 `rejected`。
 
-### 4.5 测试套件（185 tests，全 mock，无需 API key）
+### 4.5 测试套件（全 mock，无需 API key）
 
 ```bash
-cd benchmark && pytest tests/ -v 2>&1 | tail -5
-# 185 passed, 3 skipped
+pytest benchmark/tests/ -q 2>&1 | tail -3
+# 191 passed, 4 skipped
 ```
 
-所有测试 mock 了 `_run_pred`，不依赖真实 API key，任何人 clone 后可立即运行。
+单元测试 monkeypatch 了 `PredSolver`,不依赖真实 API key；集成测试(`-m integration`)才需要 `pred`。任何人 clone 后可立即运行单元测试。
 
 ---
 
@@ -225,12 +231,12 @@ cd benchmark && pytest tests/ -v 2>&1 | tail -5
 
 ### 5.1 当前版本 (v0.6.0 / `aa2d1a1`) 的 bug 分布
 
-**重要**：`aa2d1a1` 提交的 reduction rules 大部分是正确的。GitHub 上标注 "Wrong" 的 issue 描述的是**尚未实现的 rule**（future work），而不是现有 rule 的 bug。
+`aa2d1a1` 的大多数 reduction rules 是正确的,但**确实存在真实的 reduction bug**——我们在这个固定 commit 上已用 round-trip verifier + 原生 `pred` 复核确认了多个反例(集中在较冷门、加权 / 边界输入的规则上)。具体反例是评测的"答案",不在公开仓库里(见 `benchmark/tests/fixtures/private/`,已 gitignore)。
 
-因此：
-- **在 `aa2d1a1` 上跑出 0 bugs 是正常结果**，说明 agent 分析是准确的
-- 若要测试 bug 发现能力，需要切换到包含已知 bug 的库提交版本
-- 后续可以在库的 `main` 分支（更新的 commit）上重新测试
+因此:
+- **0 bugs 不代表库没 bug**,而是 agent 没找到——这正是模型间拉开差距的地方
+- 越冷门、越少被走过的规则(以及加权 / 退化 / 空或零值输入)越值得查
+- 评分基于在 `aa2d1a1` 上 `pred` 可复核的反例,与是否"新"无关
 
 ### 5.2 Windows 特有问题
 
@@ -262,11 +268,11 @@ step_limit 太低时，agent 会花完所有步数读代码，没有时间跑 `p
 
 `--per-rule 0.5` 是安全上限，大多数模型每条 rule 花不到这个数。
 
-### 5.5 Solver-based violations 的局限
+### 5.5 求解超时的局限
 
-`incomplete_reduction` 和 `solve_mismatch` 需要运行 `pred solve`。对于大实例（节点数 > 15），默认 solver 可能超时（120s）。超时时 verifier 返回 `rejected`（不崩溃），但这类 violation 无法被检测到。
+round-trip 判定需要 `pred solve` 两边(优先 ILP,退 brute-force)。对于大实例,求解可能超时;此时 verifier 返回 `rejected`(不崩溃,超时不算证明),该实例上的 bug 无法被确认。
 
-**建议**：优先设计使用 solver-free violation 类型（`unsound_extraction`、`order_reversal`）的 agent 策略。
+**建议**:用**最小**反例(几个节点 / 几条子句),既快又是更强的见证;verifier 也会拒绝过大的 source(> 256KB)。
 
 ---
 
