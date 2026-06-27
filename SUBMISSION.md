@@ -204,8 +204,10 @@ webhook→Job path is cheaper (pay-per-minute) and more robust.
   your declared price (not the gateway's self-reported dollars), held back by a safety
   margin and bounded per call by `MAX_TOKENS`; the Space cross-checks reported spend.
 
-## Status: framework
+## Status: validated against a live model
 
-This pipeline is wired and unit-tested end-to-end with `FakeRunner` and the certificate
-fixtures, but has **not** yet been exercised with a live model API. The first real `$20`
-runs are pending an API key.
+The runner pipeline is unit-tested end-to-end with `FakeRunner` + the certificate fixtures
+**and** has been exercised against a live model API (a DeepSeek OpenAI-compatible endpoint
+via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real budgeted run
+drives the agent across a rule and emits a schema-valid `submission.json`. Full `$20` runs
+and the webhook→HF Job scoring deployment are the remaining steps.
