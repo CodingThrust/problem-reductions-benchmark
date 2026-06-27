@@ -4,6 +4,9 @@ dataset/
 # Local scoring output (backend_score / score-local writes here)
 results/
 
+# Runner output (docker run -v ./out:/out writes submission.json here)
+out/
+
 # Python bytecode
 __pycache__/
 *.pyc
