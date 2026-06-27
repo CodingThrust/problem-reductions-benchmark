@@ -6,6 +6,7 @@ emits counterexample certificates. Independent checker validates each certificat
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -61,12 +62,18 @@ def save_trajectory(messages: list, path: Path) -> None:
             f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
 
 
-def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None):
+def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None,
+                 model_kwargs: dict | None = None, api_key: str | None = None):
     """A LitellmModel whose cost is OUR token×price figure, so mini-swe-agent's own
     per-step ``cost_limit`` enforces the per-rule budget with the authoritative number and
-    never raises on an unpriceable model. ``api_base``/``max_tokens`` go through
-    ``model_kwargs`` (forwarded to litellm.completion) — they are NOT top-level config
-    fields in mini-swe-agent v2 and would otherwise be silently dropped."""
+    never raises on an unpriceable model.
+
+    Everything that configures the API call flows through ``model_kwargs`` (forwarded to
+    litellm.completion) — these are NOT top-level config fields in mini-swe-agent v2 and
+    would otherwise be silently dropped. ``model_kwargs`` is the open-ended escape hatch for
+    non-standard providers (Azure ``api_version``, OpenRouter / vLLM ``custom_llm_provider``,
+    ``extra_headers``, ``temperature``, …); ``api_base``/``api_key``/``max_tokens`` are
+    convenience shortcuts that merge into it (explicit shortcuts win on conflict)."""
     from minisweagent.models.litellm_model import LitellmModel
 
     class PricedLitellmModel(LitellmModel):
@@ -78,11 +85,13 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: 
                     pass
             return super()._calculate_cost(response)
 
-    mk: dict = {}
+    mk: dict = dict(model_kwargs or {})  # arbitrary passthrough for non-standard providers
     if max_tokens:
         mk["max_tokens"] = max_tokens  # per-call ceiling → bounds the budget-crossing call
     if api_base:
         mk["api_base"] = api_base
+    if api_key:
+        mk["api_key"] = api_key  # generic key — no provider-specific env var name needed
     return PricedLitellmModel(model_name=model_name, model_kwargs=mk)
 
 
@@ -95,20 +104,34 @@ def run_one(
     trajectory_dir: Path | None = None,
     price: Price | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
+    config_path: str | Path | None = None,
+    strategy: str | None = None,
+    model_kwargs: dict | None = None,
+    api_key: str | None = None,
 ) -> dict:
-    """Run one bug-hunting session for a single rule. Returns a result dict."""
+    """Run one bug-hunting session for a single rule. Returns a result dict.
+
+    ``config_path`` overrides the bundled prompt config (hand-editable / mountable without a
+    rebuild); ``strategy`` is extra free-form bug-hunting guidance injected into the prompt's
+    reserved ``{{strategy}}`` slot (or read from env AGENT_STRATEGY_FILE if not passed).
+    """
     from minisweagent.agents.default import DefaultAgent
     from minisweagent.environments.local import LocalEnvironment
 
     safe_name = rule_name.replace("-", "_")
     rule_file = ctx.repo_path / "src" / "rules" / f"{rule_name}.rs"
 
-    config = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8"))
+    cfg_file = Path(config_path) if config_path else CONFIG_FILE
+    config = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    if strategy is None:
+        strat_file = os.environ.get("AGENT_STRATEGY_FILE")
+        strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
     agent_cfg = config.get("agent", {})
     agent_cfg["cost_limit"] = cost_limit
 
     agent = DefaultAgent(
-        _build_model(model_name, api_base, max_tokens, price),
+        _build_model(model_name, api_base, max_tokens, price,
+                     model_kwargs=model_kwargs, api_key=api_key),
         LocalEnvironment(),
         **agent_cfg,
     )
@@ -119,6 +142,7 @@ def run_one(
         "rule_file": str(rule_file),
         "commit_hash": ctx.commit_hash[:7],
         "cost_limit": cost_limit,
+        "strategy": strategy or "",
     }
 
     cert = None

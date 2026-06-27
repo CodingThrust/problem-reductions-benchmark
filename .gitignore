@@ -13,3 +13,7 @@ __pycache__/
 
 # Private accept-path bug fixtures — the benchmark answer key, never publish
 benchmark/tests/fixtures/private/
+
+# Build-baked version pins (written into the image from PR_REF; not source-controlled)
+benchmark/PINNED_COMMIT
+benchmark/PINNED_VERSION

@@ -21,9 +21,16 @@ The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + Li
 and the problem-reductions source pinned at `v0.6.0`. LiteLLM enforces the budget across
 whatever provider key you supply.
 
+The **target library version is not hardcoded** — it tracks the benchmark. The single knob
+is the `PR_REF` build arg (a tag or commit of problem-reductions); the image bakes the
+commit and `pred` version it actually built into itself, and the runner records/verifies
+against those. Bump `PR_REF` and rebuild for each benchmark round.
+
 ```bash
-# Build once (compiles pred from source — takes a few minutes):
-docker build -f docker/Dockerfile --target runner -t problem-reductions-runner:v0.6.0 .
+# Build once (compiles pred from source — takes a few minutes).
+# --build-arg PR_REF=<tag-or-commit> selects the library version (default in the Dockerfile):
+docker build -f docker/Dockerfile --target runner \
+  --build-arg PR_REF=v0.6.0 -t problem-reductions-runner:v0.6.0 .
 
 # Run. The API key is passed at run time via -e, never baked into the image:
 mkdir -p out
@@ -38,8 +45,11 @@ docker run --rm \
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `MODEL_NAME` | — (required) | LiteLLM model name (`anthropic/...`, `openai/...`, …) |
-| `<PROVIDER>_API_KEY` | — | The key matching the model (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) |
+| `MODEL_NAME` | — (required) | LiteLLM model name. Not limited to the well-known ones — any LiteLLM-routable name works (`anthropic/...`, `openai/...`, `openrouter/...`, `azure/...`, `openai/<your-model>` for an OpenAI-compatible endpoint, …). |
+| `<PROVIDER>_API_KEY` | — | The provider's standard key var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). |
+| `API_KEY` | — | Generic key for any provider — use instead of the provider-specific var when the name doesn't apply (custom / self-hosted endpoints). |
+| `API_BASE` | — | Custom endpoint URL (OpenRouter, a gateway, local vLLM/Ollama, Azure, …). |
+| `MODEL_KWARGS` | — | JSON of extra `litellm.completion` kwargs for anything non-standard: `api_version` (Azure), `custom_llm_provider`, `extra_headers`, `temperature`, etc. Escape hatch so a new/odd provider needs no code change. |
 | `BUDGET_USD` | `20` | Total budget. **Must be 20 to be ranked.** |
 | `PER_RULE_BUDGET` | `0.5` | Per-rule cost cap |
 | `PRICE_IN` / `PRICE_OUT` | (built-in for known models) | **Your** model price, USD / 1M tokens. Spend is recomputed from token usage × this — that's what makes the budget a hard cap. Required together; pass both for any model not in the built-in table. |
@@ -47,7 +57,10 @@ docker run --rm \
 | `SAFETY_MARGIN` | `1` | USD held back from the budget as overshoot headroom |
 | `MAX_TOKENS` | `8192` | Per-call output-token ceiling (bounds the budget-crossing call) |
 | `MAX_RULES` | (all) | Cap rules attempted (smoke runs) |
-| `EXPECTED_PRED_VERSION` | pinned (`0.6.0`) | Required pred version; the runner fails fast if its `pred` differs (bugs are version-specific). Empty string disables the check. |
+| `EXPECTED_PRED_VERSION` | baked at build | Required pred version; the runner fails fast if its `pred` differs (bugs are version-specific). Empty string disables the check. |
+| `EXPECTED_PRED_COMMIT` | baked at build | Library commit recorded/verified for the run (defaults to the commit the image was built from). |
+| `AGENT_CONFIG` | bundled `config.yaml` | Path to your own agent prompt config — mount it to change the bug-hunting prompt without rebuilding. |
+| `AGENT_STRATEGY_FILE` | — | File of extra bug-hunting hints injected into the prompt's reserved `{{strategy}}` slot (lighter-weight than replacing the whole config). |
 | `OUTPUT` | `/out/submission.json` | Where the submission is written |
 
 > Why you pass the price: you pay your own bill at your own rate, so you set it. The runner
@@ -55,6 +68,33 @@ docker run --rm \
 > gateway's dollar figure (which can be stale or wrong), so `$20` is a real cap. The
 > backend re-verifies bugs regardless, and ranks on **bugs/Ktok** (token counts are
 > auditable); self-reported dollars are advisory only.
+
+**Non-standard provider / endpoint** (OpenRouter, a gateway, local vLLM, Azure …) — nothing
+is hardcoded to anthropic/openai; reach any model via `MODEL_NAME` + `API_BASE` + `API_KEY`
+(+ `MODEL_KWARGS` for odd params) and `PRICE_IN`/`PRICE_OUT` for the budget:
+
+```bash
+docker run --rm \
+  -e MODEL_NAME=openai/my-model \
+  -e API_BASE=https://my-gateway.example/v1 \
+  -e API_KEY=$MY_KEY \
+  -e MODEL_KWARGS='{"custom_llm_provider":"openai","extra_headers":{"X-Org":"acme"}}' \
+  -e PRICE_IN=1.5 -e PRICE_OUT=6.0 -e BUDGET_USD=20 \
+  -v "$PWD/out:/out" \
+  problem-reductions-runner:v0.6.0
+```
+
+**Customize the agent's bug-hunting prompt** without rebuilding — mount your own files:
+
+```bash
+docker run --rm \
+  -e MODEL_NAME=… -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e AGENT_STRATEGY_FILE=/cfg/strategy.md \
+  -v "$PWD/cfg:/cfg" -v "$PWD/out:/out" \
+  problem-reductions-runner:v0.6.0
+# strategy.md is injected into the prompt's reserved {{strategy}} slot.
+# For a full prompt rewrite instead, mount a config.yaml and set AGENT_CONFIG=/cfg/config.yaml.
+```
 
 No image yet? Smoke-test the wiring with no API key:
 `make runner-smoke` (uses `FakeRunner`, writes a dummy submission).

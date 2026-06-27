@@ -26,6 +26,9 @@ ARG PR_REF
 WORKDIR /src
 RUN git clone --depth 1 --branch "${PR_REF}" \
     https://github.com/CodingThrust/problem-reductions.git .
+# Capture the exact commit that PR_REF resolved to — baked into the image so the runtime
+# records/verifies the real target version instead of a hardcoded constant.
+RUN git rev-parse HEAD > /src/PINNED_COMMIT
 # The upstream release profile uses LTO + codegen-units=1, which OOMs in a
 # constrained Docker VM. Relax it for the build (pred's solve perf is ample
 # without LTO) and cap parallel rustc jobs to keep peak memory low.
@@ -56,6 +59,10 @@ COPY benchmark/ ./benchmark/
 
 # Fail the build if pred can't run (catches a missing runtime lib early).
 RUN pred --version
+# Bake the target version pins so benchmark/env_setup.py reads the *built* commit/version
+# rather than a frozen Python literal (the target tracks PR_REF, not a constant).
+COPY --from=pred-build /src/PINNED_COMMIT /app/benchmark/PINNED_COMMIT
+RUN pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
 
 # Default: run the verifier calibration (fixtures) as a self-test.
 # Override CMD to verify a certificate, e.g. (run with NO network — the verifier only needs

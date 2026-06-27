@@ -30,6 +30,8 @@ agent:
     Different evaluations (Max(7) vs Max(3), or Or(true) vs Or(false), or one infeasible) =
     a genuine bug in the reduction.
 
+    {{strategy}}
+
     Workflow:
     1. Read the rule source at {{rule_file}} to learn what reduce_to()/extract_solution() do
        and which target type it reduces to.

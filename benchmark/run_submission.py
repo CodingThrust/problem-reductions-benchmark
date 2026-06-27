@@ -32,7 +32,7 @@ import tempfile
 from pathlib import Path
 
 from benchmark.env_context import EnvContext
-from benchmark.env_setup import PINNED_COMMIT, find_pred_binary, verify_pred_version
+from benchmark.env_setup import find_pred_binary, pinned_commit, verify_pred_version
 from benchmark.run_mini import list_rules
 from benchmark.runner import FakeRunner, MiniSweRunner
 from benchmark.scheduler import Scheduler
@@ -102,6 +102,10 @@ def run(
     price=None,
     max_tokens: int | None = None,
     safety_margin: float = 1.0,
+    config_path: str | Path | None = None,
+    strategy: str | None = None,
+    model_kwargs: dict | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """Run the full budgeted session for one model and return the submission dict.
 
@@ -113,7 +117,7 @@ def run(
     and for smoke-running the container wiring.
     """
     repo = Path(repo_dir)
-    commit = library_commit or PINNED_COMMIT
+    commit = library_commit or pinned_commit()
 
     if fake:
         # EnvContext validates a real pred binary; in fake mode the scheduler only ever
@@ -127,7 +131,9 @@ def run(
         pred_ver = verify_pred_version(pred_binary)  # fail fast if pred != pinned version
         ctx = EnvContext(repo_path=repo, pred_binary=pred_binary, commit_hash=commit,
                          pred_version=pred_ver)
-        runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens)
+        runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens,
+                               config_path=config_path, strategy=strategy,
+                               model_kwargs=model_kwargs, api_key=api_key)
 
     rules = list_rules(str(repo))
     if max_rules is not None:
@@ -186,6 +192,13 @@ def main() -> None:
     parser.add_argument("--output", default=_env("OUTPUT", "/out/submission.json"),
                         help="Where to write submission.json (env OUTPUT)")
     parser.add_argument("--api-base", default=_env("API_BASE"), help="Custom API base (env API_BASE)")
+    parser.add_argument("--api-key", default=_env("API_KEY"),
+                        help="Generic API key, any provider (env API_KEY). Avoids needing the "
+                             "provider-specific var; provider env vars (ANTHROPIC_API_KEY, …) still work.")
+    parser.add_argument("--model-kwargs", default=_env("MODEL_KWARGS"),
+                        help="JSON of extra litellm.completion kwargs for non-standard providers "
+                             "(env MODEL_KWARGS), e.g. '{\"api_version\":\"2024-02-01\","
+                             "\"custom_llm_provider\":\"openai\"}'.")
     parser.add_argument("--max-rules", type=lambda v: int(v) if v else None,
                         default=_env("MAX_RULES"), help="Cap rules attempted (smoke runs)")
     parser.add_argument("--submitted-by", default=_env("SUBMITTED_BY"))
@@ -207,6 +220,15 @@ def main() -> None:
                         help="USD held back from the budget as overshoot headroom (default 1)")
     parser.add_argument("--expected-pred-version", default=_env("EXPECTED_PRED_VERSION"),
                         help="Require this pred version (default: pinned; empty string disables)")
+    parser.add_argument("--expected-pred-commit", default=_env("EXPECTED_PRED_COMMIT"),
+                        help="Library commit to record/verify (default: pinned for this image)")
+    # Agent prompt/strategy hook — hand-editable without rebuilding the image. Mount your own
+    # config.yaml (full prompt) and/or a strategy file (extra bug-hunting hints injected into
+    # the {{strategy}} slot of the system prompt). See benchmark/config.yaml.
+    parser.add_argument("--config", default=_env("AGENT_CONFIG"),
+                        help="Path to an agent config.yaml (env AGENT_CONFIG; default: bundled)")
+    parser.add_argument("--strategy-file", default=_env("AGENT_STRATEGY_FILE"),
+                        help="File of extra strategy hints injected into the prompt (env AGENT_STRATEGY_FILE)")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
                         help="No API/pred — FakeRunner smoke test")
     args = parser.parse_args()
@@ -214,9 +236,25 @@ def main() -> None:
     if not args.model:
         parser.error("--model (or env MODEL_NAME) is required")
 
-    # verify_pred_version() reads EXPECTED_PRED_VERSION; surface the flag through it.
+    # verify_pred_version()/pinned_commit() read these env vars; surface the flags through them.
     if args.expected_pred_version is not None:
         os.environ["EXPECTED_PRED_VERSION"] = args.expected_pred_version
+    if args.expected_pred_commit:
+        os.environ["EXPECTED_PRED_COMMIT"] = args.expected_pred_commit
+
+    # Read the strategy hints file once (so a bad path fails fast, before any API spend).
+    strategy = None
+    if args.strategy_file:
+        strategy = Path(args.strategy_file).read_text(encoding="utf-8")
+
+    model_kwargs = None
+    if args.model_kwargs:
+        try:
+            model_kwargs = json.loads(args.model_kwargs)  # fail fast on malformed JSON
+        except json.JSONDecodeError as e:
+            parser.error(f"--model-kwargs is not valid JSON: {e}")
+        if not isinstance(model_kwargs, dict):
+            parser.error("--model-kwargs must be a JSON object")
 
     from benchmark.cost import Price, resolve_price
     override = None
@@ -249,6 +287,10 @@ def main() -> None:
         price=price,
         max_tokens=args.max_tokens,
         safety_margin=args.safety_margin,
+        config_path=args.config,
+        strategy=strategy,
+        model_kwargs=model_kwargs,
+        api_key=args.api_key,
     )
     print(f"\n{sub['bugs_found']} claimed bugs | ${sub['total_cost_usd']:.4f} | "
           f"{sub['rules_tested']} rules attempted")
