@@ -57,7 +57,7 @@ by tier:
 | **Required** | `MODEL_NAME`, one API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / generic `API_KEY`), `PRICE_IN`, `PRICE_OUT` | always — see the price note below |
 | **Pricing (caching)** | `PRICE_CACHE_READ`, `PRICE_CACHE_WRITE` | prompt-caching models |
 | **Non-standard provider** | `API_BASE`, `API_KEY`, `MODEL_KWARGS` (JSON of extra litellm kwargs: `api_version`, `custom_llm_provider`, `extra_headers`, …) | OpenRouter / gateway / local vLLM / Azure |
-| **Budget (defaults = ranked config)** | `BUDGET_USD=20`, `PER_RULE_BUDGET=0.5`, `SAFETY_MARGIN=1`, `MAX_TOKENS=8192`, `MAX_RULES` | smoke runs / tuning only |
+| **Budget (defaults = ranked config)** | `BUDGET_USD=20`, `PER_RULE_BUDGET=0.5`, `SAFETY_MARGIN=1`, `MAX_TOKENS=8192`, `MAX_RULES` | quick test runs / tuning only |
 | **Custom prompt** | `AGENT_CONFIG`, `AGENT_STRATEGY_FILE` (mount the files too) | bring your own bug-hunting prompt |
 | **Version pins** | `EXPECTED_PRED_VERSION` (empty disables), `EXPECTED_PRED_COMMIT` | debugging only — baked from the image build |
 
@@ -111,8 +111,17 @@ docker run --rm \
 # For a full prompt rewrite instead, mount a config.yaml and set AGENT_CONFIG=/cfg/config.yaml.
 ```
 
-No image yet? Smoke-test the wiring with no API key:
-`make runner-smoke` (uses `FakeRunner`, writes a dummy submission).
+**Before the full run, validate your config** with one tiny real call (a fraction of a cent)
+so a bad key / wrong endpoint / missing price surfaces now, not 20 rules in:
+
+```bash
+make preflight        # docker run --env-file submission.env <image> --preflight
+```
+
+It checks the `pred` binary + version, that the library rules are present, and makes one
+minimal model call through the exact batch code path (validating credentials, endpoint,
+`model_kwargs`, and that pricing computes). It exits non-zero on any failure. (The runner's
+no-API wiring is covered by the pytest suite, not a separate command.)
 
 ## 2. Submit it
 

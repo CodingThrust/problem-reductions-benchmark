@@ -7,7 +7,7 @@
 #
 # Build (from repo root):
 #   docker build -f docker/Dockerfile -t problem-reductions-benchmark:v0.6.0 .
-# Smoke test (runs the verifier calibration against fixtures, needs pred):
+# Self-test (runs the verifier calibration against fixtures, needs pred):
 #   docker run --rm problem-reductions-benchmark:v0.6.0
 # Verify a certificate:
 #   docker run --rm -i problem-reductions-benchmark:v0.6.0 - < cert.json   # (see entrypoint)
@@ -99,8 +99,8 @@ ENV REPO_DIR=/app/pr-src \
     PER_RULE_BUDGET=0.5 \
     OUTPUT=/out/submission.json
 VOLUME ["/out"]
-# Smoke-check the runner wiring at build time (no API/pred calls).
-RUN python -m benchmark.run_submission --fake --model fake/smoke --max-rules 1 \
-    --output /tmp/smoke.json && rm -f /tmp/smoke.json
+# Build-time sanity that the assembled runner imports and runs (no API/pred calls).
+RUN python -m benchmark.run_submission --fake --model fake/check --max-rules 1 \
+    --output /tmp/buildcheck.json && rm -f /tmp/buildcheck.json
 ENTRYPOINT ["python", "-m", "benchmark.run_submission"]
 CMD []

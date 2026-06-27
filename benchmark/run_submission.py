@@ -229,8 +229,11 @@ def main() -> None:
                         help="Path to an agent config.yaml (env AGENT_CONFIG; default: bundled)")
     parser.add_argument("--strategy-file", default=_env("AGENT_STRATEGY_FILE"),
                         help="File of extra strategy hints injected into the prompt (env AGENT_STRATEGY_FILE)")
+    parser.add_argument("--preflight", action="store_true", default=bool(_env("PREFLIGHT")),
+                        help="Validate the config with one tiny real API call + pred/rules "
+                             "checks, then exit (run this before the full batch).")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
-                        help="No API/pred — FakeRunner smoke test")
+                        help="No API/pred — FakeRunner wiring run (mostly covered by tests)")
     args = parser.parse_args()
 
     if not args.model:
@@ -269,6 +272,15 @@ def main() -> None:
         parser.error("--price-in and --price-out (env PRICE_IN/PRICE_OUT) are required: "
                      "spend is metered as token_usage × your price, so you must declare it "
                      "(USD / 1M tokens). There is no built-in price table.")
+
+    if args.preflight:
+        from benchmark.preflight import format_report, run_checks
+        from benchmark.run_mini import DEFAULT_MAX_TOKENS
+        print(f"Preflight for {args.model} (one tiny real call + pred/rules checks)...")
+        results = run_checks(args.model, repo_dir=args.repo_dir, api_base=args.api_base,
+                             api_key=args.api_key, model_kwargs=model_kwargs,
+                             max_tokens=args.max_tokens or DEFAULT_MAX_TOKENS, price=price)
+        raise SystemExit(0 if format_report(results) else 1)
 
     import datetime
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()

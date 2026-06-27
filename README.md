@@ -56,17 +56,17 @@ Requirements:
 - An API key for your model
 
 ```bash
-# Smoke-test the runner wiring (no API key, no pred)
-make runner-smoke
-
-# Run all unit tests (no API key needed)
+# Run all unit tests (no API key needed) — this is what exercises the runner wiring
 make test-unit
 
 # Test the verifier against the fixtures (no API key)
 make verify-calibration
 
+# Configure your run, then validate it with one tiny real call before the full batch
+cp submission.env.example submission.env   # fill in MODEL_NAME, key, PRICE_IN/OUT
+make preflight
+
 # Run the real budgeted runner via Docker → ./out/submission.json
-export ANTHROPIC_API_KEY=sk-...
 make submission
 ```
 
@@ -77,7 +77,7 @@ Key `make` targets:
 | `make test-unit` | All unit tests, no API key needed |
 | `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
 | `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
-| `make runner-smoke` | Smoke-test the runner wiring (FakeRunner, no API) |
+| `make preflight` | Validate `submission.env` with one tiny real call before a full run |
 | `make submission` | Run the real budgeted runner via Docker |
 | `make score-local` | Score submissions with the zero-trust backend |
 

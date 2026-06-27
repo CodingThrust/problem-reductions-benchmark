@@ -5,7 +5,7 @@
 #   test                 Run full pytest suite (unit + integration)
 #   test-unit            Run only unit tests (no real repo/pred needed)
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
-#   runner-smoke         Smoke-test the runner wiring (FakeRunner, no API)
+#   preflight            Validate submission.env with one tiny real call before a full run
 #   submission           Run the real budgeted runner via Docker
 #
 # Required env vars for targets that call the AI:
@@ -20,7 +20,7 @@ SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build runner-smoke submission score-local
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight submission score-local
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -43,11 +43,13 @@ verify-calibration:
 runner-build:
 	docker build -f docker/Dockerfile --target runner -t $(IMAGE) .
 
-## Smoke-test the runner wiring with FakeRunner — no API key, no pred needed.
-runner-smoke:
-	python -m benchmark.run_submission --fake --model fake/smoke \
-	  --repo-dir $(REPO_DIR) --max-rules 2 --output /tmp/submission.smoke.json
-	@echo "Wrote /tmp/submission.smoke.json"
+## Preflight: validate submission.env with one tiny real API call + pred/rules checks,
+## BEFORE committing to a full $20 run. Spends a fraction of a cent. (The no-API wiring of
+## the runner itself is covered by the pytest suite, not a make target.)
+preflight:
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in first"; exit 1; fi
+	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
 ## Run the real budgeted runner via Docker → ./out/submission.json.
 ## Preferred: copy submission.env.example → submission.env, fill it, then `make submission`
@@ -87,7 +89,7 @@ help:
 	@echo "  test-unit           Run unit tests only (no real repo needed)"
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
 	@echo "  runner-build        Build the dockerized submission runner image"
-	@echo "  runner-smoke        Smoke-test the runner (FakeRunner, no API)"
+	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  submission          Run the real runner via Docker → out/submission.json"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  audit               Audit pred CLI capabilities"
