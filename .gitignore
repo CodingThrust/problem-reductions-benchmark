@@ -17,3 +17,7 @@ benchmark/tests/fixtures/private/
 # Build-baked version pins (written into the image from PR_REF; not source-controlled)
 benchmark/PINNED_COMMIT
 benchmark/PINNED_VERSION
+
+# Filled-in submission config — may hold an API key (template is submission.env.example)
+submission.env
+*.submission.env

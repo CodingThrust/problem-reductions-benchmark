@@ -7,7 +7,6 @@ tests pin the token→USD math, the OpenAI vs Anthropic usage mapping, and price
 from types import SimpleNamespace
 
 from benchmark.cost import (
-    DEFAULT_PRICES,
     Price,
     Usage,
     extract_usage,
@@ -79,15 +78,9 @@ class TestResolvePrice:
         ov = Price(1.0, 2.0)
         assert resolve_price("anthropic/claude-sonnet-4-6", ov) is ov
 
-    def test_default_prefix_match(self):
-        p = resolve_price("anthropic/claude-sonnet-4-6")
-        assert p is DEFAULT_PRICES["anthropic/claude-sonnet-4"]
-
-    def test_longest_prefix_wins(self):
-        # opus and sonnet share "anthropic/claude-"; the full model must pick its own.
-        assert resolve_price("anthropic/claude-opus-4-8") is DEFAULT_PRICES["anthropic/claude-opus-4"]
-
-    def test_unknown_model_none(self):
+    def test_no_override_is_none(self):
+        # No built-in table by design — price must always be supplied for a real run.
+        assert resolve_price("anthropic/claude-sonnet-4-6") is None
         assert resolve_price("some/unknown-model") is None
 
 

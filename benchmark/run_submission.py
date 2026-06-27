@@ -256,17 +256,19 @@ def main() -> None:
         if not isinstance(model_kwargs, dict):
             parser.error("--model-kwargs must be a JSON object")
 
-    from benchmark.cost import Price, resolve_price
-    override = None
+    # Price is always submitter-supplied — there is no built-in table (a stale default would
+    # silently mis-meter the $20 cap). A real run REQUIRES --price-in and --price-out.
+    from benchmark.cost import Price
+    price = None
     if args.price_in is not None and args.price_out is not None:
-        override = Price(args.price_in, args.price_out,
-                         args.price_cache_read or 0.0, args.price_cache_write or 0.0)
+        price = Price(args.price_in, args.price_out,
+                      args.price_cache_read or 0.0, args.price_cache_write or 0.0)
     elif args.price_in is not None or args.price_out is not None:
         parser.error("--price-in and --price-out must be given together")
-    price = resolve_price(args.model, override)
     if price is None and not args.fake:
-        print("WARNING: no price for this model — spend falls back to the gateway figure; "
-              "pass --price-in/--price-out for a hard cap.")
+        parser.error("--price-in and --price-out (env PRICE_IN/PRICE_OUT) are required: "
+                     "spend is metered as token_usage × your price, so you must declare it "
+                     "(USD / 1M tokens). There is no built-in price table.")
 
     import datetime
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()

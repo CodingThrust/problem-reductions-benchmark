@@ -32,46 +32,61 @@ against those. Bump `PR_REF` and rebuild for each benchmark round.
 docker build -f docker/Dockerfile --target runner \
   --build-arg PR_REF=v0.6.0 -t problem-reductions-runner:v0.6.0 .
 
-# Run. The API key is passed at run time via -e, never baked into the image:
-mkdir -p out
-docker run --rm \
-  -e MODEL_NAME=anthropic/claude-sonnet-4-6 \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  -e BUDGET_USD=20 \
-  -v "$PWD/out:/out" \
-  problem-reductions-runner:v0.6.0
-# → ./out/submission.json
+# (build args, version pins — see "Library version" below)
 ```
 
-| Env var | Default | Meaning |
+### Configure and run
+
+All run config goes in **one env-file** so you don't juggle a dozen `-e` flags. Copy the
+template, fill the two required lines, and run:
+
+```bash
+cp submission.env.example submission.env   # then edit the REQUIRED lines (model, key, price)
+mkdir -p out
+docker run --rm --env-file submission.env -v "$PWD/out:/out" \
+  problem-reductions-runner:v0.6.0
+# → ./out/submission.json      (or just: make submission)
+```
+
+The **required lines are model + API key + price** (`MODEL_NAME`, a key, `PRICE_IN`/`PRICE_OUT`).
+Everything else in the template has a sane default — uncomment only what you need. The knobs,
+by tier:
+
+| Tier | Vars | When |
 |---|---|---|
-| `MODEL_NAME` | — (required) | LiteLLM model name. Not limited to the well-known ones — any LiteLLM-routable name works (`anthropic/...`, `openai/...`, `openrouter/...`, `azure/...`, `openai/<your-model>` for an OpenAI-compatible endpoint, …). |
-| `<PROVIDER>_API_KEY` | — | The provider's standard key var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). |
-| `API_KEY` | — | Generic key for any provider — use instead of the provider-specific var when the name doesn't apply (custom / self-hosted endpoints). |
-| `API_BASE` | — | Custom endpoint URL (OpenRouter, a gateway, local vLLM/Ollama, Azure, …). |
-| `MODEL_KWARGS` | — | JSON of extra `litellm.completion` kwargs for anything non-standard: `api_version` (Azure), `custom_llm_provider`, `extra_headers`, `temperature`, etc. Escape hatch so a new/odd provider needs no code change. |
-| `BUDGET_USD` | `20` | Total budget. **Must be 20 to be ranked.** |
-| `PER_RULE_BUDGET` | `0.5` | Per-rule cost cap |
-| `PRICE_IN` / `PRICE_OUT` | (built-in for known models) | **Your** model price, USD / 1M tokens. Spend is recomputed from token usage × this — that's what makes the budget a hard cap. Required together; pass both for any model not in the built-in table. |
-| `PRICE_CACHE_READ` / `PRICE_CACHE_WRITE` | `0` | Cache token prices, USD / 1M tokens (set for prompt-caching models) |
-| `SAFETY_MARGIN` | `1` | USD held back from the budget as overshoot headroom |
-| `MAX_TOKENS` | `8192` | Per-call output-token ceiling (bounds the budget-crossing call) |
-| `MAX_RULES` | (all) | Cap rules attempted (smoke runs) |
-| `EXPECTED_PRED_VERSION` | baked at build | Required pred version; the runner fails fast if its `pred` differs (bugs are version-specific). Empty string disables the check. |
-| `EXPECTED_PRED_COMMIT` | baked at build | Library commit recorded/verified for the run (defaults to the commit the image was built from). |
-| `AGENT_CONFIG` | bundled `config.yaml` | Path to your own agent prompt config — mount it to change the bug-hunting prompt without rebuilding. |
-| `AGENT_STRATEGY_FILE` | — | File of extra bug-hunting hints injected into the prompt's reserved `{{strategy}}` slot (lighter-weight than replacing the whole config). |
-| `OUTPUT` | `/out/submission.json` | Where the submission is written |
+| **Required** | `MODEL_NAME`, one API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / generic `API_KEY`), `PRICE_IN`, `PRICE_OUT` | always — see the price note below |
+| **Pricing (caching)** | `PRICE_CACHE_READ`, `PRICE_CACHE_WRITE` | prompt-caching models |
+| **Non-standard provider** | `API_BASE`, `API_KEY`, `MODEL_KWARGS` (JSON of extra litellm kwargs: `api_version`, `custom_llm_provider`, `extra_headers`, …) | OpenRouter / gateway / local vLLM / Azure |
+| **Budget (defaults = ranked config)** | `BUDGET_USD=20`, `PER_RULE_BUDGET=0.5`, `SAFETY_MARGIN=1`, `MAX_TOKENS=8192`, `MAX_RULES` | smoke runs / tuning only |
+| **Custom prompt** | `AGENT_CONFIG`, `AGENT_STRATEGY_FILE` (mount the files too) | bring your own bug-hunting prompt |
+| **Version pins** | `EXPECTED_PRED_VERSION` (empty disables), `EXPECTED_PRED_COMMIT` | debugging only — baked from the image build |
 
-> Why you pass the price: you pay your own bill at your own rate, so you set it. The runner
-> recomputes spend from raw token counts × your price rather than trusting the model
-> gateway's dollar figure (which can be stale or wrong), so `$20` is a real cap. The
-> backend re-verifies bugs regardless, and ranks on **bugs/Ktok** (token counts are
-> auditable); self-reported dollars are advisory only.
+`MODEL_NAME` accepts any LiteLLM-routable name (`anthropic/…`, `openai/…`, `openrouter/…`,
+`azure/…`, or `openai/<model>` against a custom `API_BASE`) — nothing is hardcoded to one
+provider. (`REPO_DIR` / `OUTPUT` are container-internal and already defaulted; you don't set
+them.)
 
-**Non-standard provider / endpoint** (OpenRouter, a gateway, local vLLM, Azure …) — nothing
-is hardcoded to anthropic/openai; reach any model via `MODEL_NAME` + `API_BASE` + `API_KEY`
-(+ `MODEL_KWARGS` for odd params) and `PRICE_IN`/`PRICE_OUT` for the budget:
+> Why you pass the price (and why it's required): you pay your own bill at your own rate, so
+> you set it. The runner computes spend from raw token counts × your price rather than
+> trusting the gateway's dollar figure (which can be stale or wrong — LiteLLM $0-pricing
+> incidents, Anthropic prompt-cache mis-pricing ~10×), so `$20` is a real cap. There is
+> deliberately **no built-in price table**: a wrong default would silently mis-meter the
+> budget, so a real run fails fast without `PRICE_IN`/`PRICE_OUT`. The backend re-verifies
+> bugs regardless and ranks on **bugs/Ktok** (token counts are auditable); self-reported
+> dollars are advisory only.
+
+For example, a non-standard endpoint in `submission.env`:
+
+```ini
+MODEL_NAME=openai/my-model
+API_BASE=https://my-gateway.example/v1
+API_KEY=...
+MODEL_KWARGS={"custom_llm_provider":"openai"}
+PRICE_IN=1.5
+PRICE_OUT=6.0
+```
+
+Equivalently with raw `-e` flags (the env-file just bundles these):
 
 ```bash
 docker run --rm \

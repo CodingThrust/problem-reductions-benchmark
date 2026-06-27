@@ -18,6 +18,7 @@ MODEL    ?= anthropic/claude-sonnet-4-6
 IMAGE    ?= problem-reductions-runner:v0.6.0
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
+ENV_FILE ?= submission.env
 
 .PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build runner-smoke submission score-local
 
@@ -49,15 +50,22 @@ runner-smoke:
 	@echo "Wrote /tmp/submission.smoke.json"
 
 ## Run the real budgeted runner via Docker → ./out/submission.json.
-## Requires ANTHROPIC_API_KEY (or the key matching MODEL) in the environment.
+## Preferred: copy submission.env.example → submission.env, fill it, then `make submission`
+## (all config in one --env-file). Falls back to MODEL + ANTHROPIC_API_KEY env if no file.
 submission:
 	mkdir -p out
-	docker run --rm \
-	  -e MODEL_NAME=$(MODEL) \
-	  -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-	  -e BUDGET_USD=20 \
-	  -v "$(PWD)/out:/out" \
-	  $(IMAGE)
+	@if [ -f "$(ENV_FILE)" ]; then \
+	  echo "Using --env-file $(ENV_FILE)"; \
+	  docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE); \
+	else \
+	  echo "No $(ENV_FILE) (copy submission.env.example); using MODEL + ANTHROPIC_API_KEY env"; \
+	  docker run --rm \
+	    -e MODEL_NAME=$(MODEL) \
+	    -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
+	    -e BUDGET_USD=20 \
+	    -v "$(PWD)/out:/out" \
+	    $(IMAGE); \
+	fi
 	@echo "Submission → ./out/submission.json"
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).

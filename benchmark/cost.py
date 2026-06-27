@@ -10,9 +10,9 @@ from tokens is what turns the $20 budget into a *hard* cap.
 For a budget guard, over-counting is safe and under-counting is not, so callers combine
 this figure with the gateway's via max() (see run_mini).
 
-Prices are USD per 1,000,000 tokens (the conventional unit). DEFAULT_PRICES is a small
-convenience table for common models as of 2026-06 — indicative only; the submitter's
---price flags always override it, and any model can be run by supplying its price.
+Prices are USD per 1,000,000 tokens (the conventional unit). There is deliberately NO
+built-in price table: a stale or wrong default would silently mis-meter the budget, so the
+price is always submitter-supplied (PRICE_IN / PRICE_OUT) for a real run.
 """
 from dataclasses import dataclass
 
@@ -59,24 +59,13 @@ class Price:
         ) / MTOK
 
 
-# Indicative public list prices as of 2026-06 (USD / 1M tokens). Override with --price.
-DEFAULT_PRICES: dict[str, Price] = {
-    "anthropic/claude-opus-4":   Price(15.0, 75.0, 1.5, 18.75),
-    "anthropic/claude-sonnet-4": Price(3.0, 15.0, 0.3, 3.75),
-    "anthropic/claude-haiku-4":  Price(1.0, 5.0, 0.1, 1.25),
-}
-
-
 def resolve_price(model: str, override: Price | None = None) -> Price | None:
-    """Submitter override wins; otherwise the longest matching default prefix; else None
-    (caller must then fall back to the gateway figure + step/token backstops)."""
-    if override is not None:
-        return override
-    best, best_len = None, -1
-    for prefix, price in DEFAULT_PRICES.items():
-        if model.startswith(prefix) and len(prefix) > best_len:
-            best, best_len = price, len(prefix)
-    return best
+    """Return the submitter-supplied price, or None if none was given.
+
+    Intentionally has no fallback table — `model` is accepted only for a uniform call site.
+    None means "no price"; the caller decides what to do (a real run must reject it; see
+    run_submission, which requires PRICE_IN/PRICE_OUT)."""
+    return override
 
 
 def _get(obj, key: str, default=0):
