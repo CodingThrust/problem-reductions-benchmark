@@ -7,7 +7,7 @@ claimed bug and recomputes the score from what pred actually confirms. The submi
 self-reported ``bugs_found`` is ignored entirely.
 
 Produces two views of the result:
-  * ``scored``          — results.schema.json-compatible (drop into results/ → build_index)
+  * ``scored``          — results.schema.json-compatible (the backend's per-submission output)
   * ``leaderboard_entry`` — the Space's ranked-row shape (adds budget_cap + bug_certificates)
 
 CLI:

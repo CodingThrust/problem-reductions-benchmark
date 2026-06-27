@@ -1,8 +1,8 @@
-# Generated HF Space bundle (rebuild with `make space`)
-space/site/
-
 # Generated HF Dataset bundle (rebuild with `build_dataset.py`)
 dataset/
+
+# Local scoring output (backend_score / score-local writes here)
+results/
 
 # Python bytecode
 __pycache__/

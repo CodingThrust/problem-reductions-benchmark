@@ -2,7 +2,7 @@
 
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
-**Live leaderboard:** https://ferrari-72.github.io/problem-reductions-benchmark/
+The leaderboard and submission flow live on the Hugging Face Space (Gradio). See `SUBMISSION.md` to submit a run.
 
 ## What this measures
 
@@ -46,7 +46,7 @@ class MyRunner(AgentRunner):
 
 Then pass it to `Scheduler` in `benchmark/scheduler.py`. See `MiniSweRunner` for a full example.
 
-Results must be written to `results/{safe_model}.json` following `benchmark/results.schema.json`.
+A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and submitted to the Space, where the backend re-verifies every certificate. See `SUBMISSION.md`.
 
 ## How to run locally
 
@@ -56,21 +56,18 @@ Requirements:
 - An API key for your model
 
 ```bash
-# Set env vars
-export ANTHROPIC_API_KEY=sk-...
-export REPO_DIR=/path/to/problem-reductions   # must be at pinned commit
-
-# Run a small session (2 rules, $2 budget)
-make demo
-
-# Rebuild the leaderboard index
-make build-index
+# Smoke-test the runner wiring (no API key, no pred)
+make runner-smoke
 
 # Run all unit tests (no API key needed)
 make test-unit
 
-# Validate results files against schema
-make validate-results
+# Test the verifier against the fixtures (no API key)
+make verify-calibration
+
+# Run the real budgeted runner via Docker → ./out/submission.json
+export ANTHROPIC_API_KEY=sk-...
+make submission
 ```
 
 Key `make` targets:
@@ -79,10 +76,10 @@ Key `make` targets:
 |--------|-------------|
 | `make test-unit` | All unit tests, no API key needed |
 | `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
-| `make verify-judgment` | Pred-free sanity tests (docs, CI, observability) |
-| `make validate-results` | Schema-check all `results/*.json` |
-| `make build-index` | Rebuild `results/index.json` |
-| `make demo` | Run a tiny real session + rebuild index |
+| `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
+| `make runner-smoke` | Smoke-test the runner wiring (FakeRunner, no API) |
+| `make submission` | Run the real budgeted runner via Docker |
+| `make score-local` | Score submissions with the zero-trust backend |
 
 ## How to read the metrics
 

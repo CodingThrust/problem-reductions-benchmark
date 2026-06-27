@@ -10,7 +10,7 @@ tags:
 # Problem-Reductions Benchmark — Showcase & User Guide
 
 > Repo: https://github.com/Ferrari-72/problem-reductions-benchmark
-> Leaderboard: https://ferrari-72.github.io/problem-reductions-benchmark/
+> Leaderboard & submission: Hugging Face Space (Gradio) — see `SUBMISSION.md`
 > Library: https://github.com/CodingThrust/problem-reductions (pinned commit `aa2d1a1`)
 
 ---
@@ -140,22 +140,16 @@ print(f'bugs={d[\"bugs_found\"]}, cost=\${d[\"total_cost_usd\"]:.4f}, tokens={d[
 "
 ```
 
-### 3.5 重建 Leaderboard
+### 3.5 打包并提交结果
+
+不再走 "results/ + GitHub Pages + PR" 那套。现在用 Docker runner 产出一个自描述的 `submission.json`,提交到 HF Space,后端零信任重验每条 certificate 并自动排名:
 
 ```bash
-python benchmark/build_index.py
-# 生成 results/index.json，GitHub Pages 自动读取并渲染 leaderboard
+make submission          # → ./out/submission.json（真实跑分，需 API key + 价格）
+# 然后在 Space 的 Submit 页上传 out/submission.json
 ```
 
-### 3.6 提交结果（PR）
-
-```bash
-git checkout -b results/YOUR_MODEL_NAME
-git add results/YOUR_MODEL.json results/index.json
-git commit -m "add YOUR_MODEL results: N rules, XK tok, Y bugs"
-git push origin results/YOUR_MODEL_NAME
-# 然后在 GitHub 开 PR
-```
+详见 `SUBMISSION.md`(价格 / 预算硬上限 / 提交字段)。
 
 ---
 
@@ -197,12 +191,12 @@ for line in sys.stdin:
 
 可以看到 agent 实际执行的 `pred` 命令、对 reduction 逻辑的推理分析——验证模型真的在"思考"而不是猜测。
 
-### 4.3 Leaderboard 实时数据
+### 4.3 Leaderboard
 
-访问 https://ferrari-72.github.io/problem-reductions-benchmark/ 展示：
-- 当前已有 DeepSeek (`deepseek/deepseek-chat`) 的真实跑分
-- `bugs_found`（去重后的 rule 数）是横向对比不同模型的核心指标
-- 表格按 `bugs_found` 排序，并列时用 `efficiency_bugs_per_ktok` 打破平手；新提交的模型会自动出现
+榜单在 HF Gradio Space 上(`space-gradio/`,带 Submit 页):
+- `bugs_found`(去重后的 rule 数)是横向对比不同模型的核心指标
+- 按 `bugs_found` 排序,并列时用 `efficiency_bugs_per_ktok` 打破平手;后端重验通过后自动上榜
+- 自报美元仅作参考(价格由提交者声明),效率主指标是 bugs/Ktok
 
 ### 4.4 独立 Verifier（Zero Trust）
 
@@ -281,18 +275,18 @@ round-trip 判定需要 `pred solve` 两边(优先 ILP,退 brute-force)。对于
 ```
 problem-reductions-benchmark/
 ├── benchmark/
-│   ├── run_mini.py          # 主入口
-│   ├── verify.py            # 独立 verifier（zero trust）
-│   ├── config.yaml          # agent prompt + step_limit
-│   ├── env_setup.py         # pred 环境检查
-│   └── tests/               # 185 个单元测试
-├── results/
-│   ├── deepseek_deepseek-chat.json   # 已有跑分
-│   ├── index.json           # leaderboard 数据源
-│   └── trajectories/        # agent 轨迹 JSONL
-├── docs/
-│   └── index.html           # GitHub Pages leaderboard
-└── SHOWCASE.md              # 本文件
+│   ├── run_submission.py     # 主入口：跑预算内 session → submission.json
+│   ├── run_mini.py           # 单条 rule 的 agent 会话
+│   ├── scheduler.py          # 多模型/多规则调度 + 预算上限
+│   ├── cost.py               # token×价格 自算成本（硬上限）
+│   ├── verify.py             # 独立 verifier（zero trust，round-trip）
+│   ├── verify_submission.py  # 后端打分（重验每条 cert）
+│   ├── backend_score.py      # 提交队列评分 + webhook 入口
+│   ├── config.yaml           # agent prompt + step_limit
+│   └── tests/                # 单元测试
+├── space-gradio/             # HF Gradio Space（榜单 + Submit）
+├── docker/Dockerfile         # runner 镜像（pred + agent）
+└── SHOWCASE.md               # 本文件
 ```
 
 ---

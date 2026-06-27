@@ -65,17 +65,15 @@ The **accept path** uses genuine-bug fixtures that are the benchmark answer key,
 
 ## Adding a new model
 
-1. Implement `AgentRunner` (see `benchmark/runner.py` and README).
-2. Run a session and save results to `results/{safe_model}.json`.
-3. Run `make validate-results` to confirm the file matches the schema.
-4. Run `make build-index` to rebuild the index.
-5. Open a PR — CI will re-validate and redeploy automatically.
+1. Implement `AgentRunner` (see `benchmark/runner.py` and README) — or just use the default `MiniSweRunner` via the Docker runner.
+2. Produce a `submission.json` (`make submission`, or `python -m benchmark.run_submission …`).
+3. Submit it on the Space; the backend re-verifies every certificate and ranks it. See `SUBMISSION.md`.
 
 ## Running CI locally
 
 ```bash
-python -m benchmark.validate_results --results-dir results
-python -m benchmark.build_index --results-dir results
+pytest -m "not integration"          # unit + pred-free sanity tests
+python -m benchmark.verify --calibrate   # verifier calibration
 ```
 
-These are the exact commands the CI workflow runs before deploying.
+These are the exact commands `.github/workflows/ci.yml` runs.
