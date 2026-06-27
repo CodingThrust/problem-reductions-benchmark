@@ -21,6 +21,7 @@ process_hf in a `while True: ...; sleep(N)` loop.
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -159,7 +160,6 @@ def process_hf(subs_repo: str, results_repo: str, repo_dir: str | None = None,
     except ImportError as e:  # pragma: no cover - env without huggingface_hub
         raise RuntimeError("huggingface_hub is required for --hf mode") from e
 
-    import os
     import tempfile
     token = token or os.environ.get("HF_TOKEN")
     if not token:
@@ -179,21 +179,116 @@ def process_hf(subs_repo: str, results_repo: str, repo_dir: str | None = None,
     return summary
 
 
+# ── webhook → HF Job entry ────────────────────────────────────────────────────
+# Event-driven replacement for a polling Space: register a HF webhook on the
+# submissions dataset that fires an HF Job; the Job runs `backend_score --webhook`,
+# which reads the delivery from WEBHOOK_PAYLOAD and re-runs the (idempotent) queue.
+# Avoids an always-on Space (free Spaces auto-pause at 48h + ephemeral disk).
+
+def parse_webhook_payload(payload: dict) -> dict:
+    """Pull repo + event fields from a HF webhook payload (schema v3)."""
+    repo = payload.get("repo") or {}
+    event = payload.get("event") or {}
+    return {
+        "repo_id": repo.get("name"),
+        "repo_type": repo.get("type"),
+        "action": event.get("action"),
+        "scope": event.get("scope"),
+    }
+
+
+def _is_content_change(scope) -> bool:
+    """True for repo content events (a new/updated submission file).
+
+    Ignores discussion/comment scopes ("discussion", "discussion.comment") so PR chatter
+    doesn't trigger scoring; content events use the "repo.*" scope (e.g. "repo.content").
+    """
+    return bool(scope) and str(scope).startswith("repo")
+
+
+def process_webhook(
+    payload: dict | None = None,
+    *,
+    submissions_repo: str | None = None,
+    results_repo: str | None = None,
+    repo_dir: str | None = None,
+    token: str | None = None,
+    expected_secret: str | None = None,
+    provided_secret: str | None = None,
+) -> list[dict]:
+    """Handle one HF webhook delivery (run inside an HF Job).
+
+    Reads the payload from the arg or the WEBHOOK_PAYLOAD env var (HF injects it). On a
+    content change to the submissions repo it re-runs the scoring queue via process_hf —
+    idempotent, so only newly-PENDING submissions get scored. Returns the per-submission
+    summary, or [] when the delivery is ignored (non-content event).
+
+    Repos resolve from args, else env SUBMISSIONS_REPO / RESULTS_REPO; submissions_repo
+    finally falls back to the repo named in the payload.
+    """
+    if payload is None:
+        raw = os.environ.get("WEBHOOK_PAYLOAD")
+        payload = json.loads(raw) if raw else {}
+
+    expected = expected_secret if expected_secret is not None else os.environ.get("WEBHOOK_SECRET")
+    if expected and provided_secret is not None and provided_secret != expected:
+        raise PermissionError("webhook secret mismatch — refusing to score")
+
+    info = parse_webhook_payload(payload)
+    if not _is_content_change(info.get("scope")):
+        return []
+
+    subs = submissions_repo or os.environ.get("SUBMISSIONS_REPO") or info.get("repo_id")
+    results = results_repo or os.environ.get("RESULTS_REPO")
+    if not subs or not results:
+        raise RuntimeError(
+            "submissions + results repos required "
+            "(args, or env SUBMISSIONS_REPO / RESULTS_REPO)")
+    return process_hf(subs, results, repo_dir=repo_dir, token=token)
+
+
+def register_webhook(submissions_repo: str, job_id: str, *,
+                     secret: str | None = None, token: str | None = None):
+    """One-off: register a HF webhook that fires HF Job `job_id` when the submissions
+    dataset changes. Needs huggingface_hub + a token. Returns the created WebhookInfo.
+    """
+    try:
+        from huggingface_hub import create_webhook
+    except ImportError as e:  # pragma: no cover
+        raise RuntimeError("huggingface_hub is required to register a webhook") from e
+    return create_webhook(
+        job_id=job_id,
+        watched=[{"type": "dataset", "name": submissions_repo}],
+        domains=["repo"],
+        secret=secret,
+        token=token,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backend scoring queue for submissions")
     parser.add_argument("--local", nargs=2, metavar=("SUBS_DIR", "RESULTS_DIR"),
                         help="Score submissions from a local directory")
     parser.add_argument("--hf-submissions", help="HF dataset repo holding submissions")
     parser.add_argument("--hf-results", help="HF dataset repo to write scored results to")
+    parser.add_argument("--webhook", action="store_true",
+                        help="Webhook→Job mode: read WEBHOOK_PAYLOAD + SUBMISSIONS_REPO/"
+                             "RESULTS_REPO env and score the changed submissions")
     parser.add_argument("--repo-dir", default=None, help="problem-reductions repo (default: pred on PATH)")
     args = parser.parse_args()
 
-    if args.local:
+    if args.webhook:
+        summary = process_webhook(submissions_repo=args.hf_submissions,
+                                  results_repo=args.hf_results, repo_dir=args.repo_dir)
+        if not summary:
+            print("Webhook delivery ignored (not a content change).")
+            return
+    elif args.local:
         summary = process_local(args.local[0], args.local[1], args.repo_dir)
     elif args.hf_submissions and args.hf_results:
         summary = process_hf(args.hf_submissions, args.hf_results, args.repo_dir)
     else:
-        parser.error("use --local SUBS_DIR RESULTS_DIR, or --hf-submissions and --hf-results")
+        parser.error("use --local SUBS_DIR RESULTS_DIR, --hf-submissions/--hf-results, or --webhook")
 
     for s in summary:
         line = f"{s['status']:8}  {s['submission']}"

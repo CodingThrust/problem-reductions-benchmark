@@ -95,6 +95,53 @@ class TestProcessLocal:
         assert status["status"] == "FAILED"
 
 
+class TestWebhook:
+    def _payload(self, scope="repo.content", repo="org/subs", rtype="dataset"):
+        return {"event": {"action": "update", "scope": scope},
+                "repo": {"type": rtype, "name": repo},
+                "webhook": {"id": "w", "version": 3}}
+
+    def test_parse_payload(self):
+        info = bs.parse_webhook_payload(self._payload())
+        assert info == {"repo_id": "org/subs", "repo_type": "dataset",
+                        "action": "update", "scope": "repo.content"}
+
+    def test_content_change_triggers_scoring(self, monkeypatch):
+        called = {}
+        monkeypatch.setattr(bs, "process_hf",
+                            lambda subs, results, repo_dir=None, token=None:
+                            called.update(subs=subs, results=results) or [{"status": "FINISHED"}])
+        out = bs.process_webhook(self._payload(repo="org/subs"),
+                                 results_repo="org/results")
+        assert out == [{"status": "FINISHED"}]
+        assert called == {"subs": "org/subs", "results": "org/results"}
+
+    def test_discussion_event_ignored(self, monkeypatch):
+        monkeypatch.setattr(bs, "process_hf",
+                            lambda *a, **k: pytest.fail("should not score on discussion"))
+        assert bs.process_webhook(self._payload(scope="discussion"),
+                                  results_repo="org/results") == []
+
+    def test_secret_mismatch_raises(self):
+        with pytest.raises(PermissionError):
+            bs.process_webhook(self._payload(), results_repo="org/results",
+                               expected_secret="s3cret", provided_secret="wrong")
+
+    def test_missing_results_repo_raises(self, monkeypatch):
+        monkeypatch.delenv("RESULTS_REPO", raising=False)
+        with pytest.raises(RuntimeError):
+            bs.process_webhook(self._payload(), results_repo=None)
+
+    def test_payload_from_env(self, monkeypatch):
+        monkeypatch.setenv("WEBHOOK_PAYLOAD", json.dumps(self._payload(repo="org/s")))
+        monkeypatch.setenv("RESULTS_REPO", "org/r")
+        monkeypatch.setattr(bs, "process_hf",
+                            lambda subs, results, repo_dir=None, token=None:
+                            [{"subs": subs, "results": results}])
+        out = bs.process_webhook()
+        assert out == [{"subs": "org/s", "results": "org/r"}]
+
+
 @pytest.mark.integration
 class TestRealFixture:
     def test_valid_bug_end_to_end(self, tmp_path):

@@ -90,8 +90,34 @@ For each `PENDING` submission it:
 4. writes the scored result + a ranked `leaderboard.json`, and sets status
    `FINISHED` (or `FAILED` with a reason).
 
-To run it as a service, wrap `process_local` / `process_hf` in a polling loop, or trigger
-it from a webhook on the submissions dataset as an HF Job.
+### Running the scorer as a service
+
+**Recommended: webhook → HF Job (event-driven).** Register a webhook on the submissions
+dataset that fires an HF Job on every change; the Job runs `backend_score --webhook`,
+reads the delivery from `WEBHOOK_PAYLOAD`, and re-runs the (idempotent) queue. No
+always-on Space — free Spaces auto-pause after 48h and have ephemeral disk, so a polling
+loop there stops silently.
+
+```python
+# one-off registration (needs a write token):
+from benchmark.backend_score import register_webhook
+register_webhook("isPANN/problem-reductions-submissions",
+                 job_id="<your-hf-job-id>", secret="<shared-secret>", token="<HF_TOKEN>")
+```
+
+The Job runs this image with:
+
+```bash
+# env injected by HF: WEBHOOK_PAYLOAD, WEBHOOK_SECRET; you set SUBMISSIONS_REPO/RESULTS_REPO/HF_TOKEN
+python -m benchmark.backend_score --webhook
+```
+
+Only `repo.*` content events trigger scoring; discussion/comment events are ignored, and
+the shared `WEBHOOK_SECRET` is checked before any work runs.
+
+**Simpler fallback: polling.** Wrap `process_local` / `process_hf` in a
+`while True: …; sleep(N)` loop on paid always-on hardware. Fine for a quick start, but the
+webhook→Job path is cheaper (pay-per-minute) and more robust.
 
 ## Why this is hard to cheat
 
