@@ -15,7 +15,7 @@ itself is covered by the pytest suite (tests/test_run_submission.py), not here.
 """
 from __future__ import annotations
 
-from benchmark.cost import Price
+from benchmark.cost import Price, usage_from_response
 from benchmark.env_setup import verify_pred_version
 from benchmark.run_mini import DEFAULT_MAX_TOKENS, _build_model, list_rules
 
@@ -54,19 +54,22 @@ def run_checks(
     except Exception as e:
         results.append(("library rules", False, str(e)))
 
-    # 3. one real model call through the exact batch code path (validates key, endpoint,
-    #    model name, model_kwargs, and that pricing computes — cost here is our token×price
-    #    figure via the PricedLitellmModel override).
+    # 3. one real model call through the exact batch model config (validates key, endpoint,
+    #    model name, model_kwargs, and that pricing computes).
     try:
         model = _build_model(model_name, api_base, max_tokens, price,
                              model_kwargs=model_kwargs, api_key=api_key)
-        resp = model.query([{"role": "user", "content": PROBE_PROMPT}])
-        content = resp.get("content", "") if isinstance(resp, dict) else str(resp)
-        extra = (resp.get("extra") or {}) if isinstance(resp, dict) else {}
-        detail = f"replied {len(content)} chars"
-        cost = extra.get("cost")
-        if cost is not None:
-            detail += f", this call ≈ ${cost:.6f}"
+        msgs = [{"role": "user", "content": PROBE_PROMPT}]
+        # Call the raw completion, NOT model.query(): query() also parses the reply into an
+        # agent bash-action and raises FormatError on a trivial probe. We only need to prove
+        # the API round-trips and that pricing computes from the returned usage.
+        prep = (model._prepare_messages_for_api(msgs)
+                if hasattr(model, "_prepare_messages_for_api") else msgs)
+        response = model._query(prep)
+        u = usage_from_response(getattr(response, "usage", None))
+        detail = f"API reachable; {u.total_tokens} tokens this call"
+        if price is not None:
+            detail += f", ≈ ${price.cost(u):.6f}"
         results.append(("model call", True, detail))
     except Exception as e:
         results.append(("model call", False, f"{type(e).__name__}: {e}"))

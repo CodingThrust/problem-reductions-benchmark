@@ -5,17 +5,28 @@ The real model call can't be exercised without credentials, so we mock the three
 touch-points (pred version, rule listing, model build) and assert the check aggregation and
 the all-pass/any-fail reporting are correct.
 """
+from types import SimpleNamespace
+
 from benchmark import preflight as pf
+from benchmark.cost import Price
 
 
 class _FakeModel:
-    def __init__(self, content="OK", cost=0.000123, raise_exc=None):
-        self._content, self._cost, self._raise = content, cost, raise_exc
+    """Mimics mini-swe-agent's LitellmModel low-level path used by preflight: _query returns
+    a litellm-shaped response with a .usage block."""
+    def __init__(self, prompt=6, completion=4, raise_exc=None):
+        self._usage = SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion,
+                                      prompt_tokens_details=None)
+        self._raise = raise_exc
 
-    def query(self, messages):
+    def _prepare_messages_for_api(self, messages):
+        return messages
+
+    def _query(self, messages):
         if self._raise is not None:
             raise self._raise
-        return {"content": self._content, "extra": {"cost": self._cost}}
+        return SimpleNamespace(usage=self._usage,
+                               choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))])
 
 
 def _patch(monkeypatch, *, ver="0.6.0", rules=("a", "b"), model=None, build_exc=None):
@@ -57,7 +68,8 @@ class TestRunChecks:
         assert call[0] is False and "401" in call[1]
 
     def test_model_call_cost_shown(self, monkeypatch):
-        _patch(monkeypatch, model=_FakeModel(cost=0.000456))
-        results = pf.run_checks("anthropic/x", repo_dir="/repo")
+        # 1M input @ $1 + 1M output @ $2 = $3 total for this "call".
+        _patch(monkeypatch, model=_FakeModel(prompt=1_000_000, completion=1_000_000))
+        results = pf.run_checks("anthropic/x", repo_dir="/repo", price=Price(1.0, 2.0))
         detail = dict((n, d) for n, _, d in results)["model call"]
-        assert "0.000456" in detail
+        assert "$3.0" in detail and "2000000 tokens" in detail
