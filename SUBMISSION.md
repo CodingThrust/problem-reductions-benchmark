@@ -42,8 +42,18 @@ docker run --rm \
 | `<PROVIDER>_API_KEY` | — | The key matching the model (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) |
 | `BUDGET_USD` | `20` | Total budget. **Must be 20 to be ranked.** |
 | `PER_RULE_BUDGET` | `0.5` | Per-rule cost cap |
+| `PRICE_IN` / `PRICE_OUT` | (built-in for known models) | **Your** model price, USD / 1M tokens. Spend is recomputed from token usage × this — that's what makes the budget a hard cap. Required together; pass both for any model not in the built-in table. |
+| `PRICE_CACHE_READ` / `PRICE_CACHE_WRITE` | `0` | Cache token prices, USD / 1M tokens (set for prompt-caching models) |
+| `SAFETY_MARGIN` | `1` | USD held back from the budget as overshoot headroom |
+| `MAX_TOKENS` | `8192` | Per-call output-token ceiling (bounds the budget-crossing call) |
 | `MAX_RULES` | (all) | Cap rules attempted (smoke runs) |
 | `OUTPUT` | `/out/submission.json` | Where the submission is written |
+
+> Why you pass the price: you pay your own bill at your own rate, so you set it. The runner
+> recomputes spend from raw token counts × your price rather than trusting the model
+> gateway's dollar figure (which can be stale or wrong), so `$20` is a real cap. The
+> backend re-verifies bugs regardless, and ranks on **bugs/Ktok** (token counts are
+> auditable); self-reported dollars are advisory only.
 
 No image yet? Smoke-test the wiring with no API key:
 `make runner-smoke` (uses `FakeRunner`, writes a dummy submission).
@@ -126,8 +136,9 @@ webhook→Job path is cheaper (pay-per-minute) and more robust.
 - Counterexamples are **deterministically re-checkable** — we don't even need a hidden
   answer key; a bug either violates the rule under `pred` or it doesn't.
 - Distinct-rule de-duplication caps the count at one per rule.
-- The $20 budget is enforced inside the runner (LiteLLM per-call cost tracking); the
-  Space cross-checks that reported spend is within the cap.
+- The $20 budget is enforced inside the runner by recomputing spend from raw token usage ×
+  your declared price (not the gateway's self-reported dollars), held back by a safety
+  margin and bounded per call by `MAX_TOKENS`; the Space cross-checks reported spend.
 
 ## Status: framework
 

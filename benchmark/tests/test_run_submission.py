@@ -74,8 +74,16 @@ class TestRunFake:
     def test_total_spend_within_budget(self, tmp_path):
         repo = _fake_repo(tmp_path, ["a", "b", "c", "d", "e"])
         sub = rs.run("fake/model", str(repo), budget=0.05, per_rule_budget=0.02,
-                     fake=True, fake_cost=0.02, library_commit="c")
+                     fake=True, fake_cost=0.02, safety_margin=0.0, library_commit="c")
         assert sub["total_cost_usd"] <= 0.05 + 1e-9
+
+    def test_safety_margin_held_back(self, tmp_path):
+        # Effective cap = budget - margin; spend stays under it (the reported cap is unchanged).
+        repo = _fake_repo(tmp_path, ["a", "b", "c", "d", "e", "f"])
+        sub = rs.run("fake/model", str(repo), budget=0.10, per_rule_budget=0.01,
+                     fake=True, fake_cost=0.01, safety_margin=0.04, library_commit="c")
+        assert sub["total_cost_usd"] <= 0.06 + 1e-9
+        assert sub["budget_cap"] == 0.10  # the headline cap is still the full budget
 
     def test_bug_results_counted(self, tmp_path):
         repo = _fake_repo(tmp_path, ["a", "b"])

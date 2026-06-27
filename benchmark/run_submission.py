@@ -97,8 +97,15 @@ def run(
     output: Path | None = None,
     created_at: str | None = None,
     submitted_by: str | None = None,
+    price=None,
+    max_tokens: int | None = None,
+    safety_margin: float = 1.0,
 ) -> dict:
     """Run the full budgeted session for one model and return the submission dict.
+
+    ``price`` is the submitter's per-token rate (benchmark.cost.Price); with it, spend is
+    recomputed from token usage so the budget is a hard cap. ``safety_margin`` is held back
+    from the budget so the boundary-crossing call still lands under it.
 
     In ``fake`` mode no API key or pred binary is needed (FakeRunner) — used by tests
     and for smoke-running the container wiring.
@@ -114,7 +121,7 @@ def run(
         runner = FakeRunner(cost_per_rule=fake_cost, result=fake_result)
     else:
         ctx = EnvContext(repo_path=repo, pred_binary=find_pred_binary(), commit_hash=commit)
-        runner = MiniSweRunner(api_base=api_base)
+        runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens)
 
     rules = list_rules(str(repo))
     if max_rules is not None:
@@ -132,6 +139,7 @@ def run(
             ctx=ctx,
             resume=False,
             parallelism=1,
+            safety_margin=safety_margin,
         )
         completed = scheduler.run_all()
         spent = scheduler._spent.get(model)
@@ -154,6 +162,11 @@ def _env(name: str, default: str | None = None) -> str | None:
     return os.environ.get(name, default)
 
 
+def _float_env(name: str) -> float | None:
+    v = os.environ.get(name)
+    return float(v) if v else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Budgeted bug-finding runner → submission.json")
     parser.add_argument("--model", default=_env("MODEL_NAME"), help="LiteLLM model name (env MODEL_NAME)")
@@ -169,12 +182,40 @@ def main() -> None:
     parser.add_argument("--max-rules", type=lambda v: int(v) if v else None,
                         default=_env("MAX_RULES"), help="Cap rules attempted (smoke runs)")
     parser.add_argument("--submitted-by", default=_env("SUBMITTED_BY"))
+    # Submitter-supplied price (USD / 1M tokens). You pay the bill, so you set the rate; we
+    # recompute spend from token usage instead of trusting the gateway. Omit to use a built-in
+    # default for known models (see benchmark/cost.py), or the gateway figure if unknown.
+    parser.add_argument("--price-in", type=float, default=_float_env("PRICE_IN"),
+                        help="USD per 1M input tokens (env PRICE_IN)")
+    parser.add_argument("--price-out", type=float, default=_float_env("PRICE_OUT"),
+                        help="USD per 1M output tokens (env PRICE_OUT)")
+    parser.add_argument("--price-cache-read", type=float, default=_float_env("PRICE_CACHE_READ"),
+                        help="USD per 1M cache-read tokens (env PRICE_CACHE_READ)")
+    parser.add_argument("--price-cache-write", type=float, default=_float_env("PRICE_CACHE_WRITE"),
+                        help="USD per 1M cache-write tokens (env PRICE_CACHE_WRITE)")
+    parser.add_argument("--max-tokens", type=lambda v: int(v) if v else None,
+                        default=_env("MAX_TOKENS"), help="Per-call output-token ceiling")
+    parser.add_argument("--safety-margin", type=float,
+                        default=float(_env("SAFETY_MARGIN", "1.0") or 1.0),
+                        help="USD held back from the budget as overshoot headroom (default 1)")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
                         help="No API/pred — FakeRunner smoke test")
     args = parser.parse_args()
 
     if not args.model:
         parser.error("--model (or env MODEL_NAME) is required")
+
+    from benchmark.cost import Price, resolve_price
+    override = None
+    if args.price_in is not None and args.price_out is not None:
+        override = Price(args.price_in, args.price_out,
+                         args.price_cache_read or 0.0, args.price_cache_write or 0.0)
+    elif args.price_in is not None or args.price_out is not None:
+        parser.error("--price-in and --price-out must be given together")
+    price = resolve_price(args.model, override)
+    if price is None and not args.fake:
+        print("WARNING: no price for this model — spend falls back to the gateway figure; "
+              "pass --price-in/--price-out for a hard cap.")
 
     import datetime
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -192,6 +233,9 @@ def main() -> None:
         output=Path(args.output),
         created_at=created_at,
         submitted_by=args.submitted_by,
+        price=price,
+        max_tokens=args.max_tokens,
+        safety_margin=args.safety_margin,
     )
     print(f"\n{sub['bugs_found']} claimed bugs | ${sub['total_cost_usd']:.4f} | "
           f"{sub['rules_tested']} rules attempted")

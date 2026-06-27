@@ -41,11 +41,14 @@ class Scheduler:
         ctx,
         resume: bool = False,
         parallelism: int = 1,
+        safety_margin: float = 0.0,
     ):
         self.runner = runner
         self.models = models
         self.rules = rules
-        self.total_budget = total_budget
+        # Stop with margin: never plan to spend the last `safety_margin` dollars, so the
+        # call that crosses the line still lands under the true cap (cost_limit=19 not 20).
+        self.total_budget = max(total_budget - safety_margin, 0.0)
         self.per_rule_budget = per_rule_budget
         self.results_dir = Path(results_dir)
         self.checkpoint_path = Path(checkpoint_path)

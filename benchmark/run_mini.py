@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from benchmark.cost import Price, extract_usage, usage_from_response
 from benchmark.env_context import EnvContext
 from benchmark.env_setup import setup_env
 from benchmark.verify import count_bugs, verify
@@ -19,6 +20,9 @@ SKIP_RULES = {"mod", "traits", "graph_helpers", "analysis", "cost", "registry", 
 
 # Rough average cost per 1K tokens (used as fallback when model doesn't report usage)
 AVG_COST_PER_KTOK = 6.0
+# Per-call output-token ceiling — bounds the single call that may cross the budget line to
+# well under $1 even at premium prices. The submitter can override via --max-tokens.
+DEFAULT_MAX_TOKENS = 8192
 
 
 def list_rules(repo_dir: str) -> list[str]:
@@ -57,6 +61,31 @@ def save_trajectory(messages: list, path: Path) -> None:
             f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
 
 
+def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None):
+    """A LitellmModel whose cost is OUR token×price figure, so mini-swe-agent's own
+    per-step ``cost_limit`` enforces the per-rule budget with the authoritative number and
+    never raises on an unpriceable model. ``api_base``/``max_tokens`` go through
+    ``model_kwargs`` (forwarded to litellm.completion) — they are NOT top-level config
+    fields in mini-swe-agent v2 and would otherwise be silently dropped."""
+    from minisweagent.models.litellm_model import LitellmModel
+
+    class PricedLitellmModel(LitellmModel):
+        def _calculate_cost(self, response):
+            if price is not None:
+                try:
+                    return {"cost": price.cost(usage_from_response(getattr(response, "usage", None)))}
+                except Exception:
+                    pass
+            return super()._calculate_cost(response)
+
+    mk: dict = {}
+    if max_tokens:
+        mk["max_tokens"] = max_tokens  # per-call ceiling → bounds the budget-crossing call
+    if api_base:
+        mk["api_base"] = api_base
+    return PricedLitellmModel(model_name=model_name, model_kwargs=mk)
+
+
 def run_one(
     model_name: str,
     ctx: EnvContext,
@@ -64,11 +93,12 @@ def run_one(
     cost_limit: float,
     api_base: str | None = None,
     trajectory_dir: Path | None = None,
+    price: Price | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict:
     """Run one bug-hunting session for a single rule. Returns a result dict."""
     from minisweagent.agents.default import DefaultAgent
     from minisweagent.environments.local import LocalEnvironment
-    from minisweagent.models.litellm_model import LitellmModel
 
     safe_name = rule_name.replace("-", "_")
     rule_file = ctx.repo_path / "src" / "rules" / f"{rule_name}.rs"
@@ -77,12 +107,8 @@ def run_one(
     agent_cfg = config.get("agent", {})
     agent_cfg["cost_limit"] = cost_limit
 
-    model_kwargs = {"model_name": model_name}
-    if api_base:
-        model_kwargs["api_base"] = api_base
-
     agent = DefaultAgent(
-        LitellmModel(**model_kwargs),
+        _build_model(model_name, api_base, max_tokens, price),
         LocalEnvironment(),
         **agent_cfg,
     )
@@ -98,9 +124,18 @@ def run_one(
     cert = None
     try:
         agent.run(task=rule_name)
-        cost = agent.cost
-        total_tokens = extract_total_tokens(agent.messages)
+        # agent.cost is already our token×price figure (see _build_model), which is what
+        # mini-swe-agent's per-step cost_limit enforced. Cross-check it against a fresh
+        # recompute over the whole trajectory and take the max — never under-count.
+        usage = extract_usage(agent.messages)
+        agent_cost = agent.cost
+        recomputed = price.cost(usage) if price is not None else 0.0
+        cost = max(agent_cost, recomputed)
+        total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
         tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
+        usage_row = {"input": usage.input_tokens, "output": usage.output_tokens,
+                     "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
+                     "accounted_cost_usd": round(agent_cost, 6)}
         cert = parse_certificate(agent.messages)
         if trajectory_dir is not None:
             safe_model = model_name.replace("/", "_").replace(":", "_")
@@ -120,6 +155,7 @@ def run_one(
             "cost": cost,
             "tokens_k": tokens_k,
             "steps": agent.n_calls,
+            "usage": usage_row,
         }
 
     # Ensure the certificate carries the rule name
@@ -137,6 +173,7 @@ def run_one(
             "steps": agent.n_calls,
             "reject_reason": verdict.reason,
             "certificate": cert,
+            "usage": usage_row,
         }
 
     # A confirmed certificate on a fixed library commit is a bug, full stop —
@@ -149,6 +186,7 @@ def run_one(
         "steps": agent.n_calls,
         "certificate": cert,
         "verify_details": verdict.details,
+        "usage": usage_row,
     }
 
 

@@ -39,11 +39,19 @@ class FakeRunner(AgentRunner):
 
 
 class MiniSweRunner(AgentRunner):
-    """Wraps benchmark.run_mini.run_one() — the default real agent."""
+    """Wraps benchmark.run_mini.run_one() — the default real agent.
 
-    def __init__(self, api_base: str | None = None):
+    ``price`` (submitter-supplied per-token rate) makes cost accounting authoritative;
+    when None, run_one falls back to the gateway's figure plus the step/token backstops.
+    """
+
+    def __init__(self, api_base: str | None = None, price=None, max_tokens: int | None = None):
         self.api_base = api_base
+        self.price = price
+        self.max_tokens = max_tokens
 
     def run(self, ctx, model: str, rule_name: str, per_rule_budget: float) -> dict:
-        from benchmark.run_mini import run_one  # lazy import — keeps scheduler free of mini-swe deps
-        return run_one(model, ctx, rule_name, per_rule_budget, api_base=self.api_base)
+        from benchmark.run_mini import DEFAULT_MAX_TOKENS, run_one  # lazy — keep scheduler mini-swe-free
+        return run_one(model, ctx, rule_name, per_rule_budget, api_base=self.api_base,
+                       price=self.price,
+                       max_tokens=self.max_tokens if self.max_tokens is not None else DEFAULT_MAX_TOKENS)
