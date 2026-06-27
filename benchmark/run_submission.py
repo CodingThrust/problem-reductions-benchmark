@@ -12,18 +12,16 @@ total cap). Self-reported bug counts are advisory only — the backend re-verifi
 certificate with ``pred`` before anything reaches the leaderboard (see
 benchmark/verify_submission.py).
 
-Docker usage (key passed at run time, never baked into the image):
+Docker usage (all config — any provider — in submission.env, key never baked in):
 
-    docker run --rm \
-        -e MODEL_NAME=anthropic/claude-sonnet-4-6 \
-        -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-        -e BUDGET_USD=20 \
-        -v "$PWD/out:/out" \
+    docker run --rm --env-file submission.env -v "$PWD/out:/out" \
         problem-reductions-runner:v0.6.0
-    # → ./out/submission.json
+    # → ./out/submission.json   (template: submission.env.example)
 
-Env vars (CLI flags override): MODEL_NAME, BUDGET_USD, PER_RULE_BUDGET, OUTPUT,
-REPO_DIR, MAX_RULES, API_BASE, FAKE (1 → no API/pred, for smoke tests).
+Env vars (CLI flags override): MODEL_NAME, the matching API key (generic API_KEY or a
+provider var like OPENAI_API_KEY/ANTHROPIC_API_KEY), PRICE_IN/PRICE_OUT (required),
+API_BASE, MODEL_KWARGS, BUDGET_USD, PER_RULE_BUDGET, MAX_RULES, AGENT_CONFIG,
+AGENT_STRATEGY_FILE; FAKE (1 → no API/pred, used by tests).
 """
 import argparse
 import json

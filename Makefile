@@ -8,14 +8,16 @@
 #   preflight            Validate submission.env with one tiny real call before a full run
 #   submission           Run the real budgeted runner via Docker
 #
-# Required env vars for targets that call the AI:
-#   ANTHROPIC_API_KEY   (or OPENAI_API_KEY etc., depending on model)
-#   REPO_DIR            Path to a problem-reductions clone at the pinned commit
-#                       (default: ../problem-reductions)
+# Model + key + price for the real run live in submission.env (any provider — see
+# submission.env.example); preflight/submission read it via --env-file. REPO_DIR is only
+# for the local-clone targets (audit).
 
 REPO_DIR ?= ../problem-reductions
-MODEL    ?= anthropic/claude-sonnet-4-6
-IMAGE    ?= problem-reductions-runner:v0.6.0
+# PR_REF = the problem-reductions version this benchmark round targets (tag or commit).
+# It drives BOTH the build arg and the image tag, so bumping the round is one place:
+#   make runner-build PR_REF=v0.7.0   →   builds + tags problem-reductions-runner:v0.7.0
+PR_REF   ?= v0.6.0
+IMAGE    ?= problem-reductions-runner:$(PR_REF)
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
@@ -39,9 +41,10 @@ verify-judgment:
 verify-calibration:
 	python -m benchmark.verify --calibrate
 
-## Build the dockerized submission runner image (compiles pred + bundles the agent).
+## Build the dockerized submission runner image (compiles pred at PR_REF + bundles the agent).
 runner-build:
-	docker build -f docker/Dockerfile --target runner -t $(IMAGE) .
+	docker build -f docker/Dockerfile --target runner \
+	  --build-arg PR_REF=$(PR_REF) -t $(IMAGE) .
 
 ## Preflight: validate submission.env with one tiny real API call + pred/rules checks,
 ## BEFORE committing to a full $20 run. Spends a fraction of a cent. (The no-API wiring of
@@ -52,22 +55,14 @@ preflight:
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
 ## Run the real budgeted runner via Docker → ./out/submission.json.
-## Preferred: copy submission.env.example → submission.env, fill it, then `make submission`
-## (all config in one --env-file). Falls back to MODEL + ANTHROPIC_API_KEY env if no file.
+## Config lives in submission.env (copy submission.env.example, fill it in). Run `make
+## preflight` first to validate it. All providers go through the same file — nothing here
+## assumes a particular vendor.
 submission:
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
-	@if [ -f "$(ENV_FILE)" ]; then \
-	  echo "Using --env-file $(ENV_FILE)"; \
-	  docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE); \
-	else \
-	  echo "No $(ENV_FILE) (copy submission.env.example); using MODEL + ANTHROPIC_API_KEY env"; \
-	  docker run --rm \
-	    -e MODEL_NAME=$(MODEL) \
-	    -e ANTHROPIC_API_KEY=$(ANTHROPIC_API_KEY) \
-	    -e BUDGET_USD=20 \
-	    -v "$(PWD)/out:/out" \
-	    $(IMAGE); \
-	fi
+	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
 	@echo "Submission → ./out/submission.json"
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
@@ -97,4 +92,4 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  REPO_DIR=$(REPO_DIR)"
-	@echo "  MODEL=$(MODEL)"
+	@echo "  ENV_FILE=$(ENV_FILE)  (model/key/price for preflight + submission)"

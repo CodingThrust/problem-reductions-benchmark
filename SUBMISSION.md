@@ -102,8 +102,7 @@ docker run --rm \
 **Customize the agent's bug-hunting prompt** without rebuilding — mount your own files:
 
 ```bash
-docker run --rm \
-  -e MODEL_NAME=… -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+docker run --rm --env-file submission.env \
   -e AGENT_STRATEGY_FILE=/cfg/strategy.md \
   -v "$PWD/cfg:/cfg" -v "$PWD/out:/out" \
   problem-reductions-runner:v0.6.0

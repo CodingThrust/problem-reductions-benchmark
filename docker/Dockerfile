@@ -77,14 +77,10 @@ CMD ["--calibrate"]
 # the agent reads (rule files), on top of the runtime image (pred + benchmark code).
 #
 # Build:   docker build -f docker/Dockerfile --target runner -t problem-reductions-runner:v0.6.0 .
-# Run (API key passed at run time, never baked in):
-#   docker run --rm \
-#     -e MODEL_NAME=anthropic/claude-sonnet-4-6 \
-#     -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-#     -e BUDGET_USD=20 \
-#     -v "$PWD/out:/out" \
+# Run (all config — any provider — in submission.env; key never baked in):
+#   docker run --rm --env-file submission.env -v "$PWD/out:/out" \
 #     problem-reductions-runner:v0.6.0
-#   # → ./out/submission.json
+#   # → ./out/submission.json   (see submission.env.example / SUBMISSION.md)
 FROM runtime AS runner
 ARG PR_REF
 # Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.
