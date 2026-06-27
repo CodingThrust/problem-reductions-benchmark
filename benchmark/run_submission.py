@@ -32,7 +32,7 @@ import tempfile
 from pathlib import Path
 
 from benchmark.env_context import EnvContext
-from benchmark.env_setup import PINNED_COMMIT, find_pred_binary
+from benchmark.env_setup import PINNED_COMMIT, find_pred_binary, verify_pred_version
 from benchmark.run_mini import list_rules
 from benchmark.runner import FakeRunner, MiniSweRunner
 from benchmark.scheduler import Scheduler
@@ -52,6 +52,7 @@ def build_submission(
     created_at: str | None = None,
     submitted_by: str | None = None,
     total_cost_usd: float | None = None,
+    pred_version: str = "",
 ) -> dict:
     """Assemble the submission envelope from the scheduler's per-rule result rows.
 
@@ -77,6 +78,7 @@ def build_submission(
         "rules_tested": len(attempted),
         "results": rows,
         "runner_version": runner_version,
+        "pred_version": pred_version,
         "created_at": created_at,
         "submitted_by": submitted_by,
     }
@@ -117,10 +119,14 @@ def run(
         # EnvContext validates a real pred binary; in fake mode the scheduler only ever
         # reads ctx.commit_hash, so a lightweight stand-in is enough (no API/pred needed).
         from types import SimpleNamespace
-        ctx = SimpleNamespace(repo_path=repo, pred_binary=Path("pred"), commit_hash=commit)
+        ctx = SimpleNamespace(repo_path=repo, pred_binary=Path("pred"),
+                              commit_hash=commit, pred_version="")
         runner = FakeRunner(cost_per_rule=fake_cost, result=fake_result)
     else:
-        ctx = EnvContext(repo_path=repo, pred_binary=find_pred_binary(), commit_hash=commit)
+        pred_binary = find_pred_binary()
+        pred_ver = verify_pred_version(pred_binary)  # fail fast if pred != pinned version
+        ctx = EnvContext(repo_path=repo, pred_binary=pred_binary, commit_hash=commit,
+                         pred_version=pred_ver)
         runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens)
 
     rules = list_rules(str(repo))
@@ -148,6 +154,7 @@ def run(
     sub = build_submission(
         model, rows, budget_cap=budget, library_commit=commit,
         created_at=created_at, submitted_by=submitted_by, total_cost_usd=spent,
+        pred_version=getattr(ctx, "pred_version", ""),
     )
 
     if output is not None:
@@ -198,12 +205,18 @@ def main() -> None:
     parser.add_argument("--safety-margin", type=float,
                         default=float(_env("SAFETY_MARGIN", "1.0") or 1.0),
                         help="USD held back from the budget as overshoot headroom (default 1)")
+    parser.add_argument("--expected-pred-version", default=_env("EXPECTED_PRED_VERSION"),
+                        help="Require this pred version (default: pinned; empty string disables)")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
                         help="No API/pred — FakeRunner smoke test")
     args = parser.parse_args()
 
     if not args.model:
         parser.error("--model (or env MODEL_NAME) is required")
+
+    # verify_pred_version() reads EXPECTED_PRED_VERSION; surface the flag through it.
+    if args.expected_pred_version is not None:
+        os.environ["EXPECTED_PRED_VERSION"] = args.expected_pred_version
 
     from benchmark.cost import Price, resolve_price
     override = None

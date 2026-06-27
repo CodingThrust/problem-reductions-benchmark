@@ -21,10 +21,48 @@ from unittest.mock import patch, MagicMock
 
 from benchmark.env_setup import (
     PINNED_COMMIT,
+    PINNED_PRED_VERSION,
     find_pred_binary,
+    pred_version,
     setup_env,
     verify_commit,
+    verify_pred_version,
 )
+
+
+# ── pred version pin (mock subprocess so no real pred needed) ──────────────────
+
+class TestPredVersion:
+    def _fake_run(self, stdout):
+        return lambda *a, **k: MagicMock(stdout=stdout, returncode=0)
+
+    def test_parses_version(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run("pred 0.6.0\n"))
+        assert pred_version("pred") == "0.6.0"
+
+    def test_matching_version_ok(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run(f"pred {PINNED_PRED_VERSION}\n"))
+        assert verify_pred_version("pred") == PINNED_PRED_VERSION
+
+    def test_mismatch_raises(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run("pred 0.5.0\n"))
+        with pytest.raises(ValueError, match="0.5.0"):
+            verify_pred_version("pred")
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run("pred 0.5.0\n"))
+        monkeypatch.setenv("EXPECTED_PRED_VERSION", "0.5.0")
+        assert verify_pred_version("pred") == "0.5.0"
+
+    def test_empty_expected_skips_check(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run("pred 9.9.9\n"))
+        monkeypatch.setenv("EXPECTED_PRED_VERSION", "")
+        assert verify_pred_version("pred") == "9.9.9"  # returns actual, no raise
+
+    def test_unparseable_raises(self, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run("garbage\n"))
+        with pytest.raises(ValueError, match="could not parse"):
+            pred_version("pred")
 
 
 # ── A. find_pred_binary() ─────────────────────────────────────────────────────

@@ -47,6 +47,7 @@ docker run --rm \
 | `SAFETY_MARGIN` | `1` | USD held back from the budget as overshoot headroom |
 | `MAX_TOKENS` | `8192` | Per-call output-token ceiling (bounds the budget-crossing call) |
 | `MAX_RULES` | (all) | Cap rules attempted (smoke runs) |
+| `EXPECTED_PRED_VERSION` | pinned (`0.6.0`) | Required pred version; the runner fails fast if its `pred` differs (bugs are version-specific). Empty string disables the check. |
 | `OUTPUT` | `/out/submission.json` | Where the submission is written |
 
 > Why you pass the price: you pay your own bill at your own rate, so you set it. The runner

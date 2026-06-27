@@ -22,12 +22,23 @@ process_hf in a `while True: ...; sleep(N)` loop.
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
 from benchmark.verify_submission import leaderboard_entry, score_submission
 
 STATUS_SUFFIX = ".status.json"
+
+
+def _assert_pred_version() -> None:
+    """The backend is the authoritative verifier, so its pred must be the pinned version.
+    Skip when no pred is on PATH (pred-free unit tests never verify real certificates) or
+    when EXPECTED_PRED_VERSION is set empty; otherwise hard-fail on a mismatch."""
+    if not shutil.which("pred"):
+        return
+    from benchmark.env_setup import verify_pred_version
+    verify_pred_version("pred")  # raises ValueError on mismatch
 
 
 # ── status helpers ────────────────────────────────────────────────────────────
@@ -138,6 +149,7 @@ def aggregate_leaderboard(results_dir: Path) -> list[dict]:
 
 def process_local(subs_dir: str, results_dir: str, repo_dir: str | None = None) -> list[dict]:
     """Score all pending submissions in subs_dir; return a per-submission summary."""
+    _assert_pred_version()
     subs = Path(subs_dir)
     results = Path(results_dir)
     summary = []
@@ -160,6 +172,7 @@ def process_hf(subs_repo: str, results_repo: str, repo_dir: str | None = None,
 
     Requires huggingface_hub and a write token for results_repo. Not exercised in CI.
     """
+    _assert_pred_version()
     try:
         from huggingface_hub import HfApi, snapshot_download
     except ImportError as e:  # pragma: no cover - env without huggingface_hub

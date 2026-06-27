@@ -81,6 +81,7 @@
     "efficiency_bugs_per_dollar": {"type": "number", "minimum": 0},
     "submitted_by": {"type": ["string", "null"], "description": "Submitter identity (HF username / contact), filled at submit time"},
     "runner_version": {"type": "string", "description": "Version tag of the runner image/script that produced this"},
+    "pred_version": {"type": "string", "description": "Version of the pred binary used (must match the pinned tag; verified server-side)"},
     "created_at": {"type": "string", "description": "ISO-8601 timestamp the run finished"},
     "notes": {"type": "string"},
     "placeholder": {"type": "boolean", "description": "True for demo/placeholder rows, never ranked"}
