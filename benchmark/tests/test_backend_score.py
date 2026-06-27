@@ -163,7 +163,9 @@ class TestWebhook:
 
 @pytest.mark.integration
 class TestRealFixture:
-    def test_valid_bug_end_to_end(self, tmp_path):
+    def test_fixture_end_to_end_scores_via_real_pred(self, tmp_path):
+        # End-to-end through real pred. valid_bug is re-classified as NOT a bug under the
+        # round-trip contract, so the verified count is 0 (a genuine-bug fixture is TODO).
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         cert = json.loads((FIXTURES / "valid_bug.json").read_text(encoding="utf-8"))
@@ -174,4 +176,4 @@ class TestRealFixture:
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())
         assert board[0]["model"] == "anthropic/real"
-        assert board[0]["bugs_found"] == 1
+        assert board[0]["bugs_found"] == 0
