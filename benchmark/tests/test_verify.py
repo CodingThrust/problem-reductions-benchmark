@@ -9,6 +9,8 @@ not recover the true source answer — solve(a) != solve(reduce(a)), compared by
 or feasibility (decision). See module docstring of verify.py.
 """
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,27 @@ from benchmark import verify as vf
 from benchmark.verify import Eval, agrees, verify
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+# ── sandbox hardening (resource caps + output truncation) ─────────────────────
+
+class TestHardening:
+    def test_run_truncates_oversized_output(self, tmp_path):
+        # A child that floods stdout must come back truncated to MAX_OUTPUT_BYTES.
+        solver = vf.PredSolver(str(tmp_path), binary=sys.executable)
+        big = vf.MAX_OUTPUT_BYTES + 5000
+        rc, out, err = solver._run(
+            ["-c", f'import sys; sys.stdout.write("x"*{big})'], "unused", vf.RUN_TIMEOUT)
+        assert rc == 0 and len(out) == vf.MAX_OUTPUT_BYTES
+
+    @pytest.mark.skipif(vf.resource is None, reason="POSIX-only resource limits")
+    def test_preexec_sets_child_cpu_limit(self):
+        # The preexec_fn must actually install the cap in the forked child.
+        code = "import resource; print(resource.getrlimit(resource.RLIMIT_CPU)[0])"
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
+                                text=True, preexec_fn=vf._rlimit_preexec)
+        out, _ = proc.communicate(timeout=10)
+        assert int(out.strip()) == vf.CPU_LIMIT_SECONDS
 
 
 # ── Eval.parse ────────────────────────────────────────────────────────────────

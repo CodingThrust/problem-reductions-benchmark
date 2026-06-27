@@ -29,6 +29,11 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    import resource  # POSIX-only; used to cap each pred child's CPU/memory/file size
+except ImportError:  # pragma: no cover - non-POSIX (e.g. Windows)
+    resource = None
+
 FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
 # Accept-path fixtures are the benchmark answer key (real reduction bugs); they are kept
 # OUT of version control. Default to a gitignored private dir; override with an env var.
@@ -42,6 +47,15 @@ MAX_INPUT_BYTES = 256 * 1024
 # Per-pred-call wall-clock; SOLVE_TIMEOUT is also handed to `pred solve --timeout`.
 RUN_TIMEOUT = 30
 SOLVE_TIMEOUT = 25
+
+# OS resource caps applied to each pred child (best-effort, POSIX). The verifier runs our
+# trusted pred binary on a submitter-supplied instance, so these bound a *pathological
+# instance* — not a hostile binary. Network isolation is a deployment concern: run the
+# scoring container/Job with no network (e.g. `docker run --network none`).
+CPU_LIMIT_SECONDS = 60               # hard CPU-time cap (wall clock is RUN_TIMEOUT)
+MEM_LIMIT_BYTES = 2 * 1024 ** 3      # address-space cap per call (2 GiB)
+FSIZE_LIMIT_BYTES = 64 * 1024 ** 2   # cap any file pred writes (64 MiB)
+MAX_OUTPUT_BYTES = 16 * 1024 ** 2    # truncate runaway stdout/stderr (16 MiB)
 
 
 # ─── result types ─────────────────────────────────────────────────────────────
@@ -130,6 +144,21 @@ def _cfg(solution) -> str:
 
 # ─── the pred oracle ──────────────────────────────────────────────────────────
 
+def _rlimit_preexec() -> None:  # pragma: no cover - runs in the forked child
+    """Set resource limits in the child after fork, before exec. Best-effort per limit:
+    a platform that rejects one (e.g. RLIMIT_AS on some macOS) just skips it."""
+    for res_name, value in (("RLIMIT_CPU", CPU_LIMIT_SECONDS),
+                            ("RLIMIT_AS", MEM_LIMIT_BYTES),
+                            ("RLIMIT_FSIZE", FSIZE_LIMIT_BYTES)):
+        res = getattr(resource, res_name, None)
+        if res is None:
+            continue
+        try:
+            resource.setrlimit(res, (value, value))
+        except (ValueError, OSError):
+            pass
+
+
 class PredSolver:
     """Independent oracle over `pred`. reduce/evaluate/extract are direct, reduction-free
     primitives (the trust bedrock); solve centralises the brute-force/ILP strategy and
@@ -150,15 +179,17 @@ class PredSolver:
 
     def _run(self, args: list[str], stdin_file: str, timeout: int) -> tuple[int, str, str]:
         """Run pred with the '-' placeholder replaced by stdin_file. Own process group so
-        a timeout kills the whole tree. Raises subprocess.TimeoutExpired on timeout."""
+        a timeout kills the whole tree; CPU/memory/file-size capped via setrlimit (POSIX).
+        Output is truncated to MAX_OUTPUT_BYTES. Raises subprocess.TimeoutExpired on timeout."""
         cmd = [self.binary] + [stdin_file if a == "-" else a for a in args]
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True,
+            preexec_fn=_rlimit_preexec if resource is not None else None,
         )
         try:
             out, err = proc.communicate(timeout=timeout)
-            return proc.returncode, out, err
+            return proc.returncode, out[:MAX_OUTPUT_BYTES], err[:MAX_OUTPUT_BYTES]
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)

@@ -57,9 +57,11 @@ COPY benchmark/ ./benchmark/
 # Fail the build if pred can't run (catches a missing runtime lib early).
 RUN pred --version
 
-# Default: run the verifier calibration (3 fixtures) as a self-test.
-# Override CMD to verify a certificate, e.g.:
-#   docker run --rm -v "$PWD:/w" problem-reductions-benchmark:v0.6.0 /w/cert.json
+# Default: run the verifier calibration (fixtures) as a self-test.
+# Override CMD to verify a certificate, e.g. (run with NO network — the verifier only needs
+# the local pred binary, so deny egress to bound a pathological instance):
+#   docker run --rm --network none -v "$PWD:/w" problem-reductions-benchmark:v0.6.0 /w/cert.json
+# verify.py also caps each pred child's CPU/memory/file-size + output (see its constants).
 ENTRYPOINT ["python", "-m", "benchmark.verify"]
 CMD ["--calibrate"]
 
