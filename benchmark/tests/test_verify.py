@@ -192,8 +192,23 @@ class TestRealFixtures:
     @pytest.mark.parametrize("name", [
         "valid_bug.json", "wrong_target.json", "valid_solution_claimed_invalid.json",
     ])
-    def test_fixtures_are_not_bugs_under_roundtrip(self, name):
-        # All three current fixtures are non-bugs under the round-trip contract
+    def test_non_bug_fixtures_are_rejected(self, name):
+        # These are non-bugs under the round-trip contract
         # (the old "valid_bug" used a non-optimal target_config — see verify.py calibration).
         cert = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
         assert not verify(cert).accepted
+
+    @pytest.mark.parametrize("name,label", [
+        # weighted_mis: default-ILP source path; binpacking_zero: independent brute-force
+        # source path (it is an *->ILP rule). Both confirmed against pred 0.6.0.
+        # These are real bugs (the answer key) — kept in the gitignored private dir, so the
+        # test skips when the private fixtures are absent (e.g. a fresh public clone).
+        ("genuine_bug_weighted_mis.json", "optimum_not_preserved"),
+        ("genuine_bug_binpacking_zero.json", "optimum_not_preserved"),
+    ])
+    def test_genuine_bug_fixtures_are_accepted(self, name, label):
+        path = vf.PRIVATE_FIXTURES_DIR / name
+        if not path.exists():
+            pytest.skip(f"private accept-path fixture absent: {path}")
+        v = verify(json.loads(path.read_text(encoding="utf-8")))
+        assert v.accepted and v.details["label"] == label

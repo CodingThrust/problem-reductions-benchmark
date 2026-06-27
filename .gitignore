@@ -10,3 +10,6 @@ __pycache__/
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Private accept-path bug fixtures — the benchmark answer key, never publish
+benchmark/tests/fixtures/private/

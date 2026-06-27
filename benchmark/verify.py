@@ -30,6 +30,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
+# Accept-path fixtures are the benchmark answer key (real reduction bugs); they are kept
+# OUT of version control. Default to a gitignored private dir; override with an env var.
+PRIVATE_FIXTURES_DIR = Path(
+    os.environ.get("BENCHMARK_PRIVATE_FIXTURES", str(FIXTURES_DIR / "private")))
 PRED_BINARY = os.environ.get("PRED_BINARY", "pred")
 
 FLOAT_TOLERANCE = 1e-6
@@ -359,30 +363,46 @@ def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
 
 # ─── Calibration ──────────────────────────────────────────────────────────────
 
+# Reject path — published, safe fixtures (none is a real bug). NOTE: valid_bug.json was
+# re-classified to REJECTED — the round-trip recovers the optimum (Max(2)); its old
+# "suboptimal" claim used a NON-optimal target_config, not a real reduction bug.
 FIXTURE_EXPECTATIONS = {
-    # NOTE: valid_bug.json was re-classified to REJECTED. Empirically the round-trip
-    # recovers the optimum (Max(2)); the old "suboptimal" claim used a NON-optimal
-    # target_config, which is not a real reduction bug. A genuine-bug fixture is still TODO.
     "valid_bug.json": False,
     "wrong_target.json": False,
     "valid_solution_claimed_invalid.json": False,
 }
 
 
+def _private_accept_fixtures() -> list[Path]:
+    """Accept-path fixtures (real bugs) live in the gitignored private dir, so the answer
+    key is never published. Calibration runs them when present, skips them when absent."""
+    if not PRIVATE_FIXTURES_DIR.is_dir():
+        return []
+    return sorted(PRIVATE_FIXTURES_DIR.glob("genuine_bug_*.json"))
+
+
 def run_calibration() -> bool:
     all_passed = True
     print("Running verifier calibration...")
     print("-" * 60)
-    for fixture_name, expected in FIXTURE_EXPECTATIONS.items():
-        fixture_path = FIXTURES_DIR / fixture_name
+
+    cases = [(FIXTURES_DIR / name, expected)
+             for name, expected in FIXTURE_EXPECTATIONS.items()]
+    accept = _private_accept_fixtures()
+    cases += [(p, True) for p in accept]
+    if not accept:
+        print("NOTE  no private accept-path fixtures found "
+              f"({PRIVATE_FIXTURES_DIR}) — reject path only\n")
+
+    for fixture_path, expected in cases:
         if not fixture_path.exists():
-            print(f"MISSING  {fixture_name}")
+            print(f"MISSING  {fixture_path.name}")
             all_passed = False
             continue
         cert = json.loads(fixture_path.read_text(encoding="utf-8"))
         verdict = verify(cert)
         passed = verdict.accepted == expected
-        print(f"{'PASS' if passed else 'FAIL'}  {fixture_name}")
+        print(f"{'PASS' if passed else 'FAIL'}  {fixture_path.name}")
         print(f"      expected={'accepted' if expected else 'rejected'}, "
               f"got={'accepted' if verdict.accepted else 'rejected'}")
         print(f"      {verdict.reason}\n")

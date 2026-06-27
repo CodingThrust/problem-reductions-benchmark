@@ -163,9 +163,27 @@ class TestWebhook:
 
 @pytest.mark.integration
 class TestRealFixture:
-    def test_fixture_end_to_end_scores_via_real_pred(self, tmp_path):
-        # End-to-end through real pred. valid_bug is re-classified as NOT a bug under the
-        # round-trip contract, so the verified count is 0 (a genuine-bug fixture is TODO).
+    def test_genuine_bug_end_to_end_scores_via_real_pred(self, tmp_path):
+        # End-to-end through real pred: a genuine reduction bug is verified and ranked.
+        # The fixture is the answer key (gitignored private dir); skip when absent.
+        from benchmark.verify import PRIVATE_FIXTURES_DIR
+        path = PRIVATE_FIXTURES_DIR / "genuine_bug_weighted_mis.json"
+        if not path.exists():
+            pytest.skip(f"private accept-path fixture absent: {path}")
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        cert = json.loads(path.read_text(encoding="utf-8"))
+        _write_submission(subs, "real.json",
+                          [{"rule": cert.get("rule", "r"), "result": "bug_found",
+                            "cost": 1.0, "tokens_k": 10.0, "certificate": cert}],
+                          model="anthropic/real")
+        bs.process_local(str(subs), str(results))
+        board = json.loads((results / "leaderboard.json").read_text())
+        assert board[0]["model"] == "anthropic/real"
+        assert board[0]["bugs_found"] == 1
+
+    def test_non_bug_fixture_scores_zero(self, tmp_path):
+        # The re-classified valid_bug fixture is not a bug under the round-trip contract.
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         cert = json.loads((FIXTURES / "valid_bug.json").read_text(encoding="utf-8"))
@@ -175,5 +193,4 @@ class TestRealFixture:
                           model="anthropic/real")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())
-        assert board[0]["model"] == "anthropic/real"
         assert board[0]["bugs_found"] == 0

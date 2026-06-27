@@ -126,10 +126,24 @@ class TestRealVerification:
              "cost": 1.0, "tokens_k": 10.0, "certificate": cert},
         ])
 
+    def test_genuine_bug_is_confirmed(self):
+        # Accept path: a real reduction bug (weighted MIS -> IntegralFlowBundles) is
+        # confirmed end-to-end and counted. The fixture is the answer key, so it lives in
+        # the gitignored private dir; skip when absent (e.g. a fresh public clone).
+        from benchmark.verify import PRIVATE_FIXTURES_DIR
+        path = PRIVATE_FIXTURES_DIR / "genuine_bug_weighted_mis.json"
+        if not path.exists():
+            pytest.skip(f"private accept-path fixture absent: {path}")
+        cert = json.loads(path.read_text(encoding="utf-8"))
+        scored, report = vs.score_submission(_submission([
+            {"rule": cert.get("rule", "r"), "result": "bug_found",
+             "cost": 1.0, "tokens_k": 10.0, "certificate": cert}]))
+        assert scored["bugs_found"] == 1
+        assert report[0]["accepted"] is True
+
     def test_valid_bug_is_not_a_bug_under_roundtrip(self):
         # Re-classified: the old "valid_bug" fixture used a non-optimal target_config; the
-        # round-trip recovers the optimum, so it is NOT a bug. (A genuine-bug fixture for
-        # the accept path is still TODO — see verify.py calibration note.)
+        # round-trip recovers the optimum, so it is NOT a bug.
         scored, report = vs.score_submission(self._wrap("valid_bug.json"))
         assert scored["bugs_found"] == 0
         assert report[0]["accepted"] is False
