@@ -54,9 +54,13 @@ def _write_status(sub_path: Path, status: str, **extra) -> None:
 
 
 def _pending_submissions(subs_dir: Path) -> list[Path]:
-    """Submission files not yet FINISHED (status missing or non-terminal)."""
+    """Submission files not yet FINISHED (status missing or non-terminal).
+
+    Recursive: real submissions live under submissions/<handle>/<file>.json, so a
+    top-level glob would miss them.
+    """
     out = []
-    for p in sorted(subs_dir.glob("*.json")):
+    for p in sorted(subs_dir.rglob("*.json")):
         if p.name.endswith(STATUS_SUFFIX):
             continue
         st = _read_status(p)
@@ -109,6 +113,7 @@ def _dedup_best(entries: list[dict]) -> list[dict]:
 
 def aggregate_leaderboard(results_dir: Path) -> list[dict]:
     """Rebuild leaderboard.json from every scored result file in results_dir."""
+    results_dir.mkdir(parents=True, exist_ok=True)
     entries = []
     for p in sorted(results_dir.glob("*.json")):
         if p.name == "leaderboard.json":
@@ -171,11 +176,12 @@ def process_hf(subs_repo: str, results_repo: str, repo_dir: str | None = None,
                                   local_dir=str(Path(tmp) / "subs"))
         results_dir = Path(tmp) / "results"
         summary = process_local(local, str(results_dir), repo_dir)
-        # Upload scored results + the rebuilt leaderboard + status files back.
+        # Upload scored results + the rebuilt leaderboard to the results repo root, and
+        # the new status files back to the submissions repo (preserving submissions/<handle>/).
         api.upload_folder(folder_path=str(results_dir), repo_id=results_repo,
-                          repo_type="dataset", path_in_repo="results")
+                          repo_type="dataset")
         api.upload_folder(folder_path=local, repo_id=subs_repo, repo_type="dataset",
-                          path_in_repo="submissions", allow_patterns=["*.status.json"])
+                          allow_patterns=["*.status.json", "**/*.status.json"])
     return summary
 
 

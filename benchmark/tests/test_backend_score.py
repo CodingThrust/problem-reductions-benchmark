@@ -85,6 +85,25 @@ class TestProcessLocal:
         assert board[0]["bugs_found"] == 1 and board[1]["bugs_found"] == 0
         assert all(e["budget_cap"] == 20 for e in board)
 
+    def test_finds_nested_submissions(self, tmp_path):
+        # Real layout: submissions/<handle>/<file>.json — must be found recursively.
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        nested = subs / "submissions" / "alice"
+        nested.mkdir(parents=True)
+        _write_submission(nested, "run.json",
+                          [{"rule": "r1", "result": "no_certificate", "cost": 1.0, "tokens_k": 10.0}])
+        summary = bs.process_local(str(subs), str(results))
+        assert len(summary) == 1 and summary[0]["status"] == "FINISHED"
+        assert (nested / "run.status.json").exists()
+        assert (results / "leaderboard.json").exists()
+
+    def test_zero_submissions_writes_empty_board(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        summary = bs.process_local(str(subs), str(results))
+        assert summary == []
+        assert json.loads((results / "leaderboard.json").read_text()) == []
+
     def test_failed_submission_marked(self, tmp_path):
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
