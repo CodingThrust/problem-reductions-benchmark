@@ -32,7 +32,7 @@ class TestReadme:
 
     def test_readme_has_run_locally(self):
         t = _text(README)
-        assert "make submission" in t or "make runner-smoke" in t
+        assert "make run" in t or "make preflight" in t
 
     def test_readme_has_metrics_section(self):
         t = _text(README)

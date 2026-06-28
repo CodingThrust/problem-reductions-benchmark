@@ -5,11 +5,11 @@ reduction-rule bugs (counterexamples) can it find? This document describes the e
 submission pipeline.
 
 ```
-  docker run runner ─▶ submission.json ─▶ Space “🚀 Submit” tab ─▶ submissions dataset (PENDING)
-                                                                          │
-                                              backend_score.py (zero-trust pred re-verify)
-                                                                          │
-                                                 results + leaderboard.json ─▶ leaderboard
+  make run ─▶ submission.json ─▶ hf upload ─▶ submissions dataset (PENDING)
+                                                          │
+                                  backend_score.py (zero-trust pred re-verify)
+                                                          │
+                             results + leaderboard.json ─▶ static leaderboard Space
 ```
 
 The headline number on the leaderboard is **only** what the backend's `pred`
@@ -124,19 +124,19 @@ no-API wiring is covered by the pytest suite, not a separate command.)
 
 ## 2. Submit it
 
-**Via the Space (recommended).** On
-[the Space](https://huggingface.co/spaces/isPANN/problem-reductions-benchmarks),
-open the **🚀 Submit** tab, upload `submission.json`, optionally add a contact handle,
-click **Validate** then **Submit**. The Space runs a structural pre-check (required
-fields, ranked budget, plausible spend) and queues the file in the submissions dataset
-as `PENDING`.
-
-**Manual fallback.** If the Space's auto-queue isn't configured, upload directly:
+Submission is **command-line only** — there's no web upload form. Upload the
+`submission.json` to the submissions dataset; it lands as `PENDING` and the backend picks
+it up:
 
 ```bash
 hf upload isPANN/problem-reductions-submissions submission.json \
   submissions/<your-handle>/<model>.json --repo-type dataset
 ```
+
+…or open a pull request adding it to the GitHub repo. The
+[leaderboard Space](https://huggingface.co/spaces/isPANN/problem-reductions-benchmarks) is a
+static display of the verified results — it shows the `hf upload` command on its **Submit**
+tab but does no uploading itself.
 
 ## 3. Backend verification (automatic, zero-trust)
 

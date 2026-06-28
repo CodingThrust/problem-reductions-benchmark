@@ -180,7 +180,7 @@ evidence the model is really *working through it*, not guessing.
 
 ### 4.3 Leaderboard
 
-The leaderboard lives on the HF Gradio Space (`space-gradio/`, with a Submit tab):
+The leaderboard is a static HF Space (`space-static/`); submission is command-line (`hf upload`):
 - `bugs_found` (distinct rules) is the headline cross-model metric
 - sorted by `bugs_found`, ties broken by `efficiency_bugs_per_ktok`; rows appear once the
   backend re-verification passes
@@ -286,7 +286,7 @@ problem-reductions-benchmark/
 │   ├── backend_score.py      # submission-queue scoring + webhook entry
 │   ├── config.yaml           # agent prompt + step_limit
 │   └── tests/                # unit tests
-├── space-gradio/             # HF Gradio Space (leaderboard + Submit)
+├── space-static/             # HF static Space (instant leaderboard; CLI submit)
 ├── docker/Dockerfile         # runner image (pred + agent)
 └── SHOWCASE.md               # this file
 ```
