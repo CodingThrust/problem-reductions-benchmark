@@ -13,11 +13,28 @@
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;}
   .wrap{max-width:980px;margin:0 auto;padding:18px 16px 60px;}
-  header.hero{background:linear-gradient(135deg,var(--indigo),var(--violet));
-    color:#fff;border-radius:14px;padding:20px 22px;}
-  header.hero h1{margin:0 0 4px;font-size:1.5rem;}
-  header.hero p{margin:2px 0;opacity:.95;}
-  header.hero .sub{font-size:.8rem;opacity:.85;margin-top:8px;}
+  header.hero{position:relative;overflow:hidden;color:#fff;border-radius:16px;padding:26px 28px;
+    background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#9333ea 100%);
+    box-shadow:0 14px 34px -16px rgba(79,70,229,.55);}
+  header.hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(130% 120% at 100% 0%, rgba(255,255,255,.20), transparent 46%);}
+  .hero-top{position:relative;display:flex;justify-content:space-between;align-items:flex-start;
+    gap:16px;flex-wrap:wrap;}
+  header.hero h1{margin:0;font-size:1.55rem;letter-spacing:-.01em;}
+  .tagline{margin:9px 0 0;font-size:1.02rem;opacity:.96;}
+  .tagline b{background:rgba(255,255,255,.22);padding:0 6px;border-radius:6px;font-weight:700;}
+  .ver{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:#fff;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.34);border-radius:14px;
+    padding:9px 15px;white-space:nowrap;transition:background .15s;}
+  .ver:hover{background:rgba(255,255,255,.24);}
+  .ver .dot{width:9px;height:9px;border-radius:50%;background:#34d399;
+    box-shadow:0 0 0 4px rgba(52,211,153,.35);flex:0 0 auto;}
+  .ver .vl{display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;opacity:.85;}
+  .ver .vn{display:block;font-weight:800;font-size:1.05rem;line-height:1.1;}
+  .chips{position:relative;display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;}
+  .chips .chip{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
+    border-radius:999px;padding:5px 12px;font-size:.8rem;display:inline-flex;align-items:center;gap:5px;}
+  .chips .chip code{background:rgba(255,255,255,.2);padding:0 5px;border-radius:4px;font-size:.92em;}
   nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid var(--line);}
   nav.tabs button{background:none;border:none;padding:9px 14px;font-size:.95rem;font-weight:600;
     color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
@@ -62,9 +79,23 @@
 <body>
 <div class="wrap">
   <header class="hero">
-    <h1>🐛 Problem-Reductions Bug-Finding Benchmark</h1>
-    <p>Same <b>$20</b> for every model — who finds the most bugs?</p>
-    <div class="sub" id="hero-sub">tasks pinned @ <code>v0.6.0</code> · one rule = one bug, every bug re-verified by <code>pred</code></div>
+    <div class="hero-top">
+      <div>
+        <h1>🐛 Problem-Reductions Bug-Finding Benchmark</h1>
+        <p class="tagline">Same <b>$20</b> for every model — who finds the most bugs?</p>
+      </div>
+      <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0"
+         target="_blank" rel="noopener" title="problem-reductions library version (pinned)">
+        <span class="dot"></span>
+        <span><span class="vl">library pinned</span><span class="vn">v0.6.0</span></span>
+      </a>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chip-rules">📋 253 rules</span>
+      <span class="chip">💸 $20 budget</span>
+      <span class="chip">⚖️ one rule = one bug</span>
+      <span class="chip">🔒 zero-trust · re-verified by <code>pred</code></span>
+    </div>
   </header>
 
   <nav class="tabs" id="tabs">
@@ -325,6 +356,7 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res; TASKS=tasks; TOTAL = tasks.length||TOTAL_DEFAULT;
+  if(TASKS.length) document.getElementById("chip-rules").textContent = `📋 ${TASKS.length} rules`;
   if(RESULTS.some(r=>r.placeholder))
     document.getElementById("lb-banner").innerHTML =
       `<div class="banner">⚠️ Showing placeholder data — real $20 runs pending.</div>`;
