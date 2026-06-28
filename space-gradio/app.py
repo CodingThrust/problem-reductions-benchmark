@@ -449,4 +449,8 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_ui().launch()
+    # ssr_mode renders the first paint server-side so the styled page (incl. the table) shows
+    # immediately instead of flashing unstyled text while the JS bundle hydrates. Needs Node
+    # (present in the HF gradio runtime). If the third-party Leaderboard component misbehaves
+    # under SSR, drop this arg to revert to client-only rendering.
+    build_ui().launch(ssr_mode=True)
