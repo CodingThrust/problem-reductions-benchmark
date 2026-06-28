@@ -4,106 +4,155 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Problem-Reductions Bug-Finding Benchmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --indigo:#6366f1; --violet:#8b5cf6; --ink:#0f172a; --muted:#64748b;
-    --line:#e2e8f0; --bg:#f8fafc; --card:#ffffff; --gold:#f59e0b;
+    --bg:#F3F4F1; --surface:#FFFFFF; --ink:#15171C; --ink-soft:#3C424C;
+    --dim:#787E89; --rule:#E5E6E2; --rule-strong:#C8CBC2;
+    --bug:#D8402A; --bug-soft:#FBEAE6; --verify:#1C7C4A;
+    --display:"Space Grotesk",system-ui,sans-serif;
+    --sans:"IBM Plex Sans",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;}
-  .wrap{max-width:980px;margin:0 auto;padding:18px 16px 60px;}
-  header.hero{position:relative;overflow:hidden;color:#fff;border-radius:16px;padding:26px 28px;
-    background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#9333ea 100%);
-    box-shadow:0 14px 34px -16px rgba(79,70,229,.55);}
-  header.hero::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:radial-gradient(130% 120% at 100% 0%, rgba(255,255,255,.20), transparent 46%);}
-  .hero-top{position:relative;display:flex;justify-content:space-between;align-items:flex-start;
-    gap:16px;flex-wrap:wrap;}
-  header.hero h1{margin:0;font-size:1.55rem;letter-spacing:-.01em;}
-  .tagline{margin:9px 0 0;font-size:1.02rem;opacity:.96;}
-  .tagline b{background:rgba(255,255,255,.22);padding:0 6px;border-radius:6px;font-weight:700;}
-  .ver{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:#fff;
-    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.34);border-radius:14px;
-    padding:9px 15px;white-space:nowrap;transition:background .15s;}
-  .ver:hover{background:rgba(255,255,255,.24);}
-  .ver .dot{width:9px;height:9px;border-radius:50%;background:#34d399;
-    box-shadow:0 0 0 4px rgba(52,211,153,.35);flex:0 0 auto;}
-  .ver .vl{display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;opacity:.85;}
-  .ver .vn{display:block;font-weight:800;font-size:1.05rem;line-height:1.1;}
-  .chips{position:relative;display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;}
-  .chips .chip{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
-    border-radius:999px;padding:5px 12px;font-size:.8rem;display:inline-flex;align-items:center;gap:5px;}
-  .chips .chip code{background:rgba(255,255,255,.2);padding:0 5px;border-radius:4px;font-size:.92em;}
-  nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid var(--line);}
-  nav.tabs button{background:none;border:none;padding:9px 14px;font-size:.95rem;font-weight:600;
-    color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 76px;}
+  a{color:var(--ink);text-decoration:underline;text-underline-offset:2px;
+    text-decoration-thickness:1px;text-decoration-color:var(--rule-strong);}
+  a:hover{text-decoration-color:var(--bug);}
+  :focus-visible{outline:2px solid var(--bug);outline-offset:2px;border-radius:2px;}
+
+  /* title bar — reads like a tool header; version lives here */
+  .titlebar{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    background:var(--ink);color:#fff;border-radius:0 0 9px 9px;padding:10px 16px;
+    font-family:var(--mono);font-size:12.5px;}
+  .titlebar .name b{color:#fff;font-weight:600;}
+  .titlebar .name .sl{color:#6a7180;margin:0 6px;}
+  .titlebar .name .dim{color:#9aa1ad;}
+  .tag{display:inline-flex;align-items:center;gap:8px;border:1px solid #34383f;
+    border-radius:6px;padding:5px 10px;color:#fff;text-decoration:none;white-space:nowrap;}
+  .tag:hover{border-color:#5b616b;}
+  .tag .dot{width:7px;height:7px;border-radius:50%;background:#3FCF8E;flex:0 0 auto;}
+  .tag .lbl{color:#9aa1ad;}
+  .tag b{font-weight:600;}
+
+  /* hero — the thesis is the counterexample equation */
+  .hero{padding:48px 2px 32px;border-bottom:1px solid var(--rule);}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--dim);}
+  .thesis{font-family:var(--mono);font-weight:500;line-height:1.08;margin:20px 0 8px;
+    font-size:clamp(27px,6.1vw,56px);color:var(--ink-soft);letter-spacing:-.015em;}
+  .thesis .op{color:var(--ink);}
+  .thesis .ne{color:var(--bug);font-weight:700;padding:0 .1em;}
+  .thesis-cap{font-family:var(--mono);font-size:13px;color:var(--dim);margin-bottom:24px;}
+  .lede{font-size:1.07rem;color:var(--ink-soft);max-width:64ch;margin:0 0 20px;}
+  .lede b{color:var(--ink);font-weight:600;}
+  .spec{font-family:var(--mono);font-size:12.5px;color:var(--dim);
+    display:flex;flex-wrap:wrap;gap:4px 13px;align-items:center;}
+  .spec b{color:var(--ink);font-weight:600;}
+  .spec .s{color:var(--rule-strong);}
+
+  /* tabs — lowercase mono, like CLI subcommands */
+  nav.tabs{display:flex;gap:0;flex-wrap:wrap;margin:4px 0 24px;border-bottom:1px solid var(--rule);}
+  nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;
+    padding:12px 15px;margin-bottom:-1px;cursor:pointer;color:var(--dim);
+    font-family:var(--mono);font-size:13px;letter-spacing:.01em;}
   nav.tabs button:hover{color:var(--ink);}
-  nav.tabs button.active{color:var(--indigo);border-bottom-color:var(--indigo);}
+  nav.tabs button.active{color:var(--ink);border-bottom-color:var(--bug);font-weight:600;}
   section.tab{display:none;}
   section.tab.active{display:block;}
-  .banner{background:#fef3c7;border:1px solid #fcd34d;color:#92400e;
-    padding:8px 12px;border-radius:8px;font-weight:600;margin-bottom:12px;font-size:.9rem;}
-  .controls{display:flex;gap:10px;align-items:center;margin:6px 0 10px;flex-wrap:wrap;}
-  input.search{padding:8px 12px;border:1px solid var(--line);border-radius:8px;
-    font-size:.9rem;min-width:240px;background:var(--card);}
-  table{width:100%;border-collapse:collapse;background:var(--card);
-    border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:.9rem;}
-  thead th{background:#f1f5f9;text-align:left;padding:10px 12px;font-size:.8rem;
-    text-transform:uppercase;letter-spacing:.03em;color:#475569;cursor:pointer;white-space:nowrap;user-select:none;}
-  thead th .ind{opacity:.4;font-size:.7rem;}
-  thead th.sorted .ind{opacity:1;color:var(--indigo);}
-  tbody td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:middle;}
-  tbody tr:hover{background:#f8fafc;}
+
+  .banner{font-family:var(--mono);font-size:12.5px;color:var(--dim);
+    border:1px dashed var(--rule-strong);border-radius:6px;padding:9px 13px;margin-bottom:16px;
+    display:flex;align-items:center;gap:9px;}
+  .banner::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--bug);flex:0 0 auto;}
+  .controls{display:flex;gap:10px;align-items:center;margin:2px 0 12px;flex-wrap:wrap;}
+  input.search{padding:9px 12px;border:1px solid var(--rule-strong);border-radius:7px;
+    font-size:.88rem;min-width:240px;background:var(--surface);font-family:var(--mono);color:var(--ink);}
+  input.search::placeholder{color:var(--dim);}
+
+  /* ledger table */
+  .tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:9px;background:var(--surface);}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;}
+  thead th{text-align:left;padding:13px 15px;background:var(--surface);
+    font-family:var(--sans);font-weight:600;font-size:11px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--rule-strong);
+    cursor:pointer;white-space:nowrap;user-select:none;}
+  thead th.num{text-align:right;}
+  thead th .ind{color:var(--rule-strong);font-size:9px;margin-left:4px;}
+  thead th.sorted{color:var(--ink);}
+  thead th.sorted .ind{color:var(--bug);}
+  tbody td{padding:12px 15px;border-top:1px solid var(--rule);vertical-align:middle;}
+  tbody td.num{text-align:right;font-family:var(--mono);color:var(--ink-soft);font-size:.85rem;}
   tbody tr.clickable{cursor:pointer;}
-  tbody tr.selected{background:#eef2ff;}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
-  .reach{font-family:ui-monospace,Menlo,monospace;letter-spacing:-1px;color:var(--indigo);}
-  .reach small{color:var(--muted);letter-spacing:0;margin-left:6px;}
-  .note{color:var(--muted);font-size:.82rem;margin:10px 2px;}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:12px;}
-  .card h3{margin:0 0 8px;font-size:1rem;}
-  .bug{border-left:3px solid var(--indigo);padding:8px 12px;margin:8px 0;background:#fafbff;border-radius:6px;font-size:.88rem;}
-  .bug code{background:#eef2ff;padding:1px 5px;border-radius:4px;}
-  pre.cmd{background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;overflow:auto;
-    font-size:.82rem;line-height:1.5;}
-  pre.cmd .c{color:#94a3b8;}
-  a{color:var(--indigo);}
-  h2{font-size:1.15rem;margin:18px 0 8px;}
-  ul.tight li{margin:4px 0;}
-  .pill{display:inline-block;background:#eef2ff;color:var(--indigo);font-weight:600;
-    padding:2px 8px;border-radius:999px;font-size:.78rem;}
-  svg.scatter text{font-size:11px;fill:var(--muted);}
+  tbody tr:hover{background:#FBFBF8;}
+  tbody tr.selected{background:var(--bug-soft);}
+  .rk{font-family:var(--mono);color:var(--dim);font-size:.85rem;}
+  tr.lead .rk{color:var(--bug);font-weight:700;}
+  .model{font-family:var(--mono);color:var(--ink);}
+  tr.lead .model{font-weight:700;}
+  .bugs{font-family:var(--mono);font-weight:700;font-size:1.05rem;color:var(--verify);}
+  .bugs.zero{color:var(--dim);font-weight:500;}
+  .bar{display:inline-block;width:92px;height:6px;border-radius:3px;background:var(--rule);
+    overflow:hidden;vertical-align:middle;}
+  .bar>i{display:block;height:100%;background:var(--ink-soft);}
+  .bar-lbl{font-family:var(--mono);font-size:11px;color:var(--dim);margin-left:9px;}
+
+  .legend{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin:12px 2px;}
+  .panel{background:var(--surface);border:1px solid var(--rule);border-radius:9px;
+    padding:16px 18px;margin-top:16px;}
+  .panel h3{margin:0 0 10px;font-family:var(--display);font-weight:600;font-size:.95rem;
+    letter-spacing:.01em;}
+  .bug-row{border-left:2px solid var(--bug);padding:8px 12px;margin:8px 0;
+    background:var(--bug-soft);border-radius:0 6px 6px 0;font-size:.88rem;}
+  .bug-row code{font-family:var(--mono);background:rgba(216,64,42,.1);padding:1px 5px;border-radius:4px;}
+  pre.cmd{background:var(--ink);color:#E6E8EC;padding:14px 16px;border-radius:9px;overflow:auto;
+    font-family:var(--mono);font-size:.82rem;line-height:1.6;}
+  pre.cmd .c{color:#7d8492;}
+  .note{color:var(--dim);font-size:.85rem;margin:10px 2px;}
+  h2{font-family:var(--display);font-weight:600;font-size:1.15rem;margin:20px 0 8px;letter-spacing:.01em;}
+  section.tab p{color:var(--ink-soft);}
+  code{font-family:var(--mono);}
+  svg.scatter text{font-family:var(--mono);font-size:10.5px;fill:var(--dim);}
+
+  @media (max-width:560px){ .hero{padding:34px 2px 26px;} }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important;} }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="titlebar">
+    <div class="name"><b>problem-reductions</b><span class="sl">/</span><span class="dim">bug-finding benchmark</span></div>
+    <a class="tag" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0"
+       target="_blank" rel="noopener" title="problem-reductions library version (pinned)">
+      <span class="dot"></span><span class="lbl">pred&nbsp;@</span><b>v0.6.0</b>
+    </a>
+  </div>
+
   <header class="hero">
-    <div class="hero-top">
-      <div>
-        <h1>🐛 Problem-Reductions Bug-Finding Benchmark</h1>
-        <p class="tagline">Same <b>$20</b> for every model — who finds the most bugs?</p>
-      </div>
-      <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0"
-         target="_blank" rel="noopener" title="problem-reductions library version (pinned)">
-        <span class="dot"></span>
-        <span><span class="vl">library pinned</span><span class="vn">v0.6.0</span></span>
-      </a>
-    </div>
-    <div class="chips">
-      <span class="chip" id="chip-rules">📋 253 rules</span>
-      <span class="chip">💸 $20 budget</span>
-      <span class="chip">⚖️ one rule = one bug</span>
-      <span class="chip">🔒 zero-trust · re-verified by <code>pred</code></span>
+    <div class="eyebrow">Problem-Reductions · Bug-Finding Benchmark</div>
+    <h1 class="thesis"><span class="op">solve(x)</span> <span class="ne">&ne;</span> <span class="op">solve(reduce(x))</span></h1>
+    <div class="thesis-cap">// a bug is a counterexample to a reduction</div>
+    <p class="lede">A reduction is supposed to preserve the answer. Find one input where it
+      doesn't, and you've found a bug. Every model gets the same <b>$20</b> to find as many
+      distinct ones as it can.</p>
+    <div class="spec">
+      <span><b id="n-rules">253</b>&nbsp;rules</span><span class="s">·</span>
+      <span><b>$20</b>&nbsp;budget</span><span class="s">·</span>
+      <span>1&nbsp;rule&nbsp;=&nbsp;1&nbsp;bug</span><span class="s">·</span>
+      <span>re-verified&nbsp;by&nbsp;<b>pred</b></span>
     </div>
   </header>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="leaderboard" class="active">🏆 Leaderboard</button>
-    <button data-tab="tasks">📋 Tasks</button>
-    <button data-tab="how">🔄 How it works</button>
-    <button data-tab="submit">🚀 Submit</button>
-    <button data-tab="about">ℹ️ About</button>
+    <button data-tab="leaderboard" class="active">leaderboard</button>
+    <button data-tab="tasks">tasks</button>
+    <button data-tab="how">how it works</button>
+    <button data-tab="submit">submit</button>
+    <button data-tab="about">about</button>
   </nav>
 
   <!-- LEADERBOARD -->
@@ -112,17 +161,19 @@
     <div class="controls">
       <input class="search" id="lb-search" placeholder="Search model…">
     </div>
-    <table id="lb-table">
-      <thead><tr id="lb-head"></tr></thead>
-      <tbody id="lb-body"></tbody>
-    </table>
-    <div class="note"><b>Budget reach</b> = how far the $20 got (rules reached / total). <b>Bugs/Ktok</b> = bugs per 1000 tokens. Click a row to inspect its confirmed bugs.</div>
-    <div class="card">
-      <h3>Bugs vs. tokens <span class="note">(up-and-left is better)</span></h3>
+    <div class="tablewrap">
+      <table id="lb-table">
+        <thead><tr id="lb-head"></tr></thead>
+        <tbody id="lb-body"></tbody>
+      </table>
+    </div>
+    <div class="legend"><b>budget reach</b> = rules reached before the $20 ran out · <b>bugs/Ktok</b> = bugs per 1000 tokens · click a row to inspect its confirmed bugs</div>
+    <div class="panel">
+      <h3>Bugs vs. tokens <span class="note">— up and to the left is better</span></h3>
       <div id="scatter"></div>
     </div>
-    <div class="card" id="inspector">
-      <h3>🔎 Confirmed bugs</h3>
+    <div class="panel" id="inspector">
+      <h3>Confirmed bugs</h3>
       <div id="inspect-body" class="note">Click a model row above to see its confirmed bugs.</div>
     </div>
   </section>
@@ -130,17 +181,19 @@
   <!-- TASKS -->
   <section class="tab" id="tab-tasks">
     <div class="controls">
-      <input class="search" id="task-search" placeholder="Search rule / source / target…">
+      <input class="search" id="task-search" placeholder="Filter rule / source / target…">
       <span class="note" id="task-count"></span>
     </div>
-    <table id="task-table">
-      <thead><tr>
-        <th data-k="rule">Rule <span class="ind">↕</span></th>
-        <th data-k="st">Source → Target <span class="ind">↕</span></th>
-        <th data-k="overhead_num_vars">Overhead (vars) <span class="ind">↕</span></th>
-      </tr></thead>
-      <tbody id="task-body"></tbody>
-    </table>
+    <div class="tablewrap">
+      <table id="task-table">
+        <thead><tr>
+          <th data-k="rule">Rule <span class="ind">↕</span></th>
+          <th data-k="st">Source → Target <span class="ind">↕</span></th>
+          <th data-k="overhead_num_vars">Overhead (vars) <span class="ind">↕</span></th>
+        </tr></thead>
+        <tbody id="task-body"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- HOW IT WORKS -->
@@ -149,7 +202,7 @@
     <p>Give a model the same <b>$20</b> and see how many bugs it can find in the library's problem
        reductions. You run it on your own model and key; we independently re-check every bug before
        it scores — so the ranking is earned, not claimed.</p>
-    <div style="max-width:780px;margin:0 auto;"><svg viewBox="0 0 760 826" width="100%" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" role="img" aria-label="Benchmark pipeline"><defs><linearGradient id="gi" x1="0" x2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient><linearGradient id="ge" x1="0" x2="1"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient><linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#f97316"/></linearGradient><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/></marker></defs><rect x="70" y="0" width="620" height="38" rx="10" fill="url(#gi)"/><text x="380" y="24" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" letter-spacing="0.4">YOU RUN IT — your model · your key · $20 budget</text><line x1="380" y1="42" x2="380" y2="63" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="68" width="620" height="84" rx="13" fill="#eef2ff" stroke="#6366f1" stroke-width="1.3"/><circle cx="98" cy="94" r="14" fill="#6366f1"/><text x="98" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">1</text><text x="124" y="98" font-size="15" font-weight="700" fill="#0f172a">🐳  Get the runner</text><text x="124" y="117" font-size="12.5" fill="#475569">One Docker image with the solver and the rule library, pinned to the</text><text x="124" y="135" font-size="12.5" fill="#475569">benchmark version. No setup beyond Docker.</text><line x1="380" y1="156" x2="380" y2="177" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="182" width="620" height="84" rx="13" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.3"/><circle cx="98" cy="208" r="14" fill="#8b5cf6"/><text x="98" y="213" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">2</text><text x="124" y="212" font-size="15" font-weight="700" fill="#0f172a">🔌  Plug in any model</text><text x="124" y="231" font-size="12.5" fill="#475569">OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the</text><text x="124" y="249" font-size="12.5" fill="#475569">API key and tell it your price per token.</text><line x1="380" y1="270" x2="380" y2="291" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="296" width="620" height="128" rx="13" fill="#eef2ff" stroke="#6366f1" stroke-width="1.3"/><circle cx="98" cy="322" r="14" fill="#6366f1"/><text x="98" y="327" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">3</text><text x="124" y="326" font-size="15" font-weight="700" fill="#0f172a">🐛  Hunt for bugs</text><text x="124" y="345" font-size="12.5" fill="#475569">Your model searches each of the ~262 reduction rules for a</text><text x="124" y="363" font-size="12.5" fill="#475569">counterexample — an input the rule mishandles — until the $20 runs</text><text x="124" y="381" font-size="12.5" fill="#475569">out. Each find is checked by the solver on the spot.</text><rect x="124" y="388" width="546" height="20" rx="10" fill="#6366f1" opacity="0.14"/><text x="135" y="402" font-size="12" font-weight="600" fill="#6366f1">a bug = solve(input) ≠ solve(reduce(input))</text><line x1="380" y1="428" x2="380" y2="449" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="454" width="620" height="66" rx="13" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.3"/><circle cx="98" cy="480" r="14" fill="#8b5cf6"/><text x="98" y="485" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">4</text><text x="124" y="484" font-size="15" font-weight="700" fill="#0f172a">📤  Submit from the command line</text><text x="124" y="503" font-size="12.5" fill="#475569">One hf upload of submission.json to the dataset (or a PR) — no web form.</text><line x1="70" y1="543" x2="690" y2="543" stroke="#ef4444" stroke-width="2" stroke-dasharray="7 5"/><rect x="165" y="531" width="430" height="26" rx="13" fill="#fff" stroke="#ef4444" stroke-width="1.5"/><text x="380" y="548" text-anchor="middle" font-size="12" font-weight="700" fill="#ef4444">🔒 TRUST BOUNDARY · self-reported counts ignored</text><rect x="70" y="568" width="620" height="38" rx="10" fill="url(#ge)"/><text x="380" y="592" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" letter-spacing="0.4">WE SCORE IT — independent, zero-trust</text><line x1="380" y1="610" x2="380" y2="631" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="636" width="620" height="110" rx="13" fill="#ecfdf5" stroke="#10b981" stroke-width="1.3"/><circle cx="98" cy="662" r="14" fill="#10b981"/><text x="98" y="667" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">5</text><text x="124" y="666" font-size="15" font-weight="700" fill="#0f172a">🔁  Re-verified from scratch</text><text x="124" y="685" font-size="12.5" fill="#475569">We re-derive every claimed bug with our own solver and keep only the</text><text x="124" y="703" font-size="12.5" fill="#475569">ones that truly reproduce. Your self-reported numbers never count.</text><rect x="124" y="710" width="546" height="20" rx="10" fill="#10b981" opacity="0.14"/><text x="135" y="724" font-size="12" font-weight="600" fill="#10b981">only reproducible bugs are scored</text><line x1="380" y1="750" x2="380" y2="771" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="140" y="776" width="480" height="46" rx="23" fill="url(#gold)"/><text x="380" y="804" text-anchor="middle" font-size="14.5" font-weight="700" fill="#fff">🏆 Leaderboard · most distinct rules bugged · efficiency = bugs / 1K tokens</text></svg></div>
+    <div style="max-width:780px;margin:18px auto 0;"><svg viewBox="0 0 760 794" width="100%" role="img" aria-label="Benchmark pipeline"><defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#787E89"/></marker></defs><text x="64" y="12" font-family="IBM Plex Mono,monospace" font-size="12" letter-spacing="2" font-weight="700" fill="#15171C">YOU RUN IT</text><line x1="64" y1="22" x2="696" y2="22" stroke="#E5E6E2"/><line x1="380" y1="38" x2="380" y2="58" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="62" width="632" height="86" rx="8" fill="#fff" stroke="#E5E6E2" stroke-width="1"/><rect x="78" y="77" width="26" height="26" rx="6" fill="#15171C"/><text x="91" y="95" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#fff">1</text><text x="118" y="93" font-family="Space Grotesk,sans-serif" font-size="14.5" font-weight="600" fill="#15171C">Get the runner</text><text x="118" y="112" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">One Docker image: the solver (pred) plus the rule library, pinned to the</text><text x="118" y="129" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">benchmark version.</text><line x1="380" y1="150" x2="380" y2="170" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="174" width="632" height="86" rx="8" fill="#fff" stroke="#E5E6E2" stroke-width="1"/><rect x="78" y="189" width="26" height="26" rx="6" fill="#15171C"/><text x="91" y="207" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#fff">2</text><text x="118" y="205" font-family="Space Grotesk,sans-serif" font-size="14.5" font-weight="600" fill="#15171C">Plug in any model</text><text x="118" y="224" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API</text><text x="118" y="241" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">key and the price.</text><line x1="380" y1="262" x2="380" y2="282" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="286" width="632" height="110" rx="8" fill="#fff" stroke="#E5E6E2" stroke-width="1"/><rect x="78" y="301" width="26" height="26" rx="6" fill="#15171C"/><text x="91" y="319" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#fff">3</text><text x="118" y="317" font-family="Space Grotesk,sans-serif" font-size="14.5" font-weight="600" fill="#15171C">Hunt for bugs</text><text x="118" y="336" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">Your model probes each rule for a counterexample until the $20 runs out;</text><text x="118" y="353" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">each find is checked by the solver on the spot.</text><rect x="118" y="361" width="560" height="22" rx="6" fill="#D8402A" opacity="0.10"/><text x="129" y="376" font-family="IBM Plex Mono,monospace" font-size="12" font-weight="600" fill="#D8402A">a bug = solve(x) ≠ solve(reduce(x))</text><line x1="380" y1="398" x2="380" y2="418" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="422" width="632" height="86" rx="8" fill="#fff" stroke="#E5E6E2" stroke-width="1"/><rect x="78" y="437" width="26" height="26" rx="6" fill="#15171C"/><text x="91" y="455" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#fff">4</text><text x="118" y="453" font-family="Space Grotesk,sans-serif" font-size="14.5" font-weight="600" fill="#15171C">Submit from the command line</text><text x="118" y="472" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">One hf upload of submission.json to the dataset, or open a pull request</text><text x="118" y="489" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">— no web form.</text><line x1="64" y1="528" x2="696" y2="528" stroke="#D8402A" stroke-width="1.5" stroke-dasharray="6 5"/><rect x="170" y="517" width="420" height="24" rx="6" fill="#fff" stroke="#D8402A" stroke-width="1.3"/><text x="380" y="533" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11.5" font-weight="700" fill="#D8402A" letter-spacing="0.5">TRUST BOUNDARY — self-reported counts are ignored</text><text x="64" y="562" font-family="IBM Plex Mono,monospace" font-size="12" letter-spacing="2" font-weight="700" fill="#15171C">WE SCORE IT</text><line x1="64" y1="572" x2="696" y2="572" stroke="#E5E6E2"/><line x1="380" y1="588" x2="380" y2="608" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="612" width="632" height="110" rx="8" fill="#fff" stroke="#E5E6E2" stroke-width="1"/><rect x="78" y="627" width="26" height="26" rx="6" fill="#15171C"/><text x="91" y="645" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="700" fill="#fff">5</text><text x="118" y="643" font-family="Space Grotesk,sans-serif" font-size="14.5" font-weight="600" fill="#15171C">Re-verified from scratch</text><text x="118" y="662" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">We re-derive every claimed bug with our own solver and keep only the</text><text x="118" y="679" font-family="IBM Plex Sans,sans-serif" font-size="12.5" fill="#5A6068">ones that reproduce.</text><rect x="118" y="687" width="560" height="22" rx="6" fill="#1C7C4A" opacity="0.10"/><text x="129" y="702" font-family="IBM Plex Mono,monospace" font-size="12" font-weight="600" fill="#1C7C4A">only reproducible bugs are scored</text><line x1="380" y1="724" x2="380" y2="744" stroke="#787E89" stroke-width="1.5" marker-end="url(#ah)"/><rect x="64" y="748" width="632" height="42" rx="8" fill="#15171C"/><text x="380" y="774" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" font-weight="600" fill="#fff">leaderboard → ranked by confirmed bugs, then bugs / 1K tokens</text></svg></div>
     <div class="card">
       <p><b>What counts as a bug.</b> Each reduction is supposed to turn problem <i>A</i> into an
       equivalent problem <i>B</i>. It's buggy on an input when solving that input directly gives a
@@ -205,7 +258,6 @@ make run         <span class="c"># → ./out/submission.json</span></pre>
 <script>
 const RANKED_BUDGET = 20, TOTAL_DEFAULT = 253;
 const short = m => (m||"").split("/").pop();
-const medals = {1:"🥇",2:"🥈",3:"🥉"};
 let RESULTS = [], TASKS = [], TOTAL = TOTAL_DEFAULT;
 let lbRows = [], lbSort = {key:"bugs",dir:-1}, selectedModel = null;
 
@@ -219,11 +271,11 @@ document.getElementById("tabs").addEventListener("click", e => {
 
 // ---- leaderboard ----
 const LB_COLS = [
-  {key:"rank",  label:"Rank", num:true},
+  {key:"rank",  label:"#", sortBy:"_rankNum"},
   {key:"model", label:"Model"},
   {key:"bugs",  label:"Bugs", num:true},
-  {key:"reach", label:"Budget reach", num:true, sortBy:"reachFrac"},
-  {key:"spent", label:"Spent ($)", num:true, sortBy:"spentNum"},
+  {key:"reach", label:"Budget reach", sortBy:"reachFrac"},
+  {key:"spent", label:"Spent", num:true, sortBy:"spentNum"},
   {key:"tokens",label:"Tokens (K)", num:true, sortBy:"tokensNum"},
   {key:"eff",   label:"Bugs/Ktok", num:true, sortBy:"effNum"},
 ];
@@ -250,8 +302,9 @@ function renderLbHead(){
   document.getElementById("lb-head").innerHTML = LB_COLS.map(c=>{
     const sk = c.sortBy||c.key;
     const on = lbSort.key===sk;
-    const ind = on ? (lbSort.dir<0?"▼":"▲") : "↕";
-    return `<th data-sk="${sk}" class="${on?'sorted':''}">${c.label} <span class="ind">${ind}</span></th>`;
+    const ind = on ? (lbSort.dir<0?"↓":"↑") : "↕";
+    const cls = [on?"sorted":"", c.num?"num":""].join(" ").trim();
+    return `<th data-sk="${sk}" class="${cls}">${c.label} <span class="ind">${ind}</span></th>`;
   }).join("");
 }
 
@@ -265,14 +318,14 @@ function renderLbBody(){
     return String(av).localeCompare(String(bv))*d;
   });
   document.getElementById("lb-body").innerHTML = rows.map(r=>`
-    <tr class="clickable ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
-      <td>${medals[r.rank]||r.rank}</td>
-      <td class="mono">${r.model}</td>
-      <td><b>${r.bugs}</b></td>
-      <td class="reach">${r.reach}<small>${r.tested}/${TOTAL}</small></td>
-      <td>$${r.spentNum.toFixed(2)}</td>
-      <td>${Math.round(r.tokensNum)}</td>
-      <td>${r.effNum.toFixed(4)}</td>
+    <tr class="clickable ${r.rank===1?'lead':''} ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
+      <td><span class="rk">${r.rank}</span></td>
+      <td><span class="model">${r.model}</span></td>
+      <td class="num"><span class="bugs ${r.bugs?'':'zero'}">${r.bugs}</span></td>
+      <td><span class="bar"><i style="width:${Math.round(r.reachFrac*100)}%"></i></span><span class="bar-lbl">${r.tested}/${TOTAL}</span></td>
+      <td class="num">$${r.spentNum.toFixed(2)}</td>
+      <td class="num">${Math.round(r.tokensNum).toLocaleString()}</td>
+      <td class="num">${r.effNum.toFixed(4)}</td>
     </tr>`).join("") || `<tr><td colspan="7" class="note">No models match.</td></tr>`;
 }
 
@@ -283,19 +336,19 @@ function renderScatter(){
   const maxB = Math.max(3,...pts.map(p=>p.bugs));
   const sx = t => pad + (t/maxT)*(W-pad-20);
   const sy = b => H-pad - (b/maxB)*(H-pad-20);
-  const colors=["#6366f1","#8b5cf6","#0ea5e9","#10b981","#f59e0b","#ef4444"];
+  const INK="#15171C", VERIFY="#1C7C4A", DIM="#A2A7AE";
   let g=`<svg class="scatter" viewBox="0 0 ${W} ${H}" width="100%">`;
-  g+=`<line x1="${pad}" y1="${H-pad}" x2="${W-10}" y2="${H-pad}" stroke="#cbd5e1"/>`;
-  g+=`<line x1="${pad}" y1="20" x2="${pad}" y2="${H-pad}" stroke="#cbd5e1"/>`;
-  g+=`<text x="${(W)/2}" y="${H-12}" text-anchor="middle">Tokens (K) →</text>`;
-  g+=`<text x="14" y="${H/2}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">Bugs →</text>`;
-  pts.forEach((p,i)=>{
-    const c=colors[i%colors.length];
+  g+=`<line x1="${pad}" y1="${H-pad}" x2="${W-10}" y2="${H-pad}" stroke="#D9DBD5"/>`;
+  g+=`<line x1="${pad}" y1="20" x2="${pad}" y2="${H-pad}" stroke="#D9DBD5"/>`;
+  g+=`<text x="${(W)/2}" y="${H-12}" text-anchor="middle">tokens (K) →</text>`;
+  g+=`<text x="14" y="${H/2}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">bugs →</text>`;
+  pts.forEach(p=>{
+    const c = p.bugs>0 ? VERIFY : DIM;             // verified-green if it found bugs, else muted
     const px=sx(p.tokensNum), py=sy(p.bugs);
     const flip = px > W*0.62;                       // near right edge → label to the left
     const lx = flip ? px-9 : px+9, anchor = flip ? "end" : "start";
-    g+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="6" fill="${c}" opacity="0.85"><title>${p.model}: ${p.bugs} bugs, ${Math.round(p.tokensNum)}K tok</title></circle>`;
-    g+=`<text x="${lx.toFixed(1)}" y="${(py+4).toFixed(1)}" text-anchor="${anchor}" style="fill:${c};font-weight:600">${p.model}</text>`;
+    g+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.5" fill="${c}"><title>${p.model}: ${p.bugs} bugs, ${Math.round(p.tokensNum)}K tok</title></circle>`;
+    g+=`<text x="${lx.toFixed(1)}" y="${(py+4).toFixed(1)}" text-anchor="${anchor}" style="fill:${INK}">${p.model}</text>`;
   });
   g+=`</svg>`;
   document.getElementById("scatter").innerHTML = pts.length? g : `<div class="note">No ranked runs yet.</div>`;
@@ -307,7 +360,7 @@ function renderInspector(model){
   if(!row){ el.innerHTML = `<span class="note">Click a model row above to see its confirmed bugs.</span>`; return; }
   if(!row.certs.length){ el.innerHTML = `No confirmed bugs for <b>${row.model}</b> within the budget.`; return; }
   el.innerHTML = `<p><b>${row.model}</b> — ${row.certs.length} confirmed bug(s)</p>` + row.certs.map(c=>`
-    <div class="bug">
+    <div class="bug-row">
       <code>${c.rule||"?"}</code> · violation <code>${c.violation||"?"}</code> ·
       <code>${c.source_type||"?"} → ${c.target_type||"?"}</code>
       ${c.note?`<br><span class="note">${c.note}</span>`:""}
@@ -329,7 +382,7 @@ function renderTasks(){
     <td class="mono" style="font-size:.78rem">${r.overhead_num_vars}</td></tr>`).join("")
     || `<tr><td colspan="3" class="note">No tasks match.</td></tr>`;
   document.getElementById("task-count").textContent = `${rows.length} / ${TASKS.length} rules`;
-  document.querySelector('nav.tabs button[data-tab="tasks"]').textContent = `📋 Tasks (${TASKS.length})`;
+  document.querySelector('nav.tabs button[data-tab="tasks"]').textContent = `tasks (${TASKS.length})`;
 }
 
 // ---- events ----
@@ -356,10 +409,10 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res; TASKS=tasks; TOTAL = tasks.length||TOTAL_DEFAULT;
-  if(TASKS.length) document.getElementById("chip-rules").textContent = `📋 ${TASKS.length} rules`;
+  if(TASKS.length) document.getElementById("n-rules").textContent = TASKS.length;
   if(RESULTS.some(r=>r.placeholder))
     document.getElementById("lb-banner").innerHTML =
-      `<div class="banner">⚠️ Showing placeholder data — real $20 runs pending.</div>`;
+      `<div class="banner">placeholder data — real $20 runs pending</div>`;
   buildLbRows(); renderLbHead(); renderLbBody(); renderScatter(); renderTasks();
 });
 </script>
