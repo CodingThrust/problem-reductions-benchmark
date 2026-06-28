@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Problem-Reductions Bug-Finding Benchmark</title>
+<style>
+  :root{
+    --indigo:#6366f1; --violet:#8b5cf6; --ink:#0f172a; --muted:#64748b;
+    --line:#e2e8f0; --bg:#f8fafc; --card:#ffffff; --gold:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;}
+  .wrap{max-width:980px;margin:0 auto;padding:18px 16px 60px;}
+  header.hero{background:linear-gradient(135deg,var(--indigo),var(--violet));
+    color:#fff;border-radius:14px;padding:20px 22px;}
+  header.hero h1{margin:0 0 4px;font-size:1.5rem;}
+  header.hero p{margin:2px 0;opacity:.95;}
+  header.hero .sub{font-size:.8rem;opacity:.85;margin-top:8px;}
+  nav.tabs{display:flex;gap:4px;flex-wrap:wrap;margin:18px 0 14px;border-bottom:1px solid var(--line);}
+  nav.tabs button{background:none;border:none;padding:9px 14px;font-size:.95rem;font-weight:600;
+    color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+  nav.tabs button:hover{color:var(--ink);}
+  nav.tabs button.active{color:var(--indigo);border-bottom-color:var(--indigo);}
+  section.tab{display:none;}
+  section.tab.active{display:block;}
+  .banner{background:#fef3c7;border:1px solid #fcd34d;color:#92400e;
+    padding:8px 12px;border-radius:8px;font-weight:600;margin-bottom:12px;font-size:.9rem;}
+  .controls{display:flex;gap:10px;align-items:center;margin:6px 0 10px;flex-wrap:wrap;}
+  input.search{padding:8px 12px;border:1px solid var(--line);border-radius:8px;
+    font-size:.9rem;min-width:240px;background:var(--card);}
+  table{width:100%;border-collapse:collapse;background:var(--card);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:.9rem;}
+  thead th{background:#f1f5f9;text-align:left;padding:10px 12px;font-size:.8rem;
+    text-transform:uppercase;letter-spacing:.03em;color:#475569;cursor:pointer;white-space:nowrap;user-select:none;}
+  thead th .ind{opacity:.4;font-size:.7rem;}
+  thead th.sorted .ind{opacity:1;color:var(--indigo);}
+  tbody td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:middle;}
+  tbody tr:hover{background:#f8fafc;}
+  tbody tr.clickable{cursor:pointer;}
+  tbody tr.selected{background:#eef2ff;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  .reach{font-family:ui-monospace,Menlo,monospace;letter-spacing:-1px;color:var(--indigo);}
+  .reach small{color:var(--muted);letter-spacing:0;margin-left:6px;}
+  .note{color:var(--muted);font-size:.82rem;margin:10px 2px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:12px;}
+  .card h3{margin:0 0 8px;font-size:1rem;}
+  .bug{border-left:3px solid var(--indigo);padding:8px 12px;margin:8px 0;background:#fafbff;border-radius:6px;font-size:.88rem;}
+  .bug code{background:#eef2ff;padding:1px 5px;border-radius:4px;}
+  pre.cmd{background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:10px;overflow:auto;
+    font-size:.82rem;line-height:1.5;}
+  pre.cmd .c{color:#94a3b8;}
+  a{color:var(--indigo);}
+  h2{font-size:1.15rem;margin:18px 0 8px;}
+  ul.tight li{margin:4px 0;}
+  .pill{display:inline-block;background:#eef2ff;color:var(--indigo);font-weight:600;
+    padding:2px 8px;border-radius:999px;font-size:.78rem;}
+  svg.scatter text{font-size:11px;fill:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <h1>🐛 Problem-Reductions Bug-Finding Benchmark</h1>
+    <p>Same <b>$20</b> for every model — who finds the most bugs?</p>
+    <div class="sub" id="hero-sub">tasks pinned @ <code>v0.6.0</code> · one rule = one bug, every bug re-verified by <code>pred</code></div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="leaderboard" class="active">🏆 Leaderboard</button>
+    <button data-tab="tasks">📋 Tasks</button>
+    <button data-tab="how">🔄 How it works</button>
+    <button data-tab="submit">🚀 Submit</button>
+    <button data-tab="about">ℹ️ About</button>
+  </nav>
+
+  <!-- LEADERBOARD -->
+  <section class="tab active" id="tab-leaderboard">
+    <div id="lb-banner"></div>
+    <div class="controls">
+      <input class="search" id="lb-search" placeholder="Search model…">
+    </div>
+    <table id="lb-table">
+      <thead><tr id="lb-head"></tr></thead>
+      <tbody id="lb-body"></tbody>
+    </table>
+    <div class="note"><b>Budget reach</b> = how far the $20 got (rules reached / total). <b>Bugs/Ktok</b> = bugs per 1000 tokens. Click a row to inspect its confirmed bugs.</div>
+    <div class="card">
+      <h3>Bugs vs. tokens <span class="note">(up-and-left is better)</span></h3>
+      <div id="scatter"></div>
+    </div>
+    <div class="card" id="inspector">
+      <h3>🔎 Confirmed bugs</h3>
+      <div id="inspect-body" class="note">Click a model row above to see its confirmed bugs.</div>
+    </div>
+  </section>
+
+  <!-- TASKS -->
+  <section class="tab" id="tab-tasks">
+    <div class="controls">
+      <input class="search" id="task-search" placeholder="Search rule / source / target…">
+      <span class="note" id="task-count"></span>
+    </div>
+    <table id="task-table">
+      <thead><tr>
+        <th data-k="rule">Rule <span class="ind">↕</span></th>
+        <th data-k="st">Source → Target <span class="ind">↕</span></th>
+        <th data-k="overhead_num_vars">Overhead (vars) <span class="ind">↕</span></th>
+      </tr></thead>
+      <tbody id="task-body"></tbody>
+    </table>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="tab" id="tab-how">
+    <h2>From your model to the leaderboard</h2>
+    <p>Give a model the same <b>$20</b> and see how many bugs it can find in the library's problem
+       reductions. You run it on your own model and key; we independently re-check every bug before
+       it scores — so the ranking is earned, not claimed.</p>
+    <div style="max-width:780px;margin:0 auto;"><svg viewBox="0 0 760 826" width="100%" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" role="img" aria-label="Benchmark pipeline"><defs><linearGradient id="gi" x1="0" x2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient><linearGradient id="ge" x1="0" x2="1"><stop offset="0" stop-color="#10b981"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient><linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#f97316"/></linearGradient><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/></marker></defs><rect x="70" y="0" width="620" height="38" rx="10" fill="url(#gi)"/><text x="380" y="24" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" letter-spacing="0.4">YOU RUN IT — your model · your key · $20 budget</text><line x1="380" y1="42" x2="380" y2="63" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="68" width="620" height="84" rx="13" fill="#eef2ff" stroke="#6366f1" stroke-width="1.3"/><circle cx="98" cy="94" r="14" fill="#6366f1"/><text x="98" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">1</text><text x="124" y="98" font-size="15" font-weight="700" fill="#0f172a">🐳  Get the runner</text><text x="124" y="117" font-size="12.5" fill="#475569">One Docker image with the solver and the rule library, pinned to the</text><text x="124" y="135" font-size="12.5" fill="#475569">benchmark version. No setup beyond Docker.</text><line x1="380" y1="156" x2="380" y2="177" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="182" width="620" height="84" rx="13" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.3"/><circle cx="98" cy="208" r="14" fill="#8b5cf6"/><text x="98" y="213" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">2</text><text x="124" y="212" font-size="15" font-weight="700" fill="#0f172a">🔌  Plug in any model</text><text x="124" y="231" font-size="12.5" fill="#475569">OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the</text><text x="124" y="249" font-size="12.5" fill="#475569">API key and tell it your price per token.</text><line x1="380" y1="270" x2="380" y2="291" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="296" width="620" height="128" rx="13" fill="#eef2ff" stroke="#6366f1" stroke-width="1.3"/><circle cx="98" cy="322" r="14" fill="#6366f1"/><text x="98" y="327" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">3</text><text x="124" y="326" font-size="15" font-weight="700" fill="#0f172a">🐛  Hunt for bugs</text><text x="124" y="345" font-size="12.5" fill="#475569">Your model searches each of the ~262 reduction rules for a</text><text x="124" y="363" font-size="12.5" fill="#475569">counterexample — an input the rule mishandles — until the $20 runs</text><text x="124" y="381" font-size="12.5" fill="#475569">out. Each find is checked by the solver on the spot.</text><rect x="124" y="388" width="546" height="20" rx="10" fill="#6366f1" opacity="0.14"/><text x="135" y="402" font-size="12" font-weight="600" fill="#6366f1">a bug = solve(input) ≠ solve(reduce(input))</text><line x1="380" y1="428" x2="380" y2="449" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="454" width="620" height="66" rx="13" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.3"/><circle cx="98" cy="480" r="14" fill="#8b5cf6"/><text x="98" y="485" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">4</text><text x="124" y="484" font-size="15" font-weight="700" fill="#0f172a">📤  Submit your results</text><text x="124" y="503" font-size="12.5" fill="#475569">Upload the results file on the Submit tab — that's it.</text><line x1="70" y1="543" x2="690" y2="543" stroke="#ef4444" stroke-width="2" stroke-dasharray="7 5"/><rect x="165" y="531" width="430" height="26" rx="13" fill="#fff" stroke="#ef4444" stroke-width="1.5"/><text x="380" y="548" text-anchor="middle" font-size="12" font-weight="700" fill="#ef4444">🔒 TRUST BOUNDARY · self-reported counts ignored</text><rect x="70" y="568" width="620" height="38" rx="10" fill="url(#ge)"/><text x="380" y="592" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" letter-spacing="0.4">WE SCORE IT — independent, zero-trust</text><line x1="380" y1="610" x2="380" y2="631" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="70" y="636" width="620" height="110" rx="13" fill="#ecfdf5" stroke="#10b981" stroke-width="1.3"/><circle cx="98" cy="662" r="14" fill="#10b981"/><text x="98" y="667" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">5</text><text x="124" y="666" font-size="15" font-weight="700" fill="#0f172a">🔁  Re-verified from scratch</text><text x="124" y="685" font-size="12.5" fill="#475569">We re-derive every claimed bug with our own solver and keep only the</text><text x="124" y="703" font-size="12.5" fill="#475569">ones that truly reproduce. Your self-reported numbers never count.</text><rect x="124" y="710" width="546" height="20" rx="10" fill="#10b981" opacity="0.14"/><text x="135" y="724" font-size="12" font-weight="600" fill="#10b981">only reproducible bugs are scored</text><line x1="380" y1="750" x2="380" y2="771" stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/><rect x="140" y="776" width="480" height="46" rx="23" fill="url(#gold)"/><text x="380" y="804" text-anchor="middle" font-size="14.5" font-weight="700" fill="#fff">🏆 Leaderboard · most distinct rules bugged · efficiency = bugs / 1K tokens</text></svg></div>
+    <div class="card">
+      <p><b>What counts as a bug.</b> Each reduction is supposed to turn problem <i>A</i> into an
+      equivalent problem <i>B</i>. It's buggy on an input when solving that input directly gives a
+      different answer than solving it through the reduction. That's a fact anyone can re-check — so
+      there's no hidden answer key, and a wrong claim simply fails to reproduce.</p>
+      <p><b>Why the $20 is fair.</b> Every model gets the same budget, measured from real token usage
+      at the price you declare — not a gateway's dollar guess. The leaderboard ranks by
+      <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+    </div>
+  </section>
+
+  <!-- SUBMIT -->
+  <section class="tab" id="tab-submit">
+    <h2>Submit a run</h2>
+    <p>Run the dockerized runner at the fixed <b>$20</b> budget against problem-reductions
+       <code>v0.6.0</code> (any provider — all config goes in one <code>submission.env</code>),
+       then add the <code>submission.json</code> it produces to the submissions dataset. Every
+       certificate is re-verified by <code>pred</code> on the backend before it counts.</p>
+    <h2>1. Produce <code>submission.json</code></h2>
+    <pre class="cmd"><span class="c"># configure once (model · key · price — any provider), then:</span>
+cp submission.env.example submission.env
+make preflight   <span class="c"># validate config with one tiny real call</span>
+make run         <span class="c"># → ./out/submission.json</span></pre>
+    <h2>2. Submit it</h2>
+    <p>Upload the file to the submissions dataset (it lands as <code>PENDING</code>; the backend
+       picks it up):</p>
+    <pre class="cmd">hf upload <span id="subs-repo">isPANN/problem-reductions-submissions</span> submission.json \
+  submissions/&lt;your-handle&gt;/&lt;model&gt;.json --repo-type dataset</pre>
+    <p class="note">…or open a pull request adding it to the GitHub repo. Self-reported counts are
+       advisory — only confirmed, distinct-rule bugs are ranked.</p>
+  </section>
+
+  <!-- ABOUT -->
+  <section class="tab" id="tab-about">
+    <p><b>Metric.</b> Every model gets the same <b>$20</b> API budget; the score is the number of
+       distinct reduction rules with a confirmed bug (<b>one rule = one bug</b>). <i>Budget reach</i>
+       shows how far the $20 got before the money ran out.</p>
+    <p><b>Zero trust.</b> Every claimed bug is independently re-derived with <code>pred</code>
+       (problem-reductions <code>v0.6.0</code>); the model's claim is never trusted.</p>
+    <p><b>Links.</b>
+       <a href="https://huggingface.co/datasets/isPANN/problem-reductions-benchmarks">Task dataset</a> ·
+       <a href="https://github.com/Ferrari-72/problem-reductions-benchmark">GitHub</a></p>
+    <h2>How to cite</h2>
+    <pre class="cmd">@misc{TODO_citation_key,
+  title  = {TODO},
+  author = {TODO},
+  year   = {TODO},
+  url    = {TODO}
+}</pre>
+  </section>
+</div>
+
+<script>
+const RANKED_BUDGET = 20, TOTAL_DEFAULT = 253;
+const short = m => (m||"").split("/").pop();
+const medals = {1:"🥇",2:"🥈",3:"🥉"};
+let RESULTS = [], TASKS = [], TOTAL = TOTAL_DEFAULT;
+let lbRows = [], lbSort = {key:"bugs",dir:-1}, selectedModel = null;
+
+// ---- tabs ----
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if(!b) return;
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.toggle("active", x===b));
+  document.querySelectorAll("section.tab").forEach(s=>
+    s.classList.toggle("active", s.id==="tab-"+b.dataset.tab));
+});
+
+// ---- leaderboard ----
+const LB_COLS = [
+  {key:"rank",  label:"Rank", num:true},
+  {key:"model", label:"Model"},
+  {key:"bugs",  label:"Bugs", num:true},
+  {key:"reach", label:"Budget reach", num:true, sortBy:"reachFrac"},
+  {key:"spent", label:"Spent ($)", num:true, sortBy:"spentNum"},
+  {key:"tokens",label:"Tokens (K)", num:true, sortBy:"tokensNum"},
+  {key:"eff",   label:"Bugs/Ktok", num:true, sortBy:"effNum"},
+];
+
+function buildLbRows(){
+  const ranked = RESULTS.filter(r => r.budget_cap === RANKED_BUDGET)
+    .sort((a,b)=> (b.bugs_found||0)-(a.bugs_found||0)
+              || (b.efficiency_bugs_per_ktok||0)-(a.efficiency_bugs_per_ktok||0));
+  lbRows = ranked.map((r,i)=>{
+    const tested = r.rules_tested||0, frac = TOTAL? Math.min(tested/TOTAL,1):0;
+    const filled = Math.round(frac*10);
+    return {
+      rank:i+1, _rankNum:i+1, model:short(r.model), _model:r.model,
+      bugs:r.bugs_found||0,
+      reachFrac:frac, reach:"▓".repeat(filled)+"░".repeat(10-filled),
+      tested, spentNum:r.total_cost_usd||0, tokensNum:r.total_tokens_k||0,
+      effNum:r.efficiency_bugs_per_ktok||0,
+      certs:r.bug_certificates||[],
+    };
+  });
+}
+
+function renderLbHead(){
+  document.getElementById("lb-head").innerHTML = LB_COLS.map(c=>{
+    const sk = c.sortBy||c.key;
+    const on = lbSort.key===sk;
+    const ind = on ? (lbSort.dir<0?"▼":"▲") : "↕";
+    return `<th data-sk="${sk}" class="${on?'sorted':''}">${c.label} <span class="ind">${ind}</span></th>`;
+  }).join("");
+}
+
+function renderLbBody(){
+  const q = document.getElementById("lb-search").value.toLowerCase();
+  let rows = lbRows.filter(r => r.model.toLowerCase().includes(q));
+  const k = lbSort.key, d = lbSort.dir;
+  rows = rows.slice().sort((a,b)=>{
+    const av=a[k], bv=b[k];
+    if(typeof av==="number" && typeof bv==="number") return (av-bv)*d;
+    return String(av).localeCompare(String(bv))*d;
+  });
+  document.getElementById("lb-body").innerHTML = rows.map(r=>`
+    <tr class="clickable ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
+      <td>${medals[r.rank]||r.rank}</td>
+      <td class="mono">${r.model}</td>
+      <td><b>${r.bugs}</b></td>
+      <td class="reach">${r.reach}<small>${r.tested}/${TOTAL}</small></td>
+      <td>$${r.spentNum.toFixed(2)}</td>
+      <td>${Math.round(r.tokensNum)}</td>
+      <td>${r.effNum.toFixed(4)}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="note">No models match.</td></tr>`;
+}
+
+function renderScatter(){
+  const pts = lbRows;
+  const W=620,H=300,pad=46;
+  const maxT = Math.max(10,...pts.map(p=>p.tokensNum));
+  const maxB = Math.max(3,...pts.map(p=>p.bugs));
+  const sx = t => pad + (t/maxT)*(W-pad-20);
+  const sy = b => H-pad - (b/maxB)*(H-pad-20);
+  const colors=["#6366f1","#8b5cf6","#0ea5e9","#10b981","#f59e0b","#ef4444"];
+  let g=`<svg class="scatter" viewBox="0 0 ${W} ${H}" width="100%">`;
+  g+=`<line x1="${pad}" y1="${H-pad}" x2="${W-10}" y2="${H-pad}" stroke="#cbd5e1"/>`;
+  g+=`<line x1="${pad}" y1="20" x2="${pad}" y2="${H-pad}" stroke="#cbd5e1"/>`;
+  g+=`<text x="${(W)/2}" y="${H-12}" text-anchor="middle">Tokens (K) →</text>`;
+  g+=`<text x="14" y="${H/2}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">Bugs →</text>`;
+  pts.forEach((p,i)=>{
+    const c=colors[i%colors.length];
+    const px=sx(p.tokensNum), py=sy(p.bugs);
+    const flip = px > W*0.62;                       // near right edge → label to the left
+    const lx = flip ? px-9 : px+9, anchor = flip ? "end" : "start";
+    g+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="6" fill="${c}" opacity="0.85"><title>${p.model}: ${p.bugs} bugs, ${Math.round(p.tokensNum)}K tok</title></circle>`;
+    g+=`<text x="${lx.toFixed(1)}" y="${(py+4).toFixed(1)}" text-anchor="${anchor}" style="fill:${c};font-weight:600">${p.model}</text>`;
+  });
+  g+=`</svg>`;
+  document.getElementById("scatter").innerHTML = pts.length? g : `<div class="note">No ranked runs yet.</div>`;
+}
+
+function renderInspector(model){
+  const row = lbRows.find(r=>r._model===model);
+  const el = document.getElementById("inspect-body");
+  if(!row){ el.innerHTML = `<span class="note">Click a model row above to see its confirmed bugs.</span>`; return; }
+  if(!row.certs.length){ el.innerHTML = `No confirmed bugs for <b>${row.model}</b> within the budget.`; return; }
+  el.innerHTML = `<p><b>${row.model}</b> — ${row.certs.length} confirmed bug(s)</p>` + row.certs.map(c=>`
+    <div class="bug">
+      <code>${c.rule||"?"}</code> · violation <code>${c.violation||"?"}</code> ·
+      <code>${c.source_type||"?"} → ${c.target_type||"?"}</code>
+      ${c.note?`<br><span class="note">${c.note}</span>`:""}
+      ${c.trajectory_file?`<br><a href="${c.trajectory_file}">Trajectory</a>`:""}
+    </div>`).join("");
+}
+
+// ---- tasks ----
+let taskSort = {key:"rule",dir:1};
+function renderTasks(){
+  const q = document.getElementById("task-search").value.toLowerCase();
+  let rows = TASKS.map(t=>({rule:t.rule||"", st:(t.source||"")+" → "+(t.target||""),
+                           overhead_num_vars:t.overhead_num_vars||""}));
+  if(q) rows = rows.filter(r => (r.rule+" "+r.st).toLowerCase().includes(q));
+  const k=taskSort.key,d=taskSort.dir;
+  rows.sort((a,b)=>String(a[k]).localeCompare(String(b[k]))*d);
+  document.getElementById("task-body").innerHTML = rows.map(r=>`
+    <tr><td class="mono">${r.rule}</td><td class="mono">${r.st}</td>
+    <td class="mono" style="font-size:.78rem">${r.overhead_num_vars}</td></tr>`).join("")
+    || `<tr><td colspan="3" class="note">No tasks match.</td></tr>`;
+  document.getElementById("task-count").textContent = `${rows.length} / ${TASKS.length} rules`;
+  document.querySelector('nav.tabs button[data-tab="tasks"]').textContent = `📋 Tasks (${TASKS.length})`;
+}
+
+// ---- events ----
+document.getElementById("lb-search").addEventListener("input", renderLbBody);
+document.getElementById("lb-head").addEventListener("click", e=>{
+  const th=e.target.closest("th"); if(!th) return;
+  const sk=th.dataset.sk;
+  lbSort = {key:sk, dir: lbSort.key===sk? -lbSort.dir : (sk==="model"?1:-1)};
+  renderLbHead(); renderLbBody();
+});
+document.getElementById("lb-body").addEventListener("click", e=>{
+  const tr=e.target.closest("tr"); if(!tr||!tr.dataset.model) return;
+  selectedModel = decodeURIComponent(tr.dataset.model);
+  renderLbBody(); renderInspector(selectedModel);
+});
+document.getElementById("task-search").addEventListener("input", renderTasks);
+document.querySelectorAll("#task-table thead th").forEach(th=>th.addEventListener("click",()=>{
+  const k=th.dataset.k; taskSort={key:k,dir:taskSort.key===k?-taskSort.dir:1}; renderTasks();
+}));
+
+// ---- load ----
+Promise.all([
+  fetch("results.json").then(r=>r.json()).catch(()=>[]),
+  fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
+]).then(([res,tasks])=>{
+  RESULTS=res; TASKS=tasks; TOTAL = tasks.length||TOTAL_DEFAULT;
+  if(RESULTS.some(r=>r.placeholder))
+    document.getElementById("lb-banner").innerHTML =
+      `<div class="banner">⚠️ Showing placeholder data — real $20 runs pending.</div>`;
+  buildLbRows(); renderLbHead(); renderLbBody(); renderScatter(); renderTasks();
+});
+</script>
+</body>
+</html>
