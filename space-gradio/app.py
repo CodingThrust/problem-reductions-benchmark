@@ -28,40 +28,69 @@ _CITATION = """@misc{TODO_citation_key,
   url    = {TODO}
 }"""
 
-# End-to-end pipeline, rendered as a monospace block (Gradio Markdown doesn't do mermaid).
-_PIPELINE_DIAGRAM = r"""
-SUBMITTER SIDE   (your machine · your API key · your money)
-───────────────────────────────────────────────────────────────
- 1. make runner-build PR_REF=v0.6.0
-       docker build -> image   (pred + library source, version baked in)
- 2. edit submission.env
-       MODEL_NAME · API_KEY · PRICE_IN/PRICE_OUT      (any provider)
- 3. make preflight                       <- one tiny real call (~$0.00001)
-       [ok] pred   [ok] rules   [ok] model / key / endpoint
-       any FAIL -> fix before spending
- 4. make run                             <- the budgeted bug hunt
-       for each of ~262 reduction rules:
-          mini-swe-agent --(LiteLLM)--> your model
-             read rule -> pred create -> pred solve(source)
-                                         vs pred solve(reduced)
-             values differ = bug -> certificate
-          local pred re-check -> bug_found / no_certificate
-       spend = tokens x your price · capped at $20 - safety margin
-       -> out/submission.json
- 5. upload          Space "Submit" tab   /   hf upload
-═══════════ TRUST BOUNDARY — self-reported counts are ignored ═══════════
-BACKEND SIDE   (zero-trust scorer, has its own pred)
-───────────────────────────────────────────────────────────────
- 6. backend_score   (webhook -> HF Job)
-       PENDING -> RUNNING
-       each certificate: take {rule, source} -> pred re-reduce + solve
-          reproduces?  keep  :  reject
-       score = distinct rules with a confirmed bug   (deduplicated)
-       -> leaderboard.json · FINISHED
-                              |
-                              v
-                  Leaderboard   (ranked by bugs / Ktok)
-""".strip("\n")
+# End-to-end pipeline as styled HTML cards (Gradio Markdown can't render mermaid; gr.HTML
+# renders inline CSS reliably and themes via inherited colors — no external JS/CDN).
+def _build_pipeline_html() -> str:
+    I, V, S, G, A = "#6366f1", "#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b"
+
+    def card(n, title, sub, color):
+        return (
+            '<div style="display:flex;gap:12px;align-items:flex-start;'
+            'background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.18);'
+            f'border-left:4px solid {color};border-radius:10px;padding:11px 13px;">'
+            f'<div style="flex:0 0 26px;height:26px;border-radius:50%;background:{color};'
+            'color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;'
+            f'justify-content:center;">{n}</div>'
+            f'<div style="line-height:1.45;"><b>{title}</b><br>'
+            f'<span style="opacity:.72;font-size:.88em;">{sub}</span></div></div>')
+
+    arrow = ('<div style="text-align:center;opacity:.35;font-size:17px;'
+             'line-height:1;margin:3px 0;">&#8595;</div>')
+
+    def label(txt):
+        return ('<div style="text-transform:uppercase;letter-spacing:.06em;font-size:.72em;'
+                f'font-weight:700;opacity:.6;margin:16px 2px 8px;">{txt}</div>')
+
+    submitter = [
+        ("1", "Build the runner image",
+         "make runner-build PR_REF=v0.6.0 — compiles pred &amp; bundles the library at that version", I),
+        ("2", "Configure (any provider)",
+         "submission.env: MODEL_NAME · API_KEY · PRICE_IN / PRICE_OUT", V),
+        ("3", "Preflight",
+         "make preflight — one tiny real call checks pred · rules · key / endpoint", S),
+        ("4", "Run the bug hunt",
+         "make run — agent (LiteLLM → your model) probes each rule: solve(source) ≠ solve(reduced) "
+         "⇒ certificate, re-checked locally by pred. Spend = tokens × your price, capped at $20.", I),
+        ("5", "Upload",
+         'Space "Submit" tab / hf upload  →  queued as PENDING', V),
+    ]
+
+    parts = ['<div style="max-width:720px;margin:0 auto;font-family:inherit;">']
+    parts.append(label("Submitter side · your machine, your key, your money"))
+    for i, (n, t, s, c) in enumerate(submitter):
+        parts.append(card(n, t, s, c))
+        if i < len(submitter) - 1:
+            parts.append(arrow)
+    parts.append(
+        '<div style="text-align:center;font-size:.78em;font-weight:700;color:#ef4444;'
+        'border-top:2px dashed #ef4444;border-bottom:2px dashed #ef4444;'
+        'padding:7px 0;margin:16px 0;letter-spacing:.03em;">'
+        '⛔ TRUST BOUNDARY — self-reported counts are ignored</div>')
+    parts.append(label("Backend side · zero-trust scorer with its own pred"))
+    parts.append(card(
+        "6", "Zero-trust re-verify",
+        "backend_score re-derives each bug from {rule, source} with pred and keeps only what "
+        "reproduces. Score = distinct rules with a confirmed bug (deduplicated).", G))
+    parts.append(arrow)
+    parts.append(
+        f'<div style="text-align:center;background:rgba(245,158,11,.12);border:1px solid {A};'
+        'border-radius:10px;padding:12px;font-weight:700;">'
+        '🏆 Leaderboard — ranked by bugs / Ktok</div>')
+    parts.append("</div>")
+    return "".join(parts)
+
+
+_PIPELINE_HTML = _build_pipeline_html()
 
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
 
@@ -295,7 +324,7 @@ def build_ui() -> gr.Blocks:
                 "counts are never trusted — the line below the **trust boundary** is all that "
                 "decides your rank."
             )
-            gr.Code(value=_PIPELINE_DIAGRAM, language=None, label="Pipeline")
+            gr.HTML(_PIPELINE_HTML)
             gr.Markdown(
                 "**Why a bug is a bug.** A reduction A→B is buggy on an instance when solving "
                 "the source directly disagrees with solving it *through* the reduction "
