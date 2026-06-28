@@ -21,10 +21,8 @@ IMAGE    ?= problem-reductions-runner:$(PR_REF)
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
-# HF Space that hosts the static leaderboard (the deploy target uploads space/ here).
-SPACE    ?= isPANN/problem-reductions-benchmarks
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local deploy-space
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local serve
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -57,26 +55,25 @@ preflight:
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
 ## Run the budgeted bug-finding agent via Docker → writes ./out/submission.json.
-## This RUNS the benchmark locally; it does NOT upload — submitting is a separate step
-## (Space 🚀 Submit tab or `hf upload`, see SUBMISSION.md). Config lives in submission.env
+## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
+## (open a GitHub PR adding the file, see SUBMISSION.md). Config lives in submission.env
 ## (copy submission.env.example); run `make preflight` first to validate it.
 run:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Wrote ./out/submission.json — now submit it (Space Submit tab or hf upload)."
+	@echo "Wrote ./out/submission.json — now submit it via a GitHub PR (see SUBMISSION.md)."
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
 ## Writes scored results + leaderboard.json into SCORED.
 score-local:
 	python -m benchmark.backend_score --local $(SUBS_DIR) $(SCORED)
 
-## Deploy the static leaderboard (space/) to the HF Space.
-## Uploads with --repo-type space hardwired, so it can't land in the wrong repo.
-deploy-space:
-	hf upload $(SPACE) space . --repo-type space --commit-message "deploy leaderboard"
-	@echo "Deployed space/ → https://huggingface.co/spaces/$(SPACE)"
+## Preview the leaderboard site locally (it's published to GitHub Pages on merge).
+serve:
+	@echo "Serving site/ at http://localhost:8000  (Ctrl-C to stop)"
+	cd site && python3 -m http.server 8000
 
 ## Audit pred CLI capabilities against the pinned library commit.
 audit:
@@ -95,7 +92,7 @@ help:
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
-	@echo "  deploy-space        Upload space/ to the HF Space (static leaderboard)"
+	@echo "  serve               Preview the leaderboard site locally (published via Pages on merge)"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
 	@echo ""

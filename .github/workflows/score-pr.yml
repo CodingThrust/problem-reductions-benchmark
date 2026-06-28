@@ -1,0 +1,111 @@
+name: Score submission (PR, maintainer-gated)
+
+# Authoritative pred-backed scoring, run ON the pull request so the verified result is
+# known BEFORE merge. Trigger is `pull_request` (NOT pull_request_target): on fork PRs the
+# token is read-only and no secrets are exposed, so running pred on contributor input is
+# safe. Three jobs:
+#   detect — classify the PR (none / submissions-only / mixed). Always runs.
+#   score  — re-verify the submission with pred. Runs only for submissions-only PRs, and
+#            only after a maintainer approves the `scoring` environment.
+#   gate   — the REQUIRED status check. Always runs and reports, so it never gets stuck.
+#
+# IMPORTANT: do not add a `paths:` filter here — a required check skipped by path filtering
+# stays "Pending" forever and blocks merge. We filter inside the jobs instead.
+#
+# Repo setup (one-time):
+#   * Settings → Environments → new env `scoring` → add required reviewers (maintainers).
+#   * Settings → Actions → General → require approval for all external contributors.
+#   * Branch protection / ruleset → require the status check named `gate`.
+
+on:
+  pull_request: {}
+
+permissions:
+  contents: read
+
+env:
+  PR_REF: v0.6.0
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: classify
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          changed="$(git diff --name-only "$base" "$head")"
+          echo "Changed files:"; echo "$changed"
+          subs="$(echo "$changed" | grep -E '^submissions/.*\.json$' || true)"
+          other="$(echo "$changed" | grep -vE '^submissions/' || true)"
+          if [ -z "$subs" ]; then mode=none
+          elif [ -n "$other" ]; then mode=mixed
+          else mode=submissions; fi
+          echo "mode=$mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+  score:
+    needs: detect
+    if: needs.detect.outputs.mode == 'submissions'
+    runs-on: ubuntu-latest
+    environment: scoring          # ← maintainer must approve before pred touches the input
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: List submission files to score
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          git diff --name-only --diff-filter=AM "$base" "$head" -- 'submissions/**/*.json' > changed.txt
+          echo "Will score:"; cat changed.txt
+      - name: Build scoring image (pred + verifier)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          build-args: PR_REF=${{ env.PR_REF }}
+          load: true
+          tags: prb-scoring:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Re-verify each submission with pred (zero trust)
+        run: |
+          echo "## Verified scoring (zero-trust re-check)" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "### $f" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            docker run --rm --network none -v "$PWD:/work:ro" \
+              --entrypoint python prb-scoring:latest \
+              -m benchmark.verify_submission "/work/$f" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done < changed.txt
+
+  gate:
+    needs: [detect, score]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide merge gate
+        run: |
+          mode='${{ needs.detect.outputs.mode }}'
+          score='${{ needs.score.result }}'
+          echo "mode=$mode  score=$score"
+          if [ "$mode" = "mixed" ]; then
+            echo "::error::This PR changes submissions/ AND other files. Put the submission in its own PR (submissions/** only) so it can be safely auto-scored."
+            exit 1
+          fi
+          if [ "$mode" = "none" ]; then
+            echo "No submission changes — nothing to score."; exit 0
+          fi
+          if [ "$score" != "success" ]; then
+            echo "::error::Scoring did not succeed (result=$score)."; exit 1
+          fi
+          echo "Submission verified — safe to merge."

@@ -180,7 +180,7 @@ evidence the model is really *working through it*, not guessing.
 
 ### 4.3 Leaderboard
 
-The leaderboard is a static HF Space (`space/`); submission is command-line (`hf upload`):
+The leaderboard is a static site (`site/`) on GitHub Pages; submission is a GitHub PR:
 - `bugs_found` (distinct rules) is the headline cross-model metric
 - sorted by `bugs_found`, ties broken by `efficiency_bugs_per_ktok`; rows appear once the
   backend re-verification passes
@@ -286,7 +286,7 @@ problem-reductions-benchmark/
 │   ├── backend_score.py      # submission-queue scoring + webhook entry
 │   ├── config.yaml           # agent prompt + step_limit
 │   └── tests/                # unit tests
-├── space/                    # HF static Space (instant leaderboard; CLI submit)
+├── site/                     # static leaderboard (published to GitHub Pages)
 ├── docker/Dockerfile         # runner image (pred + agent)
 └── SHOWCASE.md               # this file
 ```

@@ -2,7 +2,7 @@
 
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
-The leaderboard is a static Hugging Face Space (`space/`, deploy with `make deploy-space`). Submitting is command-line only — there's no web upload form. See `SUBMISSION.md` to run and submit.
+The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting is a **GitHub pull request** that adds `submissions/<handle>/<model>.json`; the submission is re-verified on the PR (after a maintainer approves the run) and the result must pass before merge. See `SUBMISSION.md` to run and submit.
 
 ## What this measures
 

@@ -5,15 +5,23 @@ reduction-rule bugs (counterexamples) can it find? This document describes the e
 submission pipeline.
 
 ```
-  make run ─▶ submission.json ─▶ hf upload ─▶ submissions dataset (PENDING)
-                                                          │
-                                  backend_score.py (zero-trust pred re-verify)
-                                                          │
-                             results + leaderboard.json ─▶ static leaderboard Space
+  make run ─▶ submission.json ─▶ open a GitHub PR  (submissions/<handle>/<model>.json)
+                                          │
+                       PR check: schema-validate (auto, no pred)
+                                          │
+                 maintainer APPROVES the scoring run   ← trust boundary
+                                          │
+            pred re-verifies on the PR (zero trust) → verified result shown
+                                          │
+                 result is a REQUIRED check → maintainer MERGES
+                                          │
+              on merge: rebuild leaderboard.json ─▶ static Space (deploy)
 ```
 
-The headline number on the leaderboard is **only** what the backend's `pred`
-re-verification confirms. Self-reported counts are never trusted.
+The verified result is produced **on the PR, before merge** — you never merge a number you
+haven't seen. Scoring (running `pred` on submitted input) only runs after a maintainer
+approves it, and the result is a required check, so a PR can't be merged without one.
+Self-reported counts are never trusted. Merge only publishes the already-verified result.
 
 ## 1. Produce a `submission.json` (dockerized runner)
 
@@ -122,21 +130,26 @@ minimal model call through the exact batch code path (validating credentials, en
 `model_kwargs`, and that pricing computes). It exits non-zero on any failure. (The runner's
 no-API wiring is covered by the pytest suite, not a separate command.)
 
-## 2. Submit it
+## 2. Submit it (GitHub pull request)
 
-Submission is **command-line only** — there's no web upload form. Upload the
-`submission.json` to the submissions dataset; it lands as `PENDING` and the backend picks
-it up:
+Submission is a **pull request** — there's no web upload form and no auto-running upload.
+Add the file the runner produced as `submissions/<your-handle>/<model>.json` and open a PR:
 
 ```bash
-hf upload isPANN/problem-reductions-submissions submission.json \
-  submissions/<your-handle>/<model>.json --repo-type dataset
+# in your fork of the benchmark repo
+mkdir -p submissions/<your-handle>
+cp out/submission.json submissions/<your-handle>/<model>.json
+git add submissions/<your-handle>/<model>.json
+git commit -m "submit: <model>"
+git push   # then open the PR on GitHub
 ```
 
-…or open a pull request adding it to the GitHub repo. The
-[leaderboard Space](https://huggingface.co/spaces/isPANN/problem-reductions-benchmarks) is a
-static display of the verified results — it shows the `hf upload` command on its **Submit**
-tab but does no uploading itself.
+On the PR, an automated check validates the file against `submission.schema.json`
+(structure only). Then a **maintainer approves the scoring run** (running `pred` on
+submitted input is the trust boundary), CI re-verifies every certificate with `pred`, and
+the **verified result appears on the PR as a required check** — so you never merge a number
+nobody has seen. After a maintainer merges, CI rebuilds the leaderboard and publishes the
+static site to **GitHub Pages**. See `submissions/README.md`.
 
 ## 3. Backend verification (automatic, zero-trust)
 
