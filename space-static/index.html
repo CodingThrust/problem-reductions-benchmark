@@ -96,12 +96,6 @@
         <span><span class="vl">library pinned</span><span class="vn">v0.6.0</span></span>
       </a>
     </div>
-    <div class="chips">
-      <span class="chip" id="chip-rules">253 rules</span>
-      <span class="chip">$20 budget</span>
-      <span class="chip">one rule = one bug</span>
-      <span class="chip">zero-trust · re-verified by <code>pred</code></span>
-    </div>
   </header>
 
   <nav class="tabs" id="tabs">
@@ -377,7 +371,6 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res; TASKS=tasks; TOTAL = tasks.length||TOTAL_DEFAULT;
-  if(TASKS.length) document.getElementById("chip-rules").textContent = `${TASKS.length} rules`;
   if(RESULTS.some(r=>r.placeholder))
     document.getElementById("lb-banner").innerHTML =
       `<div class="banner">Showing placeholder data — real $20 runs pending.</div>`;
