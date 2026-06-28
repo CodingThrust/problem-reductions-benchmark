@@ -66,8 +66,8 @@ make verify-calibration
 cp submission.env.example submission.env   # fill in MODEL_NAME, key, PRICE_IN/OUT
 make preflight
 
-# Run the real budgeted runner via Docker → ./out/submission.json
-make submission
+# Run the benchmark via Docker → ./out/submission.json (this does NOT upload it)
+make run
 ```
 
 Key `make` targets:
@@ -78,7 +78,7 @@ Key `make` targets:
 | `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
 | `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
 | `make preflight` | Validate `submission.env` with one tiny real call before a full run |
-| `make submission` | Run the real budgeted runner via Docker |
+| `make run` | Run the benchmark via Docker → `out/submission.json` (does not upload) |
 | `make score-local` | Score submissions with the zero-trust backend |
 
 ## How to read the metrics

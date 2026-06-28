@@ -45,7 +45,7 @@ cp submission.env.example submission.env   # then edit the REQUIRED lines (model
 mkdir -p out
 docker run --rm --env-file submission.env -v "$PWD/out:/out" \
   problem-reductions-runner:v0.6.0
-# → ./out/submission.json      (or just: make submission)
+# → ./out/submission.json      (or just: make run)
 ```
 
 The **required lines are model + API key + price** (`MODEL_NAME`, a key, `PRICE_IN`/`PRICE_OUT`).

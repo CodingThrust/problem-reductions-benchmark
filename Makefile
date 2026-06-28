@@ -6,7 +6,7 @@
 #   test-unit            Run only unit tests (no real repo/pred needed)
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   preflight            Validate submission.env with one tiny real call before a full run
-#   submission           Run the real budgeted runner via Docker
+#   run                  Run the benchmark via Docker → out/submission.json (does NOT upload)
 #
 # Model + key + price for the real run live in submission.env (any provider — see
 # submission.env.example); preflight/submission read it via --env-file. REPO_DIR is only
@@ -22,7 +22,7 @@ SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight submission score-local
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -54,16 +54,16 @@ preflight:
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in first"; exit 1; fi
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
-## Run the real budgeted runner via Docker → ./out/submission.json.
-## Config lives in submission.env (copy submission.env.example, fill it in). Run `make
-## preflight` first to validate it. All providers go through the same file — nothing here
-## assumes a particular vendor.
-submission:
+## Run the budgeted bug-finding agent via Docker → writes ./out/submission.json.
+## This RUNS the benchmark locally; it does NOT upload — submitting is a separate step
+## (Space 🚀 Submit tab or `hf upload`, see SUBMISSION.md). Config lives in submission.env
+## (copy submission.env.example); run `make preflight` first to validate it.
+run:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Submission → ./out/submission.json"
+	@echo "Wrote ./out/submission.json — now submit it (Space Submit tab or hf upload)."
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
 ## Writes scored results + leaderboard.json into SCORED.
@@ -85,7 +85,7 @@ help:
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
 	@echo "  runner-build        Build the dockerized submission runner image"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
-	@echo "  submission          Run the real runner via Docker → out/submission.json"
+	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
