@@ -449,8 +449,7 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    # ssr_mode renders the first paint server-side so the styled page (incl. the table) shows
-    # immediately instead of flashing unstyled text while the JS bundle hydrates. Needs Node
-    # (present in the HF gradio runtime). If the third-party Leaderboard component misbehaves
-    # under SSR, drop this arg to revert to client-only rendering.
-    build_ui().launch(ssr_mode=True)
+    # NB: HF Spaces already enables SSR by default, so it isn't the lever for the first-paint
+    # flash — that's a Gradio frontend CSS/hydration timing issue (see gradio #5825), not
+    # fixable from here. A static leaderboard site is the robust fix if the FOUC matters.
+    build_ui().launch()
