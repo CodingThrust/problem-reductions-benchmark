@@ -64,10 +64,10 @@ def _build_pipeline_svg() -> str:
                    f'stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/>')
         y[0] += ARROW
 
-    def step(num, title, sub, cmd, fill, accent):
+    def step(num, title, sub, chip, fill, accent):
         subl = wrap(sub, 70)
-        top, title_h, sub_h, cmd_h, bot = 14, 22, 18, 26, 12
-        h = top + title_h + sub_h * len(subl) + cmd_h + bot
+        top, title_h, sub_h, chip_h, bot = 14, 22, 18, (26 if chip else 0), 12
+        h = top + title_h + sub_h * len(subl) + chip_h + bot
         svg.append(f'<rect x="{BX}" y="{y[0]}" width="{BW}" height="{h}" rx="13" '
                    f'fill="{fill}" stroke="{accent}" stroke-width="1.3"/>')
         cx, cy = BX + 28, y[0] + top + 12
@@ -81,11 +81,12 @@ def _build_pipeline_svg() -> str:
         for ln in subl:
             svg.append(f'<text x="{tx}" y="{sy}" font-size="12.5" fill="#475569">{esc(ln)}</text>')
             sy += sub_h
-        cy2 = y[0] + top + title_h + sub_h * len(subl) + 2
-        cw = BW - (tx - BX) - 20
-        svg.append(f'<rect x="{tx}" y="{cy2}" width="{cw}" height="20" rx="5" fill="#0f172a"/>')
-        svg.append(f'<text x="{tx+9}" y="{cy2+14}" font-size="12" '
-                   f'font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#e2e8f0">{esc(cmd)}</text>')
+        if chip:
+            cy2 = y[0] + top + title_h + sub_h * len(subl) + 2
+            svg.append(f'<rect x="{tx}" y="{cy2}" width="{BW-(tx-BX)-20}" height="20" rx="10" '
+                       f'fill="{accent}" opacity="0.14"/>')
+            svg.append(f'<text x="{tx+11}" y="{cy2+14}" font-size="12" font-weight="600" '
+                       f'fill="{accent}">{esc(chip)}</text>')
         y[0] += h
 
     def boundary():
@@ -102,40 +103,38 @@ def _build_pipeline_svg() -> str:
     I, V, S, G = "#eef2ff", "#f5f3ff", "#ecfeff", "#ecfdf5"
     IA, VA, SA, GA = "#6366f1", "#8b5cf6", "#0ea5e9", "#10b981"
 
-    lane("SUBMITTER SIDE — your machine · your key · your money", "gi")
+    lane("YOU RUN IT — your model · your key · $20 budget", "gi")
     arrow()
-    step("1", "🛠  Build the runner image",
-         "Compiles pred and bundles the library source at the target version.",
-         "make runner-build PR_REF=v0.6.0", I, IA)
+    step("1", "🐳  Get the runner",
+         "One Docker image with the solver and the rule library, pinned to the benchmark version. "
+         "No setup beyond Docker.",
+         "", I, IA)
     arrow()
-    step("2", "⚙  Configure — any provider",
-         "One file holds it all: MODEL_NAME, API_KEY, PRICE_IN / PRICE_OUT.",
-         "submission.env", V, VA)
+    step("2", "🔌  Plug in any model",
+         "OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key and tell it "
+         "your price per token.",
+         "", V, VA)
     arrow()
-    step("3", "✅  Preflight",
-         "One tiny real call validates pred, the rules, and your key / endpoint before you spend.",
-         "make preflight", S, SA)
+    step("3", "🐛  Hunt for bugs",
+         "Your model searches each of the ~262 reduction rules for a counterexample — an input the "
+         "rule mishandles — until the $20 runs out. Each find is checked by the solver on the spot.",
+         "a bug = solve(input) ≠ solve(reduce(input))", I, IA)
     arrow()
-    step("4", "🐛  Run the bug hunt — per rule × ~262",
-         "Agent (LiteLLM → your model) probes each rule: solve(source) vs solve(reduced); a "
-         "mismatch is a certificate, re-checked locally by pred. Spend = tokens × your price, "
-         "capped at $20.", "make run  →  out/submission.json", I, IA)
-    arrow()
-    step("5", "📤  Upload",
-         "Send the submission.json to the queue; it lands as PENDING.",
-         'Space "Submit" tab  /  hf upload', V, VA)
+    step("4", "📤  Submit your results",
+         "Upload the results file on the Submit tab — that's it.",
+         "", V, VA)
     boundary()
-    lane("BACKEND SIDE — zero-trust scorer with its own pred", "ge")
+    lane("WE SCORE IT — independent, zero-trust", "ge")
     arrow()
-    step("6", "🔁  Re-verify every claimed bug",
-         "Re-derives each bug from rule + source with pred, keeping only what reproduces. "
-         "Score = distinct rules with a confirmed bug.",
-         "backend_score  (webhook → HF Job)", G, GA)
+    step("5", "🔁  Re-verified from scratch",
+         "We re-derive every claimed bug with our own solver and keep only the ones that truly "
+         "reproduce. Your self-reported numbers never count.",
+         "only reproducible bugs are scored", G, GA)
     arrow()
-    h = 42
-    svg.append(f'<rect x="{BX+130}" y="{y[0]}" width="{BW-260}" height="{h}" rx="21" fill="url(#gold)"/>')
+    h = 46
+    svg.append(f'<rect x="{BX+70}" y="{y[0]}" width="{BW-140}" height="{h}" rx="23" fill="url(#gold)"/>')
     svg.append(f'<text x="{W/2:.0f}" y="{y[0]+h/2+5:.0f}" text-anchor="middle" font-size="14.5" '
-               f'font-weight="700" fill="#fff">🏆 Leaderboard · ranked by bugs / Ktok</text>')
+               f'font-weight="700" fill="#fff">🏆 Leaderboard · most distinct rules bugged · efficiency = bugs / 1K tokens</text>')
     y[0] += h
 
     defs = (
@@ -384,22 +383,21 @@ def build_ui() -> gr.Blocks:
         with gr.Tab("🔄 How it works"):
             gr.Markdown(
                 "### From your model to the leaderboard\n"
-                "You run the benchmark locally under a fixed **$20** budget; the backend "
-                "re-verifies every claimed bug with `pred` before it scores. Self-reported "
-                "counts are never trusted — the line below the **trust boundary** is all that "
-                "decides your rank."
+                "Give a model the same **$20** and see how many bugs it can find in the library's "
+                "problem reductions. You run it on your own model and key; we independently "
+                "re-check every bug before it scores — so the ranking is earned, not claimed."
             )
             gr.HTML(_PIPELINE_HTML)
             gr.Markdown(
-                "**Why a bug is a bug.** A reduction A→B is buggy on an instance when solving "
-                "the source directly disagrees with solving it *through* the reduction "
-                "(`pred solve <source>` vs `pred solve <reduced>`), compared by value / "
-                "feasibility. That's deterministic, so the backend can re-check it from just "
-                "`{rule, source}` — no hidden answer key needed.\n\n"
-                "**Why $20 is a real cap.** Spend is recomputed as `tokens × your declared "
-                "price` (not the gateway's self-reported dollars), capped per-rule and in "
-                "total with a safety margin. Ranking uses **bugs / Ktok** (token counts are "
-                "auditable); self-reported dollars are advisory."
+                "**What counts as a bug.** Each reduction is supposed to turn problem *A* into an "
+                "equivalent problem *B*. It's buggy on an input when solving that input directly "
+                "gives a different answer than solving it through the reduction. That's a fact "
+                "anyone can re-check — so there's no hidden answer key, and a wrong claim simply "
+                "fails to reproduce.\n\n"
+                "**Why the $20 is fair.** Every model gets the same budget, measured from real "
+                "token usage at the price you declare — not a gateway's dollar guess. The "
+                "leaderboard ranks by **confirmed distinct-rule bugs**, with **bugs per 1K "
+                "tokens** as the efficiency tie-break."
             )
 
         with gr.Tab("🚀 Submit"):
