@@ -28,6 +28,41 @@ _CITATION = """@misc{TODO_citation_key,
   url    = {TODO}
 }"""
 
+# End-to-end pipeline, rendered as a monospace block (Gradio Markdown doesn't do mermaid).
+_PIPELINE_DIAGRAM = r"""
+SUBMITTER SIDE   (your machine · your API key · your money)
+───────────────────────────────────────────────────────────────
+ 1. make runner-build PR_REF=v0.6.0
+       docker build -> image   (pred + library source, version baked in)
+ 2. edit submission.env
+       MODEL_NAME · API_KEY · PRICE_IN/PRICE_OUT      (any provider)
+ 3. make preflight                       <- one tiny real call (~$0.00001)
+       [ok] pred   [ok] rules   [ok] model / key / endpoint
+       any FAIL -> fix before spending
+ 4. make run                             <- the budgeted bug hunt
+       for each of ~262 reduction rules:
+          mini-swe-agent --(LiteLLM)--> your model
+             read rule -> pred create -> pred solve(source)
+                                         vs pred solve(reduced)
+             values differ = bug -> certificate
+          local pred re-check -> bug_found / no_certificate
+       spend = tokens x your price · capped at $20 - safety margin
+       -> out/submission.json
+ 5. upload          Space "Submit" tab   /   hf upload
+═══════════ TRUST BOUNDARY — self-reported counts are ignored ═══════════
+BACKEND SIDE   (zero-trust scorer, has its own pred)
+───────────────────────────────────────────────────────────────
+ 6. backend_score   (webhook -> HF Job)
+       PENDING -> RUNNING
+       each certificate: take {rule, source} -> pred re-reduce + solve
+          reproduces?  keep  :  reject
+       score = distinct rules with a confirmed bug   (deduplicated)
+       -> leaderboard.json · FINISHED
+                              |
+                              v
+                  Leaderboard   (ranked by bugs / Ktok)
+""".strip("\n")
+
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
 
 # gradio_leaderboard renders its search + column controls as big bordered boxes that
@@ -252,20 +287,38 @@ def build_ui() -> gr.Blocks:
                     ),
                 )
 
+        with gr.Tab("🔄 How it works"):
+            gr.Markdown(
+                "### From your model to the leaderboard\n"
+                "You run the benchmark locally under a fixed **$20** budget; the backend "
+                "re-verifies every claimed bug with `pred` before it scores. Self-reported "
+                "counts are never trusted — the line below the **trust boundary** is all that "
+                "decides your rank."
+            )
+            gr.Code(value=_PIPELINE_DIAGRAM, language=None, label="Pipeline")
+            gr.Markdown(
+                "**Why a bug is a bug.** A reduction A→B is buggy on an instance when solving "
+                "the source directly disagrees with solving it *through* the reduction "
+                "(`pred solve <source>` vs `pred solve <reduced>`), compared by value / "
+                "feasibility. That's deterministic, so the backend can re-check it from just "
+                "`{rule, source}` — no hidden answer key needed.\n\n"
+                "**Why $20 is a real cap.** Spend is recomputed as `tokens × your declared "
+                "price` (not the gateway's self-reported dollars), capped per-rule and in "
+                "total with a safety margin. Ranking uses **bugs / Ktok** (token counts are "
+                "auditable); self-reported dollars are advisory."
+            )
+
         with gr.Tab("🚀 Submit"):
             gr.Markdown(
                 "### Submit a run\n"
                 f"Run the dockerized runner at the fixed **${lb.RANKED_BUDGET}** budget "
-                f"against problem-reductions `{_PINNED_TAG}`, then upload the "
-                "`submission.json` it produces.\n\n"
+                f"against problem-reductions `{_PINNED_TAG}` (any provider — config goes in "
+                "one `submission.env`), then upload the `submission.json` it produces. See the "
+                "**🔄 How it works** tab for the full pipeline.\n\n"
                 "```bash\n"
-                "docker run --rm \\\n"
-                "  -e MODEL_NAME=anthropic/claude-sonnet-4-6 \\\n"
-                "  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \\\n"
-                f"  -e BUDGET_USD={lb.RANKED_BUDGET} \\\n"
-                '  -v "$PWD/out:/out" \\\n'
-                "  problem-reductions-runner:v0.6.0\n"
-                "# → ./out/submission.json\n"
+                "cp submission.env.example submission.env   # set MODEL_NAME, API_KEY, PRICE_IN/OUT\n"
+                "make preflight                             # validate config (1 tiny real call)\n"
+                "make run                                   # → ./out/submission.json\n"
                 "```\n"
                 "Self-reported counts are advisory — **every certificate is re-verified "
                 "by `pred`** on the backend before it counts."
