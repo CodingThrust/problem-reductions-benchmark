@@ -28,69 +28,134 @@ _CITATION = """@misc{TODO_citation_key,
   url    = {TODO}
 }"""
 
-# End-to-end pipeline as styled HTML cards (Gradio Markdown can't render mermaid; gr.HTML
-# renders inline CSS reliably and themes via inherited colors — no external JS/CDN).
-def _build_pipeline_html() -> str:
-    I, V, S, G, A = "#6366f1", "#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b"
+# End-to-end pipeline as a hand-built SVG flowchart. SVG renders identically in every theme
+# (each box carries its own light fill + dark text, so it reads on light or dark pages) and
+# needs no external JS/CDN. Generated in Python so layout/positions stay maintainable.
+def _build_pipeline_svg() -> str:
+    W, BX, BW = 760, 70, 620
+    ARROW = 30
 
-    def card(n, title, sub, color):
-        return (
-            '<div style="display:flex;gap:12px;align-items:flex-start;'
-            'background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.18);'
-            f'border-left:4px solid {color};border-radius:10px;padding:11px 13px;">'
-            f'<div style="flex:0 0 26px;height:26px;border-radius:50%;background:{color};'
-            'color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;'
-            f'justify-content:center;">{n}</div>'
-            f'<div style="line-height:1.45;"><b>{title}</b><br>'
-            f'<span style="opacity:.72;font-size:.88em;">{sub}</span></div></div>')
+    def esc(s):
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    arrow = ('<div style="text-align:center;opacity:.35;font-size:17px;'
-             'line-height:1;margin:3px 0;">&#8595;</div>')
+    def wrap(s, n=72):
+        out, cur = [], ""
+        for w in s.split():
+            if len(cur) + len(w) + 1 <= n:
+                cur = (cur + " " + w).strip()
+            else:
+                out.append(cur); cur = w
+        if cur:
+            out.append(cur)
+        return out
 
-    def label(txt):
-        return ('<div style="text-transform:uppercase;letter-spacing:.06em;font-size:.72em;'
-                f'font-weight:700;opacity:.6;margin:16px 2px 8px;">{txt}</div>')
+    svg, y = [], [0]  # y in a list so closures can mutate it
 
-    submitter = [
-        ("1", "Build the runner image",
-         "make runner-build PR_REF=v0.6.0 — compiles pred &amp; bundles the library at that version", I),
-        ("2", "Configure (any provider)",
-         "submission.env: MODEL_NAME · API_KEY · PRICE_IN / PRICE_OUT", V),
-        ("3", "Preflight",
-         "make preflight — one tiny real call checks pred · rules · key / endpoint", S),
-        ("4", "Run the bug hunt",
-         "make run — agent (LiteLLM → your model) probes each rule: solve(source) ≠ solve(reduced) "
-         "⇒ certificate, re-checked locally by pred. Spend = tokens × your price, capped at $20.", I),
-        ("5", "Upload",
-         'Space "Submit" tab / hf upload  →  queued as PENDING', V),
-    ]
+    def lane(title, grad):
+        h = 38
+        svg.append(f'<rect x="{BX}" y="{y[0]}" width="{BW}" height="{h}" rx="10" fill="url(#{grad})"/>')
+        svg.append(f'<text x="{W/2:.0f}" y="{y[0]+h/2+5:.0f}" text-anchor="middle" '
+                   f'font-size="14" font-weight="700" fill="#fff" letter-spacing="0.4">{esc(title)}</text>')
+        y[0] += h
 
-    parts = ['<div style="max-width:720px;margin:0 auto;font-family:inherit;">']
-    parts.append(label("Submitter side · your machine, your key, your money"))
-    for i, (n, t, s, c) in enumerate(submitter):
-        parts.append(card(n, t, s, c))
-        if i < len(submitter) - 1:
-            parts.append(arrow)
-    parts.append(
-        '<div style="text-align:center;font-size:.78em;font-weight:700;color:#ef4444;'
-        'border-top:2px dashed #ef4444;border-bottom:2px dashed #ef4444;'
-        'padding:7px 0;margin:16px 0;letter-spacing:.03em;">'
-        '⛔ TRUST BOUNDARY — self-reported counts are ignored</div>')
-    parts.append(label("Backend side · zero-trust scorer with its own pred"))
-    parts.append(card(
-        "6", "Zero-trust re-verify",
-        "backend_score re-derives each bug from {rule, source} with pred and keeps only what "
-        "reproduces. Score = distinct rules with a confirmed bug (deduplicated).", G))
-    parts.append(arrow)
-    parts.append(
-        f'<div style="text-align:center;background:rgba(245,158,11,.12);border:1px solid {A};'
-        'border-radius:10px;padding:12px;font-weight:700;">'
-        '🏆 Leaderboard — ranked by bugs / Ktok</div>')
-    parts.append("</div>")
-    return "".join(parts)
+    def arrow():
+        x = W / 2
+        svg.append(f'<line x1="{x:.0f}" y1="{y[0]+4}" x2="{x:.0f}" y2="{y[0]+ARROW-5}" '
+                   f'stroke="#94a3b8" stroke-width="2" marker-end="url(#ah)"/>')
+        y[0] += ARROW
+
+    def step(num, title, sub, cmd, fill, accent):
+        subl = wrap(sub, 70)
+        top, title_h, sub_h, cmd_h, bot = 14, 22, 18, 26, 12
+        h = top + title_h + sub_h * len(subl) + cmd_h + bot
+        svg.append(f'<rect x="{BX}" y="{y[0]}" width="{BW}" height="{h}" rx="13" '
+                   f'fill="{fill}" stroke="{accent}" stroke-width="1.3"/>')
+        cx, cy = BX + 28, y[0] + top + 12
+        svg.append(f'<circle cx="{cx}" cy="{cy:.0f}" r="14" fill="{accent}"/>')
+        svg.append(f'<text x="{cx}" y="{cy+5:.0f}" text-anchor="middle" font-size="13" '
+                   f'font-weight="700" fill="#fff">{num}</text>')
+        tx = BX + 54
+        svg.append(f'<text x="{tx}" y="{y[0]+top+16}" font-size="15" font-weight="700" '
+                   f'fill="#0f172a">{esc(title)}</text>')
+        sy = y[0] + top + title_h + 13
+        for ln in subl:
+            svg.append(f'<text x="{tx}" y="{sy}" font-size="12.5" fill="#475569">{esc(ln)}</text>')
+            sy += sub_h
+        cy2 = y[0] + top + title_h + sub_h * len(subl) + 2
+        cw = BW - (tx - BX) - 20
+        svg.append(f'<rect x="{tx}" y="{cy2}" width="{cw}" height="20" rx="5" fill="#0f172a"/>')
+        svg.append(f'<text x="{tx+9}" y="{cy2+14}" font-size="12" '
+                   f'font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#e2e8f0">{esc(cmd)}</text>')
+        y[0] += h
+
+    def boundary():
+        y[0] += 8
+        svg.append(f'<line x1="{BX}" y1="{y[0]+15}" x2="{BX+BW}" y2="{y[0]+15}" '
+                   f'stroke="#ef4444" stroke-width="2" stroke-dasharray="7 5"/>')
+        pw = 430; px = (W - pw) / 2
+        svg.append(f'<rect x="{px:.0f}" y="{y[0]+3}" width="{pw}" height="26" rx="13" '
+                   f'fill="#fff" stroke="#ef4444" stroke-width="1.5"/>')
+        svg.append(f'<text x="{W/2:.0f}" y="{y[0]+20}" text-anchor="middle" font-size="12" '
+                   f'font-weight="700" fill="#ef4444">🔒 TRUST BOUNDARY · self-reported counts ignored</text>')
+        y[0] += 40
+
+    I, V, S, G = "#eef2ff", "#f5f3ff", "#ecfeff", "#ecfdf5"
+    IA, VA, SA, GA = "#6366f1", "#8b5cf6", "#0ea5e9", "#10b981"
+
+    lane("SUBMITTER SIDE — your machine · your key · your money", "gi")
+    arrow()
+    step("1", "🛠  Build the runner image",
+         "Compiles pred and bundles the library source at the target version.",
+         "make runner-build PR_REF=v0.6.0", I, IA)
+    arrow()
+    step("2", "⚙  Configure — any provider",
+         "One file holds it all: MODEL_NAME, API_KEY, PRICE_IN / PRICE_OUT.",
+         "submission.env", V, VA)
+    arrow()
+    step("3", "✅  Preflight",
+         "One tiny real call validates pred, the rules, and your key / endpoint before you spend.",
+         "make preflight", S, SA)
+    arrow()
+    step("4", "🐛  Run the bug hunt — per rule × ~262",
+         "Agent (LiteLLM → your model) probes each rule: solve(source) vs solve(reduced); a "
+         "mismatch is a certificate, re-checked locally by pred. Spend = tokens × your price, "
+         "capped at $20.", "make run  →  out/submission.json", I, IA)
+    arrow()
+    step("5", "📤  Upload",
+         "Send the submission.json to the queue; it lands as PENDING.",
+         'Space "Submit" tab  /  hf upload', V, VA)
+    boundary()
+    lane("BACKEND SIDE — zero-trust scorer with its own pred", "ge")
+    arrow()
+    step("6", "🔁  Re-verify every claimed bug",
+         "Re-derives each bug from rule + source with pred, keeping only what reproduces. "
+         "Score = distinct rules with a confirmed bug.",
+         "backend_score  (webhook → HF Job)", G, GA)
+    arrow()
+    h = 42
+    svg.append(f'<rect x="{BX+130}" y="{y[0]}" width="{BW-260}" height="{h}" rx="21" fill="url(#gold)"/>')
+    svg.append(f'<text x="{W/2:.0f}" y="{y[0]+h/2+5:.0f}" text-anchor="middle" font-size="14.5" '
+               f'font-weight="700" fill="#fff">🏆 Leaderboard · ranked by bugs / Ktok</text>')
+    y[0] += h
+
+    defs = (
+        '<defs>'
+        '<linearGradient id="gi" x1="0" x2="1"><stop offset="0" stop-color="#6366f1"/>'
+        '<stop offset="1" stop-color="#8b5cf6"/></linearGradient>'
+        '<linearGradient id="ge" x1="0" x2="1"><stop offset="0" stop-color="#10b981"/>'
+        '<stop offset="1" stop-color="#0ea5e9"/></linearGradient>'
+        '<linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#f59e0b"/>'
+        '<stop offset="1" stop-color="#f97316"/></linearGradient>'
+        '<marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">'
+        '<path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/></marker>'
+        '</defs>')
+    return (f'<div style="max-width:780px;margin:0 auto;">'
+            f'<svg viewBox="0 0 {W} {y[0]+4}" width="100%" '
+            f'font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" '
+            f'role="img" aria-label="Benchmark pipeline">{defs}{"".join(svg)}</svg></div>')
 
 
-_PIPELINE_HTML = _build_pipeline_html()
+_PIPELINE_HTML = _build_pipeline_svg()
 
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="purple")
 
