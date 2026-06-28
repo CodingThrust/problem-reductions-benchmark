@@ -24,3 +24,6 @@ benchmark/PINNED_VERSION
 # Filled-in submission config — may hold an API key (template is submission.env.example)
 submission.env
 *.submission.env
+
+# macOS
+.DS_Store

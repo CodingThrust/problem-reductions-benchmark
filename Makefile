@@ -21,8 +21,10 @@ IMAGE    ?= problem-reductions-runner:$(PR_REF)
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
+# HF Space that hosts the static leaderboard (the deploy target uploads space/ here).
+SPACE    ?= isPANN/problem-reductions-benchmarks
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local deploy-space
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -70,6 +72,12 @@ run:
 score-local:
 	python -m benchmark.backend_score --local $(SUBS_DIR) $(SCORED)
 
+## Deploy the static leaderboard (space/) to the HF Space.
+## Uploads with --repo-type space hardwired, so it can't land in the wrong repo.
+deploy-space:
+	hf upload $(SPACE) space . --repo-type space --commit-message "deploy leaderboard"
+	@echo "Deployed space/ → https://huggingface.co/spaces/$(SPACE)"
+
 ## Audit pred CLI capabilities against the pinned library commit.
 audit:
 	python -m benchmark.pred_audit $(REPO_DIR)
@@ -87,6 +95,7 @@ help:
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
+	@echo "  deploy-space        Upload space/ to the HF Space (static leaderboard)"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
 	@echo ""

@@ -2,7 +2,7 @@
 
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
-The leaderboard is a static Hugging Face Space (`space-static/`). Submitting is command-line only — there's no web upload form. See `SUBMISSION.md` to run and submit.
+The leaderboard is a static Hugging Face Space (`space/`, deploy with `make deploy-space`). Submitting is command-line only — there's no web upload form. See `SUBMISSION.md` to run and submit.
 
 ## What this measures
 
