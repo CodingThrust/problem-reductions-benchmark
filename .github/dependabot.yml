@@ -1,0 +1,26 @@
+# Dependabot keeps the moving parts of the benchmark up to date. Note: `pred` is pinned
+# by git tag (PR_REF) and cloned in docker/Dockerfile — Dependabot cannot see it, so the
+# problem-reductions version is still bumped by hand (PR_REF in the workflows + Dockerfile).
+version: 2
+updates:
+  # GitHub Actions used across the CI / scoring / publish workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Python deps the runner + verifier install (benchmark/requirements.txt).
+  - package-ecosystem: pip
+    directory: /benchmark
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Base images in the scoring image (rust:1-slim-bookworm, python:3.12-slim-bookworm).
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
