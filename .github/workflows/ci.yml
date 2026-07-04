@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+env:
+  PR_REF: v0.6.0
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,5 +24,24 @@ jobs:
       - name: Run unit tests (judgment + non-integration)
         run: pytest -v -m "not integration"
 
-      - name: Run verifier calibration (known-answer fixture tests)
-        run: python -m benchmark.verify --calibrate
+      # Calibration needs the real `pred` binary (Rust, built from problem-reductions at
+      # PR_REF). The bare runner has no pred, so run it inside the scoring image — the same
+      # pinned-pred environment used to score submissions. The image's default CMD is the
+      # calibration self-test. GHA cache is shared with score-pr.yml / publish-on-merge.yml.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build scoring image (pred + verifier)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          build-args: PR_REF=${{ env.PR_REF }}
+          load: true
+          tags: prb-scoring:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run verifier calibration (known-answer fixtures, in-image)
+        run: docker run --rm --network none prb-scoring:latest
