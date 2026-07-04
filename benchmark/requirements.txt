@@ -1,4 +1,4 @@
 mini-swe-agent==2.2.8
-pyyaml>=6.0
+pyyaml>=6.0.3
 pytest>=8.0
 pytest-timeout>=2.3
