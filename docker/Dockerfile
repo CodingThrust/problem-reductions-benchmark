@@ -40,7 +40,7 @@ RUN CARGO_PROFILE_RELEASE_LTO=off \
 # → /src/target/release/pred
 
 # ---- Stage 2: runtime — pred + the stdlib-only verifier ----
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 # Runtime libs pred may dynamically link (HiGHS uses OpenMP / libstdc++) — ref-independent,
 # so keep before ARG to preserve the cache across ref bumps.
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
