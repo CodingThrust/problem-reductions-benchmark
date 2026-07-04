@@ -15,7 +15,7 @@ submission pipeline.
                                           │
                  result is a REQUIRED check → maintainer MERGES
                                           │
-              on merge: rebuild leaderboard.json ─▶ static Space (deploy)
+              on merge: rebuild leaderboard.json ─▶ GitHub Pages (deploy)
 ```
 
 The verified result is produced **on the PR, before merge** — you never merge a number you
@@ -39,8 +39,6 @@ against those. Bump `PR_REF` and rebuild for each benchmark round.
 # --build-arg PR_REF=<tag-or-commit> selects the library version (default in the Dockerfile):
 docker build -f docker/Dockerfile --target runner \
   --build-arg PR_REF=v0.6.0 -t problem-reductions-runner:v0.6.0 .
-
-# (build args, version pins — see "Library version" below)
 ```
 
 ### Configure and run
@@ -156,14 +154,12 @@ static site to **GitHub Pages**. See `submissions/README.md`.
 `benchmark/backend_score.py` is the queue worker. It runs inside the same Docker image
 (which has `pred`):
 
+This is exactly what `.github/workflows/publish-on-merge.yml` runs after a submission PR
+merges — you can reproduce the leaderboard locally:
+
 ```bash
 # Local directory of submissions → scored results + leaderboard.json:
 python -m benchmark.backend_score --local submissions/ results/scored/
-
-# Or against the HF datasets (needs HF_TOKEN with write access to the results repo):
-HF_TOKEN=… python -m benchmark.backend_score \
-  --hf-submissions isPANN/problem-reductions-submissions \
-  --hf-results     isPANN/problem-reductions-results
 ```
 
 For each `PENDING` submission it:
@@ -177,34 +173,46 @@ For each `PENDING` submission it:
 4. writes the scored result + a ranked `leaderboard.json`, and sets status
    `FINISHED` (or `FAILED` with a reason).
 
-### Running the scorer as a service
+In production this runs unattended inside GitHub Actions: `score-pr.yml` verifies on the PR
+and `publish-on-merge.yml` rebuilds and deploys the leaderboard on merge — no external
+service to host.
 
-**Recommended: webhook → HF Job (event-driven).** Register a webhook on the submissions
-dataset that fires an HF Job on every change; the Job runs `backend_score --webhook`,
-reads the delivery from `WEBHOOK_PAYLOAD`, and re-runs the (idempotent) queue. No
-always-on Space — free Spaces auto-pause after 48h and have ephemeral disk, so a polling
-loop there stops silently.
+## Certificate format
 
-```python
-# one-off registration (needs a write token):
-from benchmark.backend_score import register_webhook
-register_webhook("isPANN/problem-reductions-submissions",
-                 job_id="<your-hf-job-id>", secret="<shared-secret>", token="<HF_TOKEN>")
+Each row in `submission.json` carries a **counterexample certificate** — the JSON the
+runner emits to claim a bug in a rule. The verifier (`benchmark/verify.py`) re-derives
+everything from `pred` and never trusts the claim; the authoritative schema is
+`benchmark/submission.schema.json`.
+
+```json
+{
+  "rule": "MaximumIndependentSet/SimpleGraph/i32 -> IntegralFlowBundles",
+  "source": {
+    "type": "MaximumIndependentSet",
+    "data": { ... },
+    "variant": { ... }
+  },
+  "bundle": {
+    "target": { "type": "IntegralFlowBundles" }
+  },
+  "target_config": "optional witness config"
+}
 ```
 
-The Job runs this image with:
+Only `rule`, `source`, and the **target type** are required — the latter from
+`bundle.target.type` (paste the full `pred reduce` bundle) or a top-level `target_type`
+string. `target_config` is optional. Any `violation` / `note` you add is free-form; the
+backend ignores it and derives the authoritative label itself:
 
-```bash
-# env injected by HF: WEBHOOK_PAYLOAD, WEBHOOK_SECRET; you set SUBMISSIONS_REPO/RESULTS_REPO/HF_TOKEN
-python -m benchmark.backend_score --webhook
-```
+| Label | Meaning |
+|-------|---------|
+| `optimum_not_preserved` | both feasible, but the round-tripped value differs |
+| `feasibility_not_preserved` | source is solvable but the round-trip yields none |
+| `spurious_solution` | the round-trip claims a solution the source has none of |
 
-Only `repo.*` content events trigger scoring; discussion/comment events are ignored, and
-the shared `WEBHOOK_SECRET` is checked before any work runs.
-
-**Simpler fallback: polling.** Wrap `process_local` / `process_hf` in a
-`while True: …; sleep(N)` loop on paid always-on hardware. Fine for a quick start, but the
-webhook→Job path is cheaper (pay-per-minute) and more robust.
+With `target_config` the verifier additionally checks that specific target solution,
+catching `unsound_extraction` and `suboptimal_extraction` that the solver's own optimum
+would hide. The round-trip judging itself is explained in the [README](README.md).
 
 ## Why this is hard to cheat
 
@@ -215,12 +223,12 @@ webhook→Job path is cheaper (pay-per-minute) and more robust.
 - Distinct-rule de-duplication caps the count at one per rule.
 - The $20 budget is enforced inside the runner by recomputing spend from raw token usage ×
   your declared price (not the gateway's self-reported dollars), held back by a safety
-  margin and bounded per call by `MAX_TOKENS`; the Space cross-checks reported spend.
+  margin and bounded per call by `MAX_TOKENS`; the backend cross-checks reported spend.
 
 ## Status: validated against a live model
 
 The runner pipeline is unit-tested end-to-end with `FakeRunner` + the certificate fixtures
 **and** has been exercised against a live model API (a DeepSeek OpenAI-compatible endpoint
 via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real budgeted run
-drives the agent across a rule and emits a schema-valid `submission.json`. Full `$20` runs
-and the webhook→HF Job scoring deployment are the remaining steps.
+drives the agent across a rule and emits a schema-valid `submission.json`. PR scoring and
+GitHub Pages publishing are live; full `$20` runs are the remaining step.
