@@ -1,7 +1,6 @@
 """
-Tests for issue #10: README.md and CONTRIBUTING.md existence and content.
-
-Structural checks only — no rendering, no external calls.
+Structural checks for the two root docs: README.md (overview) and SUBMISSION.md
+(the single run-and-submit guide). No rendering, no external calls.
 All tests are marked @pytest.mark.judgment.
 """
 import pytest
@@ -11,7 +10,7 @@ pytestmark = pytest.mark.judgment
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 README = REPO_ROOT / "README.md"
-CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
+SUBMISSION = REPO_ROOT / "SUBMISSION.md"
 
 
 def _text(path: Path) -> str:
@@ -39,14 +38,14 @@ class TestReadme:
         assert "bugs/ktok" in t or "bugs_per_ktok" in t
 
 
-class TestContributing:
-    def test_contributing_exists(self):
-        assert CONTRIBUTING.exists(), "CONTRIBUTING.md missing from repo root"
+class TestSubmission:
+    def test_submission_exists(self):
+        assert SUBMISSION.exists(), "SUBMISSION.md missing from repo root"
 
-    def test_contributing_has_certificate_schema(self):
-        t = _text(CONTRIBUTING)
+    def test_submission_has_certificate_format(self):
+        t = _text(SUBMISSION)
         assert "source" in t and "bundle" in t and "violation" in t
 
-    def test_contributing_has_verify_calibration(self):
-        t = _text(CONTRIBUTING)
-        assert "verify-calibration" in t
+    def test_submission_has_github_pr_flow(self):
+        t = _text(SUBMISSION)
+        assert "pull request" in t and "github pages" in t
