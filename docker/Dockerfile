@@ -80,7 +80,7 @@ CMD ["--calibrate"]
 # Run (all config — any provider — in submission.env; key never baked in):
 #   docker run --rm --env-file submission.env -v "$PWD/out:/out" \
 #     problem-reductions-runner:v0.6.0
-#   # → ./out/submission.json   (see submission.env.example / SUBMISSION.md)
+#   # → ./out/submission.json   (see submission.env.example / CONTRIBUTING.md)
 FROM runtime AS runner
 ARG PR_REF
 # Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.

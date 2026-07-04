@@ -9,7 +9,7 @@ submissions/<your-handle>/<model>.json
 ## How to submit
 
 1. **Produce the file.** Run the dockerized runner at the fixed $20 budget (see
-   `../SUBMISSION.md`): `make run` → `out/submission.json`.
+   `../CONTRIBUTING.md`): `make run` → `out/submission.json`.
 2. **Open a PR** adding it as `submissions/<your-handle>/<model>.json` — and nothing else
    (a PR that also changes code won't be auto-scored; keep submissions in their own PR).
    - An automated check validates the file against `benchmark/submission.schema.json`

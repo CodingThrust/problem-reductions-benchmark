@@ -2,7 +2,7 @@
 
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
-The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting is a **GitHub pull request** that adds `submissions/<handle>/<model>.json`; the submission is re-verified on the PR (after a maintainer approves the run) and the result must pass before merge. See `SUBMISSION.md` to run and submit.
+The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting is a **GitHub pull request** that adds `submissions/<handle>/<model>.json`; the submission is re-verified on the PR (after a maintainer approves the run) and the result must pass before merge. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
 
 ## What this measures
 
@@ -46,7 +46,7 @@ class MyRunner(AgentRunner):
 
 Then pass it to `Scheduler` in `benchmark/scheduler.py`. See `MiniSweRunner` for a full example.
 
-A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and submitted as a **GitHub pull request** that adds it under `submissions/`; the PR re-verifies every certificate with `pred` (after a maintainer approves the run) and must pass before merge. See `SUBMISSION.md`.
+A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and submitted as a **GitHub pull request** that adds it under `submissions/`; the PR re-verifies every certificate with `pred` (after a maintainer approves the run) and must pass before merge. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How to run locally
 

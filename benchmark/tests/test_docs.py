@@ -1,5 +1,5 @@
 """
-Structural checks for the two root docs: README.md (overview) and SUBMISSION.md
+Structural checks for the two root docs: README.md (overview) and CONTRIBUTING.md
 (the single run-and-submit guide). No rendering, no external calls.
 All tests are marked @pytest.mark.judgment.
 """
@@ -10,7 +10,7 @@ pytestmark = pytest.mark.judgment
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 README = REPO_ROOT / "README.md"
-SUBMISSION = REPO_ROOT / "SUBMISSION.md"
+GUIDE = REPO_ROOT / "CONTRIBUTING.md"
 
 
 def _text(path: Path) -> str:
@@ -38,14 +38,14 @@ class TestReadme:
         assert "bugs/ktok" in t or "bugs_per_ktok" in t
 
 
-class TestSubmission:
-    def test_submission_exists(self):
-        assert SUBMISSION.exists(), "SUBMISSION.md missing from repo root"
+class TestGuide:
+    def test_guide_exists(self):
+        assert GUIDE.exists(), "CONTRIBUTING.md (run-and-submit guide) missing from repo root"
 
-    def test_submission_has_certificate_format(self):
-        t = _text(SUBMISSION)
+    def test_guide_has_certificate_format(self):
+        t = _text(GUIDE)
         assert "source" in t and "bundle" in t and "violation" in t
 
-    def test_submission_has_github_pr_flow(self):
-        t = _text(SUBMISSION)
+    def test_guide_has_github_pr_flow(self):
+        t = _text(GUIDE)
         assert "pull request" in t and "github pages" in t
