@@ -49,6 +49,8 @@
       "items": {
         "type": "object",
         "required": ["rule", "result", "cost", "tokens_k"],
+        "if": {"properties": {"result": {"const": "bug_found"}}},
+        "then": {"required": ["rule", "result", "cost", "tokens_k", "certificate", "trajectory"]},
         "properties": {
           "rule": {"type": "string"},
           "result": {
@@ -70,6 +72,17 @@
               "target_config": {"type": "string", "description": "Optional witness: a target solution that mis-extracts"},
               "violation": {"type": "string", "description": "Optional free-form label; the backend derives the authoritative one (e.g. optimum_not_preserved)"},
               "note": {"type": "string"}
+            }
+          },
+          "trajectory": {
+            "type": "array",
+            "description": "The agent's own message history for this rule — provenance proof. REQUIRED for result=bug_found: the backend checks the certificate was emitted in this trajectory (not pasted from a public answer key) before counting the bug.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {"type": "string"},
+                "content": {"type": "string"}
+              }
             }
           },
           "verify_details": {"type": "object"},

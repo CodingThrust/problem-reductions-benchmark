@@ -141,6 +141,11 @@
   .bug code{background:var(--accent-soft);color:var(--accent-2);padding:1px 5px;border-radius:4px;}
   .bug .bn{color:var(--muted);display:block;margin-top:4px;font-family:var(--sans);}
   .bug a{color:var(--accent);}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:2px 0 0;}
+  .stats>div{border:1px solid var(--line2);border-radius:9px;padding:10px 12px;background:#fbfcfe;}
+  .stats dt{font-family:var(--sans);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .stats dd{margin:3px 0 0;font-family:var(--mono);font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .stats dd em{font-size:12px;color:var(--muted);font-style:normal;}
 
   /* prose */
   .prose{max-width:680px;}
@@ -266,7 +271,7 @@
 
     <div class="controls">
       <input class="search" id="lb-search" placeholder="filter models…">
-      <span class="hint">Click a row for its confirmed bugs →</span>
+      <span class="hint">Click a row for its run stats →</span>
     </div>
     <table class="lb" id="lb-table"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
     <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Budget reach</b> = rules the $20 reached. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
@@ -366,7 +371,7 @@ make run         <span class="c"># → ./out/submission.json</span></pre>
 <aside class="drawer" id="drawer" aria-hidden="true">
   <div class="drawer-head">
     <div>
-      <div class="drawer-title" id="drawer-title">Confirmed bugs</div>
+      <div class="drawer-title" id="drawer-title">Run details</div>
       <div class="drawer-sub" id="drawer-sub"></div>
     </div>
     <button class="drawer-x" id="drawer-x" aria-label="Close">×</button>
@@ -409,7 +414,7 @@ function buildLbRows(){
     const tested=r.rules_tested||0, frac=TOTAL?Math.min(tested/TOTAL,1):0;
     return {rank:i+1,model:short(r.model),_model:r.model,bugs:r.bugs_found||0,
       reachFrac:frac,tested,spentNum:r.total_cost_usd||0,tokensNum:r.total_tokens_k||0,
-      effNum:r.efficiency_bugs_per_ktok||0,certs:r.bug_certificates||[]};
+      effNum:r.efficiency_bugs_per_ktok||0,spentEff:r.efficiency_bugs_per_dollar||0};
   });
 }
 function renderLbHead(){
@@ -524,15 +529,19 @@ function renderInspector(model){
   const row=lbRows.find(r=>r._model===model); if(!row)return;
   document.getElementById("drawer-title").textContent=row.model;
   const sub=document.getElementById("drawer-sub"), el=document.getElementById("inspect-body");
-  if(!row.certs.length){
-    sub.textContent=`${row.bugs} bugs · ${row.tested}/${TOTAL} rules reached · ${Math.round(row.tokensNum)}K tok`;
-    el.innerHTML=`<div class="empty" style="text-align:left;padding:6px 0">No confirmed bugs within the $20 budget.</div>`;
-  }else{
-    sub.textContent=`${row.certs.length} confirmed bug(s) · ${row.tested}/${TOTAL} rules reached · ${Math.round(row.tokensNum)}K tok`;
-    el.innerHTML=row.certs.map(c=>`
-      <div class="bug"><code>${esc(c.rule||"?")}</code> · violation <code>${esc(c.violation||"?")}</code> · <code>${esc(c.source_type||"?")} → ${esc(c.target_type||"?")}</code>
-      ${c.note?`<span class="bn">${esc(c.note)}</span>`:""}${c.trajectory_file?`<span class="bn"><a href="${esc(c.trajectory_file)}">trajectory ↗</a></span>`:""}</div>`).join("");
-  }
+  sub.textContent=`${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules reached · ${Math.round(row.tokensNum)}K tok`;
+  // Aggregate-only by design: the leaderboard never reveals WHICH rules a model found bugs
+  // in. On a public library commit a pred-confirmed certificate counts regardless of who
+  // produced it, so publishing the rules/certificates would be a free answer key.
+  el.innerHTML=`<dl class="stats">
+    <div><dt>Confirmed bugs</dt><dd>${row.bugs}</dd></div>
+    <div><dt>Rules reached</dt><dd>${row.tested}<em>/${TOTAL}</em></dd></div>
+    <div><dt>Spent</dt><dd>$${row.spentNum.toFixed(2)}</dd></div>
+    <div><dt>Tokens</dt><dd>${Math.round(row.tokensNum).toLocaleString()}K</dd></div>
+    <div><dt>Bugs / Ktok</dt><dd>${row.effNum.toFixed(4)}</dd></div>
+    <div><dt>Bugs / $</dt><dd>${row.spentEff.toFixed(3)}</dd></div>
+  </dl>
+  <p class="note" style="margin-top:14px">Which rules each model found bugs in is not published — a confirmed certificate on this fixed commit counts regardless of provenance, so the buggy-rule identities are kept private to protect the benchmark.</p>`;
   openDrawer();
 }
 

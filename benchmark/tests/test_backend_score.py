@@ -14,6 +14,12 @@ from benchmark import backend_score as bs
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _traj(cert: dict) -> list[dict]:
+    """A minimal trajectory reproducing ``cert`` — satisfies the provenance gate."""
+    return [{"role": "assistant",
+             "content": "CERTIFICATE_START\n" + json.dumps(cert) + "\nCERTIFICATE_END"}]
+
+
 def _write_submission(subs_dir: Path, name: str, results, **over) -> Path:
     sub = {
         "schema_version": "1.0",
@@ -71,13 +77,14 @@ class TestProcessLocal:
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         cert = lambda v: {"rule": "r1", "violation": v, "source": {}, "bundle": {}}
+        win_cert, lose_cert = cert("solve_mismatch"), cert("unsound_extraction")
         _write_submission(subs, "win.json",
                           [{"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-                            "certificate": cert("solve_mismatch")}],
+                            "certificate": win_cert, "trajectory": _traj(win_cert)}],
                           model="anthropic/winner")
         _write_submission(subs, "lose.json",
                           [{"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-                            "certificate": cert("unsound_extraction")}],
+                            "certificate": lose_cert, "trajectory": _traj(lose_cert)}],
                           model="anthropic/loser")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())
@@ -175,7 +182,8 @@ class TestRealFixture:
         cert = json.loads(path.read_text(encoding="utf-8"))
         _write_submission(subs, "real.json",
                           [{"rule": cert.get("rule", "r"), "result": "bug_found",
-                            "cost": 1.0, "tokens_k": 10.0, "certificate": cert}],
+                            "cost": 1.0, "tokens_k": 10.0, "certificate": cert,
+                            "trajectory": _traj(cert)}],
                           model="anthropic/real")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())

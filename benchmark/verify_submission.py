@@ -8,7 +8,9 @@ self-reported ``bugs_found`` is ignored entirely.
 
 Produces two views of the result:
   * ``scored``          — results.schema.json-compatible (the backend's per-submission output)
-  * ``leaderboard_entry`` — the Space's ranked-row shape (adds budget_cap + bug_certificates)
+  * ``leaderboard_entry`` — the public ranked-row shape (aggregate only: counts, cost,
+                            efficiency, budget_cap — never the certificates or buggy-rule
+                            identities, which would be a free answer key)
 
 CLI:
     python -m benchmark.verify_submission <submission.json> [--repo-dir <path>]
@@ -17,17 +19,63 @@ CLI:
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 from benchmark.verify import count_bugs, verify
 
+CERT_BLOCK = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
+
+
+def _cert_from_trajectory(trajectory) -> dict | None:
+    """Parse the last CERTIFICATE_START…END block emitted in an agent trajectory.
+
+    ``trajectory`` is a list of {role, content} messages (as saved by the runner).
+    Returns the parsed certificate dict, or None if absent/unparseable.
+    """
+    if not trajectory:
+        return None
+    for msg in reversed(trajectory):
+        content = msg.get("content", "") or ""
+        m = CERT_BLOCK.search(content)
+        if m:
+            try:
+                return json.loads(m.group(1).strip())
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def _provenance_ok(row: dict, cert: dict) -> tuple[bool, str]:
+    """Check the certificate was actually produced by this model's own run.
+
+    Guards against copied answer keys: a scored bug must appear in a CERTIFICATE block the
+    agent emitted in its trajectory, with the same rule and source instance. This can't
+    make copying impossible (the target library is public), but it lifts the bar from
+    "paste a rule name" to "produce a full run artifact whose source still round-trip-fails
+    under pred".
+    """
+    traj = row.get("trajectory")
+    if not traj:
+        return False, "no trajectory attached (required for a scored bug)"
+    emitted = _cert_from_trajectory(traj)
+    if emitted is None:
+        return False, "no CERTIFICATE block found in trajectory"
+    if emitted.get("rule") not in (cert.get("rule"), row.get("rule")):
+        return False, "trajectory certificate targets a different rule"
+    if emitted.get("source") != cert.get("source"):
+        return False, "trajectory certificate source does not match the submitted source"
+    return True, "reproduced in the model's own trajectory"
+
 
 def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dict, list[dict]]:
     """Re-verify every certificate and recompute the score.
 
-    Returns (scored, report). ``scored`` is results.schema.json-shaped; ``report`` is a
-    per-certificate list of {rule, violation, accepted, reason}.
+    A bug counts only when BOTH hold: pred confirms the round-trip failure (zero-trust
+    re-derivation) AND the certificate is reproduced in the model's own trajectory
+    (provenance). Returns (scored, report); ``scored`` is results.schema.json-shaped and
+    ``report`` is a per-certificate list of {rule, violation, accepted, reason, provenance}.
     """
     rescored: list[dict] = []
     report: list[dict] = []
@@ -40,21 +88,25 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
 
         cert.setdefault("rule", row.get("rule"))
         verdict = verify(cert, repo_dir)
+        prov_ok, prov_reason = _provenance_ok(row, cert) if verdict.accepted else (False, "")
+        accepted = verdict.accepted and prov_ok
         new = dict(row)
-        if verdict.accepted:
+        if accepted:
             new["result"] = "bug_found"
             new["verify_details"] = verdict.details
             new.pop("reject_reason", None)
         else:
             new["result"] = "rejected"
-            new["reject_reason"] = verdict.reason
+            new["reject_reason"] = (
+                verdict.reason if not verdict.accepted else f"provenance: {prov_reason}")
             new.pop("verify_details", None)
         rescored.append(new)
         report.append({
             "rule": row.get("rule"),
             "violation": cert.get("violation"),
-            "accepted": verdict.accepted,
-            "reason": verdict.reason,
+            "accepted": accepted,
+            "reason": new.get("reject_reason") if not accepted else verdict.reason,
+            "provenance": prov_reason if verdict.accepted else None,
         })
 
     bugs = count_bugs(rescored)
@@ -76,24 +128,15 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
 
 
 def leaderboard_entry(submission: dict, scored: dict) -> dict:
-    """Build the Space's ranked-row entry from a scored result.
+    """Build the public ranked-row entry from a scored result.
 
-    Carries ``budget_cap`` (the Space ranks rows with budget_cap == 20) and the
-    confirmed-bug certificate drilldown.
+    Aggregate-only, by design: it carries counts, cost/token totals, efficiency and
+    ``budget_cap`` (rows with budget_cap == 20 are ranked) but NEVER the certificates or
+    the identities of the buggy rules. Publishing those would be a free answer key — on a
+    public library commit a `pred`-confirmed certificate counts regardless of provenance,
+    so anyone could copy it. The full certificates stay in the private scored result the
+    maintainer holds; the leaderboard shows only how many each model found.
     """
-    bug_certs = []
-    for r in scored.get("results", []):
-        if r.get("result") != "bug_found" or not r.get("certificate"):
-            continue
-        cert = r["certificate"]
-        bug_certs.append({
-            "rule": r["rule"],
-            "violation": cert.get("violation"),
-            "note": cert.get("note", ""),
-            "source_type": cert.get("source", {}).get("type"),
-            "target_type": cert.get("bundle", {}).get("target", {}).get("type"),
-            "trajectory_file": None,
-        })
     return {
         "model": scored["model"],
         "library_commit": scored.get("library_commit", "unknown"),
@@ -104,7 +147,6 @@ def leaderboard_entry(submission: dict, scored: dict) -> dict:
         "total_tokens_k": scored["total_tokens_k"],
         "efficiency_bugs_per_ktok": scored["efficiency_bugs_per_ktok"],
         "efficiency_bugs_per_dollar": scored["efficiency_bugs_per_dollar"],
-        "bug_certificates": bug_certs,
         "submitted_by": submission.get("submitted_by"),
         "placeholder": False,
     }

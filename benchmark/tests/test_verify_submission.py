@@ -15,6 +15,19 @@ from benchmark.verify import Verdict
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _traj(cert: dict) -> list[dict]:
+    """A minimal trajectory that reproduces ``cert`` — satisfies the provenance gate."""
+    return [{"role": "assistant",
+             "content": "CERTIFICATE_START\n" + json.dumps(cert) + "\nCERTIFICATE_END"}]
+
+
+def _bug_row(cert: dict, **over) -> dict:
+    row = {"rule": cert.get("rule", "r"), "result": "bug_found", "cost": 1.0,
+           "tokens_k": 10.0, "certificate": cert, "trajectory": _traj(cert)}
+    row.update(over)
+    return row
+
+
 def _submission(results, **over) -> dict:
     base = {
         "schema_version": "1.0",
@@ -37,9 +50,7 @@ class TestScoreSubmission:
     def test_ignores_self_reported_count(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": {"rule": "r1", "violation": "solve_mismatch",
-                             "source": {}, "bundle": {}}},
+            _bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}),
         ], bugs_found=999)
         scored, _ = vs.score_submission(sub)
         assert scored["bugs_found"] == 1  # not 999
@@ -47,9 +58,7 @@ class TestScoreSubmission:
     def test_rejected_certificate_does_not_count(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(False, "nope"))
         sub = _submission([
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": {"rule": "r1", "violation": "solve_mismatch",
-                             "source": {}, "bundle": {}}},
+            _bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}),
         ])
         scored, report = vs.score_submission(sub)
         assert scored["bugs_found"] == 0
@@ -57,16 +66,37 @@ class TestScoreSubmission:
         assert scored["results"][0]["reject_reason"] == "nope"
         assert report[0]["accepted"] is False
 
-    def test_distinct_rule_dedup(self, monkeypatch):
+    def test_no_trajectory_not_counted(self, monkeypatch):
+        # pred confirms the round-trip failure, but no trajectory is attached → the bug is
+        # not scored (provenance gate): a pasted answer key must not count.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
-        cert = lambda rule, v: {"rule": rule, "violation": v, "source": {}, "bundle": {}}
         sub = _submission([
             {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": cert("r1", "solve_mismatch")},
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": cert("r1", "unsound_extraction")},
-            {"rule": "r2", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": cert("r2", "solve_mismatch")},
+             "certificate": {"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}},
+        ])
+        scored, report = vs.score_submission(sub)
+        assert scored["bugs_found"] == 0
+        assert scored["results"][0]["result"] == "rejected"
+        assert "provenance" in scored["results"][0]["reject_reason"]
+        assert report[0]["accepted"] is False
+
+    def test_trajectory_source_mismatch_not_counted(self, monkeypatch):
+        # A trajectory whose certificate names a different source than the submitted one is
+        # not a valid provenance proof.
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "violation": "solve_mismatch", "source": {"n": 1}, "bundle": {}}
+        other = {"rule": "r1", "violation": "solve_mismatch", "source": {"n": 999}, "bundle": {}}
+        sub = _submission([_bug_row(cert, trajectory=_traj(other))])
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 0
+
+    def test_distinct_rule_dedup(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = lambda rule, v: {"rule": rule, "violation": v, "source": {"r": rule}, "bundle": {}}
+        sub = _submission([
+            _bug_row(cert("r1", "solve_mismatch")),
+            _bug_row(cert("r1", "unsound_extraction")),
+            _bug_row(cert("r2", "solve_mismatch")),
         ])
         scored, _ = vs.score_submission(sub)
         assert scored["bugs_found"] == 2  # {r1, r2}, two certs on r1 collapse
@@ -83,9 +113,7 @@ class TestScoreSubmission:
     def test_scored_is_results_schema_shaped(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": {"rule": "r1", "violation": "solve_mismatch",
-                             "source": {}, "bundle": {}}},
+            _bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}),
         ])
         scored, _ = vs.score_submission(sub)
         for field in ("model", "library_commit", "bugs_found", "total_cost_usd",
@@ -97,22 +125,23 @@ class TestScoreSubmission:
 # ── leaderboard entry ─────────────────────────────────────────────────────────
 
 class TestLeaderboardEntry:
-    def test_carries_budget_cap_and_certs(self, monkeypatch):
+    def test_aggregate_only_no_certificates(self, monkeypatch):
+        # The public entry must carry counts/cost but NEVER the certificates or the
+        # identities of the buggy rules — publishing those is a free answer key.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
-             "certificate": {"rule": "r1", "violation": "solve_mismatch",
-                             "source": {"type": "A"},
-                             "bundle": {"target": {"type": "B"}}, "note": "x"}},
+            _bug_row({"rule": "r1", "violation": "solve_mismatch",
+                      "source": {"type": "A"}, "bundle": {"target": {"type": "B"}}, "note": "x"}),
         ], budget_cap=20)
         scored, _ = vs.score_submission(sub)
         entry = vs.leaderboard_entry(sub, scored)
         assert entry["budget_cap"] == 20
         assert entry["placeholder"] is False
         assert entry["bugs_found"] == 1
-        assert len(entry["bug_certificates"]) == 1
-        c = entry["bug_certificates"][0]
-        assert c["rule"] == "r1" and c["source_type"] == "A" and c["target_type"] == "B"
+        # no per-bug drilldown, no rule identities, no certificate fields leak out
+        assert "bug_certificates" not in entry
+        blob = json.dumps(entry)
+        assert "r1" not in blob and "solve_mismatch" not in blob and "source" not in blob
 
 
 # ── integration: real fixtures + pred ─────────────────────────────────────────
@@ -121,10 +150,7 @@ class TestLeaderboardEntry:
 class TestRealVerification:
     def _wrap(self, fixture_name: str) -> dict:
         cert = json.loads((FIXTURES / fixture_name).read_text(encoding="utf-8"))
-        return _submission([
-            {"rule": cert.get("rule", "r"), "result": "bug_found",
-             "cost": 1.0, "tokens_k": 10.0, "certificate": cert},
-        ])
+        return _submission([_bug_row(cert)])
 
     def test_genuine_bug_is_confirmed(self):
         # Accept path: a real reduction bug (weighted MIS -> IntegralFlowBundles) is
@@ -135,9 +161,7 @@ class TestRealVerification:
         if not path.exists():
             pytest.skip(f"private accept-path fixture absent: {path}")
         cert = json.loads(path.read_text(encoding="utf-8"))
-        scored, report = vs.score_submission(_submission([
-            {"rule": cert.get("rule", "r"), "result": "bug_found",
-             "cost": 1.0, "tokens_k": 10.0, "certificate": cert}]))
+        scored, report = vs.score_submission(_submission([_bug_row(cert)]))
         assert scored["bugs_found"] == 1
         assert report[0]["accepted"] is True
 

@@ -160,6 +160,11 @@ def run_one(
         usage_row = {"input": usage.input_tokens, "output": usage.output_tokens,
                      "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
                      "accounted_cost_usd": round(agent_cost, 6)}
+        # Provenance record: the agent's own message history. The backend requires this on a
+        # bug_found row and checks the certificate was emitted here (not pasted from a public
+        # answer key), so we carry it on every cert-bearing row.
+        trajectory = [{"role": m.get("role", ""), "content": m.get("content", "")}
+                      for m in agent.messages]
         cert = parse_certificate(agent.messages)
         if trajectory_dir is not None:
             safe_model = model_name.replace("/", "_").replace(":", "_")
@@ -197,6 +202,7 @@ def run_one(
             "steps": agent.n_calls,
             "reject_reason": verdict.reason,
             "certificate": cert,
+            "trajectory": trajectory,
             "usage": usage_row,
         }
 
@@ -209,6 +215,7 @@ def run_one(
         "tokens_k": tokens_k,
         "steps": agent.n_calls,
         "certificate": cert,
+        "trajectory": trajectory,
         "verify_details": verdict.details,
         "usage": usage_row,
     }
