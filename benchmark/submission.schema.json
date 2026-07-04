@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "submission.schema.json",
+  "title": "BenchmarkSubmission",
+  "description": "A self-describing, rankable submission emitted by the dockerized runner and uploaded to the Space. Superset of results.schema.json: the results[] items stay byte-compatible with the scheduler's per-rule output, with an envelope added so the backend can rank and re-verify it.",
+  "type": "object",
+  "required": ["schema_version", "model", "library_commit", "budget_cap", "bugs_found", "total_cost_usd", "total_tokens_k", "rules_tested", "results"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Submission schema version (e.g. '1.0')"
+    },
+    "model": {
+      "type": "string",
+      "description": "LiteLLM model name (e.g. 'anthropic/claude-sonnet-4-6')"
+    },
+    "library_commit": {
+      "type": "string",
+      "description": "Full git commit hash of the problem-reductions library the run targeted"
+    },
+    "budget_cap": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total USD budget the run was given. Must be 20 to be ranked."
+    },
+    "bugs_found": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Self-reported distinct rules with a confirmed bug. ADVISORY ONLY — the backend recomputes this from pred re-verification and never trusts this number."
+    },
+    "total_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total spend in USD (from LiteLLM cost tracking inside the runner)"
+    },
+    "total_tokens_k": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total tokens used (in thousands)"
+    },
+    "rules_tested": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of rules the run attempted before the budget ran out"
+    },
+    "results": {
+      "type": "array",
+      "description": "Per-rule results, byte-compatible with results.schema.json items",
+      "items": {
+        "type": "object",
+        "required": ["rule", "result", "cost", "tokens_k"],
+        "properties": {
+          "rule": {"type": "string"},
+          "result": {
+            "type": "string",
+            "description": "Outcome for this rule. Canonical: bug_found | no_certificate | rejected | no_bug | error | skipped_budget. error rows may carry a free-form 'error: <msg>' string."
+          },
+          "cost": {"type": "number", "minimum": 0},
+          "tokens_k": {"type": "number", "minimum": 0},
+          "steps": {"type": "integer", "minimum": 0},
+          "certificate": {
+            "type": "object",
+            "description": "Counterexample certificate (present when result=bug_found or rejected). The backend re-derives the bundle from source via pred and ignores any self-reported claim; only rule, source, and the target type are needed.",
+            "required": ["rule", "source"],
+            "properties": {
+              "rule": {"type": "string"},
+              "source": {"type": "object", "description": "Source problem instance (pred create JSON)"},
+              "bundle": {"type": "object", "description": "Reduction bundle (pred reduce JSON); supplies the target type"},
+              "target_type": {"type": "string", "description": "Target problem type (alternative to bundle.target.type)"},
+              "target_config": {"type": "string", "description": "Optional witness: a target solution that mis-extracts"},
+              "violation": {"type": "string", "description": "Optional free-form label; the backend derives the authoritative one (e.g. optimum_not_preserved)"},
+              "note": {"type": "string"}
+            }
+          },
+          "verify_details": {"type": "object"},
+          "reject_reason": {"type": "string"}
+        }
+      }
+    },
+    "efficiency_bugs_per_ktok": {"type": "number", "minimum": 0},
+    "efficiency_bugs_per_dollar": {"type": "number", "minimum": 0},
+    "submitted_by": {"type": ["string", "null"], "description": "Submitter identity (HF username / contact), filled at submit time"},
+    "runner_version": {"type": "string", "description": "Version tag of the runner image/script that produced this"},
+    "pred_version": {"type": "string", "description": "Version of the pred binary used (must match the pinned tag; verified server-side)"},
+    "created_at": {"type": "string", "description": "ISO-8601 timestamp the run finished"},
+    "notes": {"type": "string"},
+    "placeholder": {"type": "boolean", "description": "True for demo/placeholder rows, never ranked"}
+  }
+}

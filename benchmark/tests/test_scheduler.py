@@ -47,6 +47,7 @@ def _make_scheduler(
     per_rule_budget: float = 1.0,
     resume: bool = False,
     parallelism: int = 1,
+    safety_margin: float = 0.0,
 ) -> Scheduler:
     if runner is None:
         runner = FakeRunner(cost_per_rule=0.01)
@@ -61,6 +62,7 @@ def _make_scheduler(
         ctx=_fake_ctx(),
         resume=resume,
         parallelism=parallelism,
+        safety_margin=safety_margin,
     )
 
 
@@ -203,6 +205,14 @@ class TestSchedulerBudgetFair:
         s = _make_scheduler(tmp_path, runner=runner, total_budget=total_budget, per_rule_budget=0.02)
         s.run_all()
         assert s._total_spent <= total_budget + 1e-9
+
+    def test_safety_margin_held_back(self, tmp_path):
+        # With a $0.02 margin on a $0.10 budget, effective cap is $0.08 — spend stays under it.
+        runner = FakeRunner(cost_per_rule=0.01)
+        s = _make_scheduler(tmp_path, runner=runner, total_budget=0.10,
+                            per_rule_budget=0.01, safety_margin=0.02)
+        s.run_all()
+        assert s._total_spent <= 0.08 + 1e-9
 
     def test_excess_sessions_marked_skipped_budget(self, tmp_path):
         # Budget of 0.04 with 0.02/rule and 2 models × 3 rules = 6 sessions = $0.12 needed

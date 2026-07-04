@@ -16,6 +16,9 @@ class EnvContext:
     commit_hash: str
     """Git commit hash of the repo."""
 
+    pred_version: str = ""
+    """Version of the pred binary (e.g. '0.6.0'); must match the pinned tag."""
+
     def __post_init__(self):
         self.repo_path = Path(self.repo_path).resolve()
         self.pred_binary = Path(self.pred_binary).resolve()

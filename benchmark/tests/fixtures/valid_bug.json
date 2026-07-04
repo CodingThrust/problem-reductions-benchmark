@@ -1,5 +1,5 @@
 {
-  "_comment": "Genuine suboptimal_extraction bug fixture. Target config [1,0,0] extracts solution [1,0,0] with value Max(1), but [1,0,1] achieves Max(2) — strictly better. Verifier must accept this as a real suboptimality.",
+  "_comment": "REJECT fixture (NOT a real bug). target_config [1,0,0] is non-optimal, so it proves nothing: the round-trip recovers the true optimum Max(2). The verifier must REJECT this. Filename kept for history; see verify.py FIXTURE_EXPECTATIONS.",
   "rule": "MaximumIndependentSetToMaximumClique",
   "violation": "suboptimal_extraction",
   "source": {

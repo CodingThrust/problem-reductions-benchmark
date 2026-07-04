@@ -1,586 +1,460 @@
 """
-Certificate verifier: independently re-validates counterexample certificates using only pred.
+Certificate verifier: independently re-validates a claimed reduction bug using only pred.
+
+A certificate names a source instance `a` and a reduction A→B. The reduction is correct
+on `a` iff solving via the reduction recovers the true source answer:
+
+    solve(a)  ==  solve(reduce(a))        # compare VALUES (opt) / feasibility (decision)
+
+`pred solve <bundle>` already does the round-trip (solve the target, extract back to the
+source, evaluate there), so its top-level evaluation is the source-space value. A mismatch
+is a genuine bug (incomplete / unsound-at-optimum / suboptimal-at-optimum). We compare
+*values*, never *which* solution — so multiple optima never cause a false mismatch.
+
+Optionally, a certificate may carry a witness `target_config` (a specific target solution);
+this lets us also catch extraction bugs on feasible solutions the solver wouldn't return.
 
 Usage:
     python -m benchmark.verify <certificate.json> [--repo-dir <path>]
-    python -m benchmark.verify --calibrate           # run against fixtures, exit 0 iff all pass
-
-A certificate is a JSON object describing a claimed bug in a reduction rule.
-This verifier never trusts the AI's claim — it re-derives everything from pred.
+    python -m benchmark.verify --calibrate
 """
 
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    import resource  # POSIX-only; used to cap each pred child's CPU/memory/file size
+except ImportError:  # pragma: no cover - non-POSIX (e.g. Windows)
+    resource = None
+
 FIXTURES_DIR = Path(__file__).parent / "tests" / "fixtures"
+# Accept-path fixtures are the benchmark answer key (real reduction bugs); they are kept
+# OUT of version control. Default to a gitignored private dir; override with an env var.
+PRIVATE_FIXTURES_DIR = Path(
+    os.environ.get("BENCHMARK_PRIVATE_FIXTURES", str(FIXTURES_DIR / "private")))
 PRED_BINARY = os.environ.get("PRED_BINARY", "pred")
 
-
 FLOAT_TOLERANCE = 1e-6
+# Counterexamples are minimal witnesses — reject absurd inputs before spawning pred.
+MAX_INPUT_BYTES = 256 * 1024
+# Per-pred-call wall-clock; SOLVE_TIMEOUT is also handed to `pred solve --timeout`.
+RUN_TIMEOUT = 30
+SOLVE_TIMEOUT = 25
 
+# OS resource caps applied to each pred child (best-effort, POSIX). The verifier runs our
+# trusted pred binary on a submitter-supplied instance, so these bound a *pathological
+# instance* — not a hostile binary. Network isolation is a deployment concern: run the
+# scoring container/Job with no network (e.g. `docker run --network none`).
+CPU_LIMIT_SECONDS = 60               # hard CPU-time cap (wall clock is RUN_TIMEOUT)
+MEM_LIMIT_BYTES = 2 * 1024 ** 3      # address-space cap per call (2 GiB)
+FSIZE_LIMIT_BYTES = 64 * 1024 ** 2   # cap any file pred writes (64 MiB)
+MAX_OUTPUT_BYTES = 16 * 1024 ** 2    # truncate runaway stdout/stderr (16 MiB)
+
+
+# ─── result types ─────────────────────────────────────────────────────────────
 
 @dataclass
 class Verdict:
     accepted: bool
     reason: str
     details: dict = field(default_factory=dict)
-    novelty: str | None = None  # "novel" | "known" | None (only set when accepted)
 
     def __str__(self) -> str:
-        status = "ACCEPTED" if self.accepted else "REJECTED"
-        return f"{status}: {self.reason}"
+        return f"{'ACCEPTED' if self.accepted else 'REJECTED'}: {self.reason}"
 
 
-def _write_json(data: dict, path: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+class PredError(Exception):
+    """pred failed (non-zero exit, panic, bad JSON)."""
 
 
-def _run_pred(args: list[str], stdin_file: str | None = None) -> tuple[int, str, str]:
+class Inconclusive(Exception):
+    """Could not decide within resource limits (timeout / no solver succeeded).
+
+    A timeout is not a proof, so the verifier rejects rather than guesses.
     """
-    Run pred with file-based input (avoids Windows stdin BOM/encoding issues).
-    If stdin_file is given, replace the '-' placeholder in args with the file path.
+
+
+def _num(s: str) -> float | None:
+    m = re.search(r"[-+]?\d+(?:\.\d+)?", s or "")
+    return float(m.group()) if m else None
+
+
+@dataclass
+class Eval:
+    """A pred result/evaluation parsed into a structured, kind-aware form.
+
+    kind: "opt" (objective, Max/Min) | "sat" (decision, true/false) | "unknown".
+    All the brittle string handling lives HERE — switch to structured pred fields later
+    by changing only this parser.
     """
-    cmd = [PRED_BINARY] + args
-    if stdin_file:
-        # Replace any "-" placeholder with the actual file path
-        cmd = [stdin_file if a == "-" else a for a in cmd]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30
-    )
-    return result.returncode, result.stdout, result.stderr
+    kind: str
+    feasible: bool
+    value: float | None
+    sense: str          # "max" | "min" | ""
+    raw: str
+
+    @classmethod
+    def parse(cls, raw: str) -> "Eval":
+        s = (raw or "").strip()
+        low = s.lower()
+        if low.startswith("max") or low.startswith("min"):
+            sense = "max" if low.startswith("max") else "min"
+            if "none" in low:                       # Max(None) → infeasible
+                return cls("opt", False, None, sense, s)
+            v = _num(s)
+            return cls("opt", v is not None, v, sense, s)
+        if "true" in low or "false" in low:         # Or(true)/Or(false) → decision
+            return cls("sat", "true" in low, None, "", s)
+        v = _num(s)
+        if v is not None:
+            return cls("opt", True, v, "", s)
+        return cls("unknown", False, None, "", s)
 
 
-def _is_strictly_better(extracted: float, candidate: float, is_max: bool) -> bool:
-    """True only if candidate is meaningfully better than extracted (beyond rounding noise)."""
-    if is_max:
-        return candidate - extracted > FLOAT_TOLERANCE
-    return extracted - candidate > FLOAT_TOLERANCE
+def agrees(a: Eval, b: Eval) -> bool:
+    """Kind-aware equivalence — the round-trip must preserve feasibility and (opt) value.
+
+    Compares values, never solutions, so degeneracy (multiple optima) is irrelevant.
+    """
+    if a.feasible != b.feasible:
+        return False
+    if not a.feasible:
+        return True
+    if a.value is not None and b.value is not None:
+        return abs(a.value - b.value) <= FLOAT_TOLERANCE
+    return True   # both feasible decision problems, or values absent → consistent
 
 
-def _novelty_key(rule: str, source: dict) -> str:
-    """Canonical key for deduplicating bugs: (rule, normalized_source)."""
-    return json.dumps({"rule": rule, "source": _normalize(source)}, sort_keys=True)
+def _strictly_worse(value: float, optimum: float, sense: str) -> bool:
+    if sense == "min":
+        return value - optimum > FLOAT_TOLERANCE
+    return optimum - value > FLOAT_TOLERANCE       # default: maximization
 
 
-def _normalize(data: dict) -> dict:
-    """Normalize a JSON object for structural comparison (sort keys, stable types)."""
-    if isinstance(data, dict):
-        return {k: _normalize(v) for k, v in sorted(data.items())}
-    if isinstance(data, list):
-        return [_normalize(v) for v in data]
-    return data
+def _cfg(solution) -> str:
+    return ",".join(str(x) for x in solution)
 
 
-def _structures_match(a: dict, b: dict) -> bool:
-    """True if two problem instances have the same type and structure (not raw text equality)."""
-    return _normalize(a) == _normalize(b)
+# ─── the pred oracle ──────────────────────────────────────────────────────────
+
+def _rlimit_preexec() -> None:  # pragma: no cover - runs in the forked child
+    """Set resource limits in the child after fork, before exec. Best-effort per limit:
+    a platform that rejects one (e.g. RLIMIT_AS on some macOS) just skips it."""
+    for res_name, value in (("RLIMIT_CPU", CPU_LIMIT_SECONDS),
+                            ("RLIMIT_AS", MEM_LIMIT_BYTES),
+                            ("RLIMIT_FSIZE", FSIZE_LIMIT_BYTES)):
+        res = getattr(resource, res_name, None)
+        if res is None:
+            continue
+        try:
+            resource.setrlimit(res, (value, value))
+        except (ValueError, OSError):
+            pass
 
 
-def verify(
-    cert: dict,
-    repo_dir: str | None = None,
-    known_bugs: list[dict] | None = None,
-) -> Verdict:
-    """Re-validate a certificate via pred and determine novelty against a known-bugs ledger."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        verdict = _verify_in(cert, tmpdir)
-    if verdict.accepted:
-        key = _novelty_key(cert.get("rule", ""), cert.get("source", {}))
-        known_keys = {_novelty_key(b.get("rule", ""), b.get("source", {})) for b in (known_bugs or [])}
-        verdict.novelty = "known" if key in known_keys else "novel"
-    return verdict
+class PredSolver:
+    """Independent oracle over `pred`. reduce/evaluate/extract are direct, reduction-free
+    primitives (the trust bedrock); solve centralises the brute-force/ILP strategy and
+    timeout handling. All subprocess + resource handling lives here.
+    """
 
+    def __init__(self, tmpdir: str, binary: str = PRED_BINARY):
+        self.tmpdir = tmpdir
+        self.binary = binary
+        self._n = 0
 
-def _verify_in(cert: dict, tmpdir: str) -> Verdict:
-    source = cert.get("source")
-    bundle = cert.get("bundle")
-    violation = cert.get("violation")
-    target_config = cert.get("target_config")
-    claimed_source_solution = cert.get("claimed_source_solution")
+    def _write(self, data: dict) -> str:
+        self._n += 1
+        path = os.path.join(self.tmpdir, f"obj_{self._n}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        return path
 
-    if not source or not bundle or not violation:
-        return Verdict(False, "certificate missing required fields (source, bundle, violation)")
-
-    claimed_target = bundle.get("target")
-    claimed_source_in_bundle = bundle.get("source")
-
-    if not claimed_target or not claimed_source_in_bundle:
-        return Verdict(False, "bundle missing source or target fields")
-
-    # Step 1: re-derive the bundle from source using pred reduce
-    target_type = claimed_target.get("type")
-    if not target_type:
-        return Verdict(False, "bundle.target has no type field")
-
-    source_file = os.path.join(tmpdir, "source.json")
-    _write_json(source, source_file)
-
-    rc, stdout, stderr = _run_pred(["reduce", "-", "--to", target_type, "--json"], stdin_file=source_file)
-    if rc != 0:
-        return Verdict(False, f"pred reduce failed: {stderr.strip()[:200]}")
-
-    try:
-        real_bundle = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred reduce returned invalid JSON: {e}")
-
-    # Step 2: confirm re-derived target matches claimed target structure
-    real_target = real_bundle.get("target", {})
-    if not _structures_match(real_target, claimed_target):
-        return Verdict(
-            False,
-            "bundle target does not match what pred reduce actually produces",
-            {"claimed_target": claimed_target, "real_target": real_target},
+    def _run(self, args: list[str], stdin_file: str, timeout: int) -> tuple[int, str, str]:
+        """Run pred with the '-' placeholder replaced by stdin_file. Own process group so
+        a timeout kills the whole tree; CPU/memory/file-size capped via setrlimit (POSIX).
+        Output is truncated to MAX_OUTPUT_BYTES. Raises subprocess.TimeoutExpired on timeout."""
+        cmd = [self.binary] + [stdin_file if a == "-" else a for a in args]
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True,
+            preexec_fn=_rlimit_preexec if resource is not None else None,
         )
-
-    bundle_file = os.path.join(tmpdir, "bundle.json")
-    _write_json(real_bundle, bundle_file)
-
-    # Step 3-5: check the claimed violation
-    if violation == "unsound_extraction":
-        return _check_unsound_extraction(cert, source_file, bundle_file, tmpdir)
-    elif violation == "incomplete_reduction":
-        return _check_incomplete_reduction(cert, source_file, bundle_file)
-    elif violation == "suboptimal_extraction":
-        return _check_suboptimal_extraction(cert, source_file, bundle_file)
-    elif violation == "solve_mismatch":
-        return _check_solve_mismatch(cert, source_file, bundle_file)
-    elif violation == "order_reversal":
-        return _check_order_reversal(cert, source_file, bundle_file, tmpdir)
-    else:
-        return Verdict(False, f"unknown violation type: {violation!r}")
-
-
-def _check_unsound_extraction(cert: dict, source_file: str, bundle_file: str, tmpdir: str) -> Verdict:
-    """
-    Unsound extraction: a valid target solution maps back to an INVALID source solution.
-
-    Verifier re-derives the extracted solution via pred extract — never trusts
-    the AI-supplied claimed_source_solution.
-    """
-    target_config = cert.get("target_config")
-
-    if not target_config:
-        return Verdict(False, "unsound_extraction certificate missing target_config")
-
-    # Step 1: verify target_config is a valid target solution
-    target_data = cert.get("bundle", {}).get("target")
-    if target_data:
-        target_file = os.path.join(tmpdir, "target.json")
-        _write_json(target_data, target_file)
-        rc, stdout, stderr = _run_pred(
-            ["evaluate", "-", "--config", target_config, "--json"], stdin_file=target_file
-        )
-        if rc == 0:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+            return proc.returncode, out[:MAX_OUTPUT_BYTES], err[:MAX_OUTPUT_BYTES]
+        except subprocess.TimeoutExpired:
             try:
-                tgt_eval = json.loads(stdout)
-                tgt_result = tgt_eval.get("result", "")
-                if "None" in tgt_result or "false" in tgt_result.lower():
-                    return Verdict(
-                        False,
-                        f"target_config {target_config!r} is not a valid target solution ({tgt_result}) — not useful evidence",
-                        {"target_evaluation": tgt_result},
-                    )
-            except json.JSONDecodeError:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
                 pass
+            proc.wait()
+            raise
 
-    # Step 2: run pred extract to get the real extracted source solution
-    rc, stdout, stderr = _run_pred(
-        ["extract", "-", "--config", target_config, "--json"], stdin_file=bundle_file
-    )
-    if rc != 0:
-        return Verdict(False, f"pred extract failed: {stderr.strip()[:200]}")
+    def reduce(self, source: dict, target_type: str) -> dict:
+        f = self._write(source)
+        rc, out, err = self._run(["reduce", "-", "--to", target_type, "--json"], f, RUN_TIMEOUT)
+        if rc != 0:
+            raise PredError(f"reduce failed: {err.strip()[:200]}")
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError as e:
+            raise PredError(f"reduce returned invalid JSON: {e}")
 
+    def evaluate(self, instance: dict, config: str) -> Eval:
+        f = self._write(instance)
+        rc, out, err = self._run(["evaluate", "-", "--config", config, "--json"], f, RUN_TIMEOUT)
+        if rc != 0:
+            raise PredError(f"evaluate failed: {err.strip()[:200]}")
+        try:
+            return Eval.parse(json.loads(out).get("result", ""))
+        except json.JSONDecodeError as e:
+            raise PredError(f"evaluate returned invalid JSON: {e}")
+
+    def extract(self, bundle: dict, config: str) -> tuple[list | None, Eval]:
+        f = self._write(bundle)
+        rc, out, err = self._run(["extract", "-", "--config", config, "--json"], f, RUN_TIMEOUT)
+        if rc != 0:
+            raise PredError(f"extract failed: {err.strip()[:200]}")
+        try:
+            d = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise PredError(f"extract returned invalid JSON: {e}")
+        return d.get("solution"), Eval.parse(d.get("evaluation", ""))
+
+    def _solve_with(self, instance: dict, solver: str | None) -> Eval | None:
+        """One `pred solve` call. Returns Eval or None on failure/panic/timeout/bad-JSON."""
+        f = self._write(instance)
+        args = ["solve", "-", "--json", "--timeout", str(SOLVE_TIMEOUT)]
+        if solver:
+            args += ["--solver", solver]
+        try:
+            rc, out, _ = self._run(args, f, RUN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None
+        if rc != 0:
+            return None
+        try:
+            return Eval.parse(json.loads(out).get("evaluation", ""))
+        except json.JSONDecodeError:
+            return None
+
+    def solve(self, instance: dict, *, independent: bool = False) -> Eval:
+        """Optimal source-space evaluation.
+
+        Default: pred's default solver (ILP/HiGHS, which auto-reduces to ILP) — fast, since
+        pure enumeration is too slow for many problems. Falls back to brute-force if ILP has
+        no path or fails (e.g. a panic in the auto-reduce chain). `independent=True` forces
+        brute-force (used for the SOURCE of an *→ILP rule, where solving via ILP would use
+        the very rule under test — self-verification). A clean result from either solver is
+        trusted; if neither decides in time → Inconclusive (a timeout is not a proof)."""
+        if not independent:
+            ev = self._solve_with(instance, None)         # None → pred default solver (ilp)
+            if ev is not None:
+                return ev
+        ev = self._solve_with(instance, "brute-force")
+        if ev is not None:
+            return ev
+        raise Inconclusive("no solver decided within limits (ilp + brute-force failed/timed out)")
+
+
+# ─── verification ─────────────────────────────────────────────────────────────
+
+def count_bugs(results: list[dict]) -> int:
+    """Distinct rules with at least one confirmed bug (one rule = one bug)."""
+    return len({r.get("rule") for r in results if r.get("result") == "bug_found"})
+
+
+def _derive_label(src: Eval, bnd: Eval) -> str:
+    if src.feasible and not bnd.feasible:
+        return "feasibility_not_preserved"   # source solvable but round-trip yields no/invalid solution
+    if not src.feasible and bnd.feasible:
+        return "spurious_solution"           # round-trip claims a solution the source has none of
+    return "optimum_not_preserved"           # both feasible, values differ
+
+
+def _witness_check(solver: PredSolver, source: dict, bundle: dict,
+                   config: str, source_opt: Eval) -> Verdict | None:
+    """Optional: a specific target solution `config` exposes an extraction bug the
+    round-trip (which only sees the solver's returned optimum) would miss.
+    Returns a Verdict if it confirms a bug, else None."""
+    target = bundle.get("target")
+    if not target:
+        return None
     try:
-        extract_result = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred extract returned invalid JSON: {e}")
+        tev = solver.evaluate(target, config)
+        if not tev.feasible:
+            return None  # not a valid target solution → not evidence
+        sol, _ = solver.extract(bundle, config)
+        if sol is None:
+            return None
+        sev = solver.evaluate(source, _cfg(sol))
+    except PredError:
+        return None
 
-    extracted_solution = extract_result.get("solution")
-    if extracted_solution is None:
-        return Verdict(False, "pred extract returned no solution field")
-
-    # Step 3: evaluate the extracted source solution — must be INVALID
-    config_str = ",".join(str(x) for x in extracted_solution)
-    rc, stdout, stderr = _run_pred(
-        ["evaluate", "-", "--config", config_str, "--json"], stdin_file=source_file
-    )
-    if rc != 0:
-        return Verdict(False, f"pred evaluate (extracted solution) failed: {stderr.strip()[:200]}")
-
-    try:
-        eval_result = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred evaluate returned invalid JSON: {e}")
-
-    result_value = eval_result.get("result", "")
-    if "None" in result_value or "false" in result_value.lower():
+    # Soundness: a valid target solution must extract to a valid source solution.
+    if not sev.feasible:
         return Verdict(
             True,
-            f"confirmed unsound extraction: extracted source solution {extracted_solution} is invalid ({result_value})",
-            {"extracted_solution": extracted_solution, "evaluation": result_value},
-        )
-    else:
-        return Verdict(
-            False,
-            f"extracted source solution is actually valid: {result_value} — not a bug",
-            {"extracted_solution": extracted_solution, "evaluation": result_value},
+            f"confirmed unsound_extraction: valid target solution {config!r} extracts to "
+            f"invalid source solution {sol} ({sev.raw})",
+            {"witness": config, "extracted_solution": sol, "evaluation": sev.raw},
         )
 
-
-def _check_incomplete_reduction(cert: dict, source_file: str, bundle_file: str) -> Verdict:
-    """
-    Incomplete reduction: source has a valid solution but the reduction target has none.
-    """
-    # First confirm the source has a solution
-    try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=source_file)
-    except subprocess.TimeoutExpired:
-        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
-
-    if rc != 0:
-        return Verdict(False, f"pred solve (source) failed: {stderr.strip()[:200]}")
-
-    try:
-        source_solve = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred solve (source) returned invalid JSON: {e}")
-
-    source_eval = source_solve.get("evaluation", "")
-    if "None" in source_eval or "false" in source_eval.lower():
-        return Verdict(
-            False,
-            "source problem itself has no solution — incomplete_reduction requires source to be satisfiable",
-            {"source_evaluation": source_eval},
-        )
-
-    # Now confirm the target (bundle) has no solution
-    try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=bundle_file)
-    except subprocess.TimeoutExpired:
-        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
-
-    if rc != 0:
-        return Verdict(False, f"pred solve (bundle) failed: {stderr.strip()[:200]}")
-
-    try:
-        bundle_solve = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred solve (bundle) returned invalid JSON: {e}")
-
-    target_eval = bundle_solve.get("evaluation", "")
-    if "None" in target_eval or "false" in target_eval.lower():
-        return Verdict(
-            True,
-            "confirmed incomplete reduction: source is satisfiable but target has no solution",
-            {"source_evaluation": source_eval, "target_evaluation": target_eval},
-        )
-    else:
-        return Verdict(
-            False,
-            f"target has a solution ({target_eval}) — no incomplete reduction",
-            {"source_evaluation": source_eval, "target_evaluation": target_eval},
-        )
-
-
-def _parse_numeric_result(result_str: str) -> float | None:
-    """Parse 'Max(2)' or 'Min(-14)' into a float. Returns None for None/false results."""
-    import re
-    m = re.search(r"[-+]?\d+(?:\.\d+)?", result_str)
-    if m:
-        return float(m.group())
+    # Optimality: an *optimal* target solution must extract to an *optimal* source solution.
+    if (source_opt.kind == "opt" and source_opt.feasible
+            and sev.value is not None and source_opt.value is not None):
+        try:
+            tgt_opt = solver.solve(target)
+        except (Inconclusive, PredError):
+            return None
+        is_c_optimal = (tgt_opt.feasible and tev.value is not None
+                        and tgt_opt.value is not None
+                        and abs(tev.value - tgt_opt.value) <= FLOAT_TOLERANCE)
+        if is_c_optimal and _strictly_worse(sev.value, source_opt.value, source_opt.sense):
+            return Verdict(
+                True,
+                f"confirmed suboptimal_extraction: optimal target solution {config!r} extracts "
+                f"to suboptimal source value {sev.raw} vs optimum {source_opt.raw}",
+                {"witness": config, "extracted_value": sev.raw, "source_optimum": source_opt.raw},
+            )
     return None
 
 
-def _check_suboptimal_extraction(cert: dict, source_file: str, bundle_file: str) -> Verdict:
+def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
+    """Re-validate a certificate deterministically via pred. Never trusts the AI's claim.
+
+    Core check: solve(source) vs solve(reduce(source)) — a value/feasibility mismatch is a
+    genuine bug. Plus an optional witness check when the certificate carries a target_config.
     """
-    Suboptimal extraction: target's optimal solution maps to a non-optimal source solution,
-    and the certificate provides a strictly better one.
-    """
-    target_config = cert.get("target_config")
-    brute_force_solution = cert.get("brute_force_solution")
+    source = cert.get("source")
+    if not source:
+        return Verdict(False, "certificate missing 'source'")
 
-    if not target_config:
-        return Verdict(False, "suboptimal_extraction certificate missing target_config")
-    if not brute_force_solution:
-        return Verdict(False, "suboptimal_extraction certificate missing brute_force_solution")
+    target_type = ((cert.get("bundle") or {}).get("target") or {}).get("type") \
+        or cert.get("target_type")
+    if not target_type:
+        return Verdict(False, "certificate missing target type (bundle.target.type)")
 
-    # Extract the solution from the bundle
-    rc, stdout, stderr = _run_pred(["extract", "-", "--config", target_config, "--json"], stdin_file=bundle_file)
-    if rc != 0:
-        return Verdict(False, f"pred extract failed: {stderr.strip()[:200]}")
+    if len(json.dumps(source)) > MAX_INPUT_BYTES:
+        return Verdict(False, f"source instance too large (> {MAX_INPUT_BYTES} bytes) — "
+                              "counterexamples must be minimal")
 
-    try:
-        extract_result = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred extract returned invalid JSON: {e}")
+    with tempfile.TemporaryDirectory() as tmp:
+        solver = PredSolver(tmp)
 
-    source_eval_str = extract_result.get("evaluation", "")
-    extracted_value = _parse_numeric_result(source_eval_str)
+        # Re-derive the bundle from source ourselves (the agent's bundle is never trusted).
+        try:
+            bundle = solver.reduce(source, target_type)
+        except PredError as e:
+            return Verdict(False, f"pred reduce failed: {e}")
 
-    # Evaluate the claimed better solution
-    better_config = ",".join(str(x) for x in brute_force_solution)
-    rc, stdout, stderr = _run_pred(
-        ["evaluate", "-", "--config", better_config, "--json"], stdin_file=source_file
-    )
-    if rc != 0:
-        return Verdict(False, f"pred evaluate (better solution) failed: {stderr.strip()[:200]}")
+        # Core round-trip check. The SOURCE of an *→ILP rule must be solved independently
+        # of ILP (else we'd verify the rule with itself); the target side is unaffected
+        # (solving B via B→ILP doesn't use the rule A→B under test).
+        rule_targets_ilp = str(target_type).upper().startswith("ILP")
+        try:
+            src = solver.solve(source, independent=rule_targets_ilp)
+            bnd = solver.solve(bundle)
+        except Inconclusive as e:
+            return Verdict(False, f"inconclusive — {e}")
+        except PredError as e:
+            return Verdict(False, f"pred solve failed: {e}")
 
-    try:
-        better_eval_result = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred evaluate returned invalid JSON: {e}")
+        if not agrees(src, bnd):
+            label = _derive_label(src, bnd)
+            return Verdict(
+                True,
+                f"confirmed {label}: source solves to {src.raw} but solving via the "
+                f"reduction yields {bnd.raw}",
+                {"source_evaluation": src.raw, "roundtrip_evaluation": bnd.raw, "label": label},
+            )
 
-    better_value = _parse_numeric_result(better_eval_result.get("result", ""))
+        # Optional witness check (closes the all-feasible-solutions / degenerate-optimum gap).
+        config = cert.get("target_config")
+        if config:
+            w = _witness_check(solver, source, bundle, config, src)
+            if w is not None:
+                return w
 
-    # For a maximization bug: better_value > extracted_value
-    # For a minimization bug: better_value < extracted_value
-    # We determine the objective direction from the result string prefix
-    is_max = source_eval_str.lower().startswith("max")
-
-    if extracted_value is None or better_value is None:
         return Verdict(
             False,
-            f"could not parse numeric values: extracted={source_eval_str!r}, better={better_eval_result.get('result')!r}",
-        )
-
-    if _is_strictly_better(extracted_value, better_value, is_max):
-        return Verdict(
-            True,
-            f"confirmed suboptimal extraction: extracted {extracted_value} but better solution achieves {better_value}",
-            {"extracted_evaluation": source_eval_str, "better_evaluation": better_eval_result.get("result")},
-        )
-    else:
-        return Verdict(
-            False,
-            f"extraction is already optimal: extracted={extracted_value}, claimed better={better_value}",
-            {"extracted_evaluation": source_eval_str, "better_evaluation": better_eval_result.get("result")},
+            f"reduction recovers the source answer (direct {src.raw} == round-trip {bnd.raw}) "
+            "— no bug",
+            {"source_evaluation": src.raw, "roundtrip_evaluation": bnd.raw},
         )
 
 
-def _check_solve_mismatch(cert: dict, source_file: str, bundle_file: str) -> Verdict:
-    """
-    Solve mismatch: pred solve on source and bundle return different evaluations.
-    The verifier solves both sides itself — no target_config or solution data from the AI.
-    """
-    try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=source_file)
-    except subprocess.TimeoutExpired:
-        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on source")
+# ─── Calibration ──────────────────────────────────────────────────────────────
 
-    if rc != 0:
-        return Verdict(False, f"pred solve (source) failed: {stderr.strip()[:200]}")
-    try:
-        source_solve = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred solve (source) returned invalid JSON: {e}")
-
-    try:
-        rc, stdout, stderr = _run_pred(["solve", "-", "--json"], stdin_file=bundle_file)
-    except subprocess.TimeoutExpired:
-        return Verdict(False, "instance too large for solve-based verification: pred solve timed out on bundle")
-
-    if rc != 0:
-        return Verdict(False, f"pred solve (bundle) failed: {stderr.strip()[:200]}")
-    try:
-        bundle_solve = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred solve (bundle) returned invalid JSON: {e}")
-
-    eval_source = source_solve.get("evaluation", "")
-    eval_bundle = bundle_solve.get("evaluation", "")
-
-    src_val = _parse_numeric_result(eval_source)
-    bnd_val = _parse_numeric_result(eval_bundle)
-
-    # Compare numerically if both parseable, else compare strings
-    mismatch = False
-    if src_val is not None and bnd_val is not None:
-        mismatch = abs(src_val - bnd_val) > FLOAT_TOLERANCE
-    else:
-        mismatch = eval_source != eval_bundle
-
-    if mismatch:
-        return Verdict(
-            True,
-            f"confirmed solve_mismatch: source evaluation {eval_source!r} != bundle evaluation {eval_bundle!r}",
-            {"source_evaluation": eval_source, "bundle_evaluation": eval_bundle},
-        )
-    else:
-        return Verdict(
-            False,
-            f"evaluations match — no bug: source={eval_source!r}, bundle={eval_bundle!r}",
-            {"source_evaluation": eval_source, "bundle_evaluation": eval_bundle},
-        )
-
-
-def _check_order_reversal(cert: dict, source_file: str, bundle_file: str, tmpdir: str) -> Verdict:
-    """
-    Order reversal: two target configs c_lo, c_hi where obj_B(c_lo) < obj_B(c_hi)
-    but obj_A(extract(c_lo)) > obj_A(extract(c_hi)).
-    Proves the reduction does not preserve ordering — solver-free.
-    """
-    c_lo = cert.get("target_config_lo")
-    c_hi = cert.get("target_config_hi")
-
-    if not c_lo:
-        return Verdict(False, "order_reversal certificate missing target_config_lo")
-    if not c_hi:
-        return Verdict(False, "order_reversal certificate missing target_config_hi")
-
-    # Extract source solutions for both configs
-    rc, stdout, stderr = _run_pred(["extract", "-", "--config", c_lo, "--json"], stdin_file=bundle_file)
-    if rc != 0:
-        return Verdict(False, f"pred extract (c_lo) failed: {stderr.strip()[:200]}")
-    try:
-        extract_lo = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred extract (c_lo) returned invalid JSON: {e}")
-
-    rc, stdout, stderr = _run_pred(["extract", "-", "--config", c_hi, "--json"], stdin_file=bundle_file)
-    if rc != 0:
-        return Verdict(False, f"pred extract (c_hi) failed: {stderr.strip()[:200]}")
-    try:
-        extract_hi = json.loads(stdout)
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred extract (c_hi) returned invalid JSON: {e}")
-
-    obj_a_lo_str = extract_lo.get("evaluation", "")
-    obj_a_hi_str = extract_hi.get("evaluation", "")
-    obj_a_lo = _parse_numeric_result(obj_a_lo_str)
-    obj_a_hi = _parse_numeric_result(obj_a_hi_str)
-
-    # Evaluate target configs against the target problem
-    target_data = cert.get("bundle", {}).get("target")
-    if not target_data:
-        return Verdict(False, "bundle has no target field")
-    target_file = os.path.join(tmpdir, "target.json")
-    _write_json(target_data, target_file)
-
-    rc, stdout, stderr = _run_pred(["evaluate", "-", "--config", c_lo, "--json"], stdin_file=target_file)
-    if rc != 0:
-        return Verdict(False, f"pred evaluate target (c_lo) failed: {stderr.strip()[:200]}")
-    try:
-        obj_b_lo_str = json.loads(stdout).get("result", "")
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred evaluate (c_lo) returned invalid JSON: {e}")
-
-    rc, stdout, stderr = _run_pred(["evaluate", "-", "--config", c_hi, "--json"], stdin_file=target_file)
-    if rc != 0:
-        return Verdict(False, f"pred evaluate target (c_hi) failed: {stderr.strip()[:200]}")
-    try:
-        obj_b_hi_str = json.loads(stdout).get("result", "")
-    except json.JSONDecodeError as e:
-        return Verdict(False, f"pred evaluate (c_hi) returned invalid JSON: {e}")
-
-    obj_b_lo = _parse_numeric_result(obj_b_lo_str)
-    obj_b_hi = _parse_numeric_result(obj_b_hi_str)
-
-    if obj_a_lo is None or obj_a_hi is None or obj_b_lo is None or obj_b_hi is None:
-        return Verdict(False, f"could not parse numeric values: "
-                       f"obj_B(c_lo)={obj_b_lo_str!r}, obj_B(c_hi)={obj_b_hi_str!r}, "
-                       f"obj_A(c_lo)={obj_a_lo_str!r}, obj_A(c_hi)={obj_a_hi_str!r}")
-
-    # Determine direction from c_hi extraction (assume maximization if starts with Max)
-    is_max = obj_a_hi_str.lower().startswith("max")
-
-    # c_lo must be strictly lower in target space
-    b_lo_is_lower = _is_strictly_better(obj_b_lo, obj_b_hi, is_max)  # hi > lo by tolerance
-    if not b_lo_is_lower:
-        return Verdict(False,
-            f"target values not strictly ordered: obj_B(c_lo)={obj_b_lo_str!r}, obj_B(c_hi)={obj_b_hi_str!r}",
-            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str})
-
-    # Order is reversed if extract(c_lo) is strictly better than extract(c_hi) in source space
-    reversed_ = _is_strictly_better(obj_a_hi, obj_a_lo, is_max)  # lo > hi
-    if reversed_:
-        return Verdict(True,
-            f"confirmed order_reversal: obj_B(c_lo)={obj_b_lo_str} < obj_B(c_hi)={obj_b_hi_str} "
-            f"but obj_A(extract(c_lo))={obj_a_lo_str} > obj_A(extract(c_hi))={obj_a_hi_str}",
-            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str,
-             "obj_a_lo": obj_a_lo_str, "obj_a_hi": obj_a_hi_str})
-    else:
-        return Verdict(False,
-            f"order preserved — no bug: obj_B(c_lo)={obj_b_lo_str}, obj_B(c_hi)={obj_b_hi_str}, "
-            f"obj_A(extract(c_lo))={obj_a_lo_str}, obj_A(extract(c_hi))={obj_a_hi_str}",
-            {"obj_b_lo": obj_b_lo_str, "obj_b_hi": obj_b_hi_str,
-             "obj_a_lo": obj_a_lo_str, "obj_a_hi": obj_a_hi_str})
-
-
-# ─── Calibration mode ────────────────────────────────────────────────────────
-
+# Reject path — published, safe fixtures (none is a real bug). NOTE: valid_bug.json was
+# re-classified to REJECTED — the round-trip recovers the optimum (Max(2)); its old
+# "suboptimal" claim used a NON-optimal target_config, not a real reduction bug.
 FIXTURE_EXPECTATIONS = {
-    "valid_bug.json": True,                       # genuine bug → accepted
-    "wrong_target.json": False,                   # tampered bundle → rejected
-    "valid_solution_claimed_invalid.json": False, # false alarm → rejected
+    "valid_bug.json": False,
+    "wrong_target.json": False,
+    "valid_solution_claimed_invalid.json": False,
 }
 
 
+def _private_accept_fixtures() -> list[Path]:
+    """Accept-path fixtures (real bugs) live in the gitignored private dir, so the answer
+    key is never published. Calibration runs them when present, skips them when absent."""
+    if not PRIVATE_FIXTURES_DIR.is_dir():
+        return []
+    return sorted(PRIVATE_FIXTURES_DIR.glob("genuine_bug_*.json"))
+
+
 def run_calibration() -> bool:
-    """Run verifier against all fixtures. Return True iff every expectation is met."""
     all_passed = True
     print("Running verifier calibration...")
     print("-" * 60)
 
-    for fixture_name, expected_accepted in FIXTURE_EXPECTATIONS.items():
-        fixture_path = FIXTURES_DIR / fixture_name
+    cases = [(FIXTURES_DIR / name, expected)
+             for name, expected in FIXTURE_EXPECTATIONS.items()]
+    accept = _private_accept_fixtures()
+    cases += [(p, True) for p in accept]
+    if not accept:
+        print("NOTE  no private accept-path fixtures found "
+              f"({PRIVATE_FIXTURES_DIR}) — reject path only\n")
+
+    for fixture_path, expected in cases:
         if not fixture_path.exists():
-            print(f"MISSING  {fixture_name}")
+            print(f"MISSING  {fixture_path.name}")
             all_passed = False
             continue
-
-        with open(fixture_path, encoding="utf-8") as f:
-            cert = json.load(f)
-
+        cert = json.loads(fixture_path.read_text(encoding="utf-8"))
         verdict = verify(cert)
-        passed = verdict.accepted == expected_accepted
-
-        status = "PASS" if passed else "FAIL"
-        expected = "accepted" if expected_accepted else "rejected"
-        got = "accepted" if verdict.accepted else "rejected"
-        print(f"{status}  {fixture_name}")
-        print(f"      expected={expected}, got={got}")
-        print(f"      {verdict.reason}")
-        print()
-
-        if not passed:
-            all_passed = False
-
+        passed = verdict.accepted == expected
+        print(f"{'PASS' if passed else 'FAIL'}  {fixture_path.name}")
+        print(f"      expected={'accepted' if expected else 'rejected'}, "
+              f"got={'accepted' if verdict.accepted else 'rejected'}")
+        print(f"      {verdict.reason}\n")
+        all_passed = all_passed and passed
     print("-" * 60)
-    if all_passed:
-        print("Calibration PASSED: all fixtures verified correctly.")
-    else:
-        print("Calibration FAILED: some fixtures did not verify as expected.")
+    print("Calibration PASSED" if all_passed else "Calibration FAILED")
     return all_passed
 
-
-# ─── CLI ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python -m benchmark.verify <certificate.json>")
         print("       python -m benchmark.verify --calibrate")
         sys.exit(1)
-
     if sys.argv[1] == "--calibrate":
-        ok = run_calibration()
-        sys.exit(0 if ok else 1)
-
-    cert_path = sys.argv[1]
-    with open(cert_path, encoding="utf-8") as f:
-        cert = json.load(f)
-
+        sys.exit(0 if run_calibration() else 1)
+    cert = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     verdict = verify(cert)
     print(verdict)
-    if verdict.details:
-        for k, v in verdict.details.items():
-            print(f"  {k}: {v}")
+    for k, v in verdict.details.items():
+        print(f"  {k}: {v}")
     sys.exit(0 if verdict.accepted else 1)
 
 

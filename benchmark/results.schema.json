@@ -57,7 +57,7 @@
           },
           "result": {
             "type": "string",
-            "enum": ["bug_found", "known_issue", "no_certificate", "rejected", "no_bug", "error"],
+            "enum": ["bug_found", "no_certificate", "rejected", "no_bug", "error"],
             "description": "Outcome for this rule"
           },
           "cost": {
@@ -74,21 +74,17 @@
           },
           "certificate": {
             "type": "object",
-            "description": "Counterexample certificate (present only when result=bug_found or rejected)",
+            "description": "Counterexample certificate (present only when result=bug_found or rejected). The backend re-derives the bundle from source via pred; only rule, source, and the target type are needed.",
             "properties": {
               "rule": {"type": "string"},
-              "violation": {
-                "type": "string",
-                "enum": ["unsound_extraction", "incomplete_reduction", "suboptimal_extraction", "solve_mismatch", "order_reversal"]
-              },
-              "source": {"type": "object"},
-              "bundle": {"type": "object"},
-              "target_config": {"type": "string"},
-              "claimed_source_solution": {"type": "array"},
-              "brute_force_solution": {"type": "array"},
+              "source": {"type": "object", "description": "Source problem instance (pred create JSON)"},
+              "bundle": {"type": "object", "description": "Reduction bundle (pred reduce JSON); supplies the target type"},
+              "target_type": {"type": "string", "description": "Target problem type (alternative to bundle.target.type)"},
+              "target_config": {"type": "string", "description": "Optional witness: a target solution that mis-extracts"},
+              "violation": {"type": "string", "description": "Optional free-form label; the backend derives the authoritative one"},
               "note": {"type": "string"}
             },
-            "required": ["rule", "violation", "source", "bundle"]
+            "required": ["rule", "source"]
           },
           "verify_details": {
             "type": "object",

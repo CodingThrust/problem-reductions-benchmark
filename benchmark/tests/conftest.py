@@ -85,24 +85,3 @@ def tampered_bundle_cert():
         "target_config": "1,0,0",
         "claimed_source_solution": [1, 1, 0],
     }
-
-
-# ── Minimal valid results file dict ───────────────────────────────────────────
-
-def make_results_dict(**overrides) -> dict:
-    """Return a minimal schema-valid results dict, with optional field overrides."""
-    base = {
-        "model": "anthropic/claude-sonnet-4-6",
-        "library_commit": "aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
-        "bugs_found": 0,
-        "total_cost_usd": 0.1,
-        "total_tokens_k": 10.0,
-        "efficiency_bugs_per_ktok": 0.0,
-        "efficiency_bugs_per_dollar": 0.0,
-        "rules_tested": 1,
-        "results": [
-            {"rule": "some_rule", "result": "no_certificate", "cost": 0.1, "tokens_k": 10.0}
-        ],
-    }
-    base.update(overrides)
-    return base

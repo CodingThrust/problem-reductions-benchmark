@@ -1,0 +1,78 @@
+name: Publish leaderboard (on merge)
+
+# Runs after a submission PR is merged into the default branch. The verified result was
+# already produced and reviewed on the PR (score-pr.yml); this rebuilds the full
+# leaderboard from all merged submissions and publishes the static site to GitHub Pages.
+# pred is deterministic, so re-verifying reproduces exactly the number shown on the PR.
+#
+# One-time repo setup: Settings → Pages → Source = "GitHub Actions".
+# Bump PR_REF when the benchmark targets a new problem-reductions version.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'submissions/**'
+  workflow_dispatch: {}   # manual republish (e.g. after a verifier change)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PR_REF: v0.6.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build scoring image (pred + verifier)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          build-args: PR_REF=${{ env.PR_REF }}
+          load: true
+          tags: prb-scoring:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Rebuild the leaderboard (re-verify all submissions with pred)
+        run: |
+          mkdir -p results/scored
+          docker run --rm --network none \
+            -v "$PWD/submissions:/app/submissions:ro" \
+            -v "$PWD/results:/app/results" \
+            --entrypoint python prb-scoring:latest \
+            -m benchmark.backend_score --local /app/submissions /app/results/scored
+
+      - name: Stage leaderboard → the site's data file
+        run: |
+          test -f results/scored/leaderboard.json
+          cp results/scored/leaderboard.json site/results.json
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

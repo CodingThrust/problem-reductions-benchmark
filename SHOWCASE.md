@@ -10,74 +10,92 @@ tags:
 # Problem-Reductions Benchmark — Showcase & User Guide
 
 > Repo: https://github.com/Ferrari-72/problem-reductions-benchmark
-> Leaderboard: https://ferrari-72.github.io/problem-reductions-benchmark/
+> Leaderboard & submission: Hugging Face Space (Gradio) — see `SUBMISSION.md`
 > Library: https://github.com/CodingThrust/problem-reductions (pinned commit `aa2d1a1`)
 
 ---
 
-## 一、这个 Benchmark 是什么
+## 1. What this benchmark is
 
-**核心问题**：对于同等计算预算，哪个 LLM 能在 problem-reductions 库中找到最多 bug？
+**The question:** for an equal compute budget, which LLM finds the most bugs in the
+problem-reductions library?
 
-**工作流**：
+**Workflow:**
 
 ```
 LLM Agent
   │
-  ├─ pred create       # 构造小的 source 实例
-  ├─ pred reduce       # A → B（reduction bundle）
-  ├─ pred solve        # 求解 B，得到 target config
+  ├─ pred create       # build a small source instance
+  ├─ pred reduce       # A → B (reduction bundle)
+  ├─ pred solve        # solve B, get a target config
   ├─ pred extract      # target config → source config
-  └─ pred evaluate     # 验证提取出的 source config 是否合法
+  └─ pred evaluate     # check the extracted source config is valid
          │
-         └─ 不合法 → 生成 CERTIFICATE（bug 凭证）
+         └─ invalid → emit a CERTIFICATE (bug claim)
                 │
-                └─ Verifier 独立复核 → accepted / rejected
+                └─ Verifier re-checks independently → accepted / rejected
                          │
-                         └─ accepted → 写入 results/*.json → Leaderboard
+                         └─ accepted → counts on the leaderboard
 ```
 
-**核心指标**：`bugs / K tokens`（每千 token 找到的 bug 数）—— 比 `bugs / $` 更能跨模型比较，因为不同模型定价差异大。
+**Primary metric:** `bugs_found` — on a fixed commit, the number of **distinct rules with
+≥1 confirmed bug** (one rule counts once, no matter how many counterexamples target it).
+Fully verifiable and impossible to inflate. `bugs / Ktok` and `bugs / $` are efficiency
+reference metrics (self-reported denominators) used only to break ties.
 
 ---
 
-## 二、5 种 Violation 类型
+## 2. The single test for a bug: round-trip
 
-| 类型 | 含义 | 需要 Solver | AI 需提供 |
-|------|------|:-----------:|-----------|
-| `unsound_extraction` | extract 出的解不合法 | 否 | `target_config` |
-| `incomplete_reduction` | source 有解但 target 无解 | 是 | 无 |
-| `suboptimal_extraction` | 提取出的解比最优差 | 否 | `target_config` + `brute_force_solution` |
-| `solve_mismatch` | source/target 的 evaluation 不一致 | 是 | 无 |
-| `order_reversal` | 目标空间排序与源空间排序相反 | 否 | `target_config_lo` + `target_config_hi` |
+A rule A→B is correct on an instance `a` iff solving it **directly** agrees with solving it
+**through the reduction** — by **value** (optimization) or **feasibility** (decision):
 
-**Solver-free 优先**：`unsound_extraction`、`suboptimal_extraction`、`order_reversal` 不依赖 `pred solve`，可以处理大实例；另两种受超时保护，超时返回 `rejected`，不崩溃。
+```
+solve(a)  ==  solve(reduce(a))
+```
+
+`pred solve <bundle>` already does the whole round-trip (solve the target → extract back to
+the source → evaluate in source space), so you just compare it against `pred solve <source>`.
+A mismatch is a real bug. The verifier re-runs `pred` itself and **never trusts the AI's
+claim**. The mismatch gets a derived label:
+
+| Label | Meaning |
+|-------|---------|
+| `optimum_not_preserved` | both feasible, but the round-tripped value differs |
+| `feasibility_not_preserved` | source is solvable but the round-trip yields none |
+| `spurious_solution` | the round-trip claims a solution the source has none of |
+
+Optionally, a certificate carries a `target_config` (a specific target solution) to also
+catch **extraction-layer** bugs — `unsound_extraction` (a valid target solution extracts to
+an invalid source solution) and `suboptimal_extraction` (an optimal target solution extracts
+to a suboptimal source solution) that the solver's own optimum would hide. Values, never
+specific solutions, are compared, so multiple optima never cause a false mismatch.
 
 ---
 
-## 三、如何添加新模型并提交结果
+## 3. How to run and submit a model
 
-### 3.1 环境准备
+### 3.1 Environment setup
 
 ```bash
-# 1. Clone benchmark repo
+# 1. Clone the benchmark repo
 git clone https://github.com/Ferrari-72/problem-reductions-benchmark
 cd problem-reductions-benchmark
 
-# 2. Clone 并 pin 库到指定 commit
+# 2. Clone and pin the library to the fixed commit
 git clone https://github.com/CodingThrust/problem-reductions
 cd problem-reductions && git checkout aa2d1a1 && cd ..
 
-# 3. 安装依赖
+# 3. Install dependencies
 pip install -e ".[dev]"
 
-# 4. 确认 pred CLI 可用
+# 4. Confirm the pred CLI works
 pred --version
 ```
 
-### 3.2 配置 API Key
+### 3.2 Configure the API key
 
-根据模型设置环境变量：
+Set the environment variable matching your model:
 
 ```bash
 # OpenAI
@@ -91,76 +109,45 @@ export DEEPSEEK_API_KEY=sk-...
 
 # Windows PowerShell
 $env:OPENAI_API_KEY = "sk-..."
-$env:PYTHONUTF8 = "1"   # Windows 必须，防止 emoji 导致 GBK 编码错误
+$env:PYTHONUTF8 = "1"   # required on Windows so emoji output doesn't hit a GBK encoding error
 ```
 
-### 3.3 运行 Benchmark
+### 3.3 Run a budgeted session → submission.json
+
+The recommended path is the Docker runner, which enforces the budget and emits a
+self-describing `submission.json`:
 
 ```bash
-python -m benchmark.run_mini \
-  --model deepseek/deepseek-chat \
-  --api-base https://api.deepseek.com/v1 \
-  --repo-dir path/to/problem-reductions \
-  --budget 5.0 \
-  --per-rule 0.5 \
-  --output results/deepseek_deepseek-chat.json \
-  --trajectory-dir results/trajectories
+make submission          # → ./out/submission.json (real run; needs an API key + price)
 ```
 
-**参数说明**：
+`make submission` runs `benchmark.run_submission` inside the runner image. Key flags
+(see `SUBMISSION.md` for the full list, including the per-token price that makes the budget
+a hard cap):
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--model` | LiteLLM 格式的模型名 | `anthropic/claude-sonnet-4-6` |
-| `--api-base` | 自定义 API 地址（第三方模型需要） | None |
-| `--budget` | 总预算上限（USD） | 20.0 |
-| `--per-rule` | 每条 rule 的预算上限 | 0.5 |
-| `--rules` | 只测指定 rule（空=全部） | all |
-| `--trajectory-dir` | 保存 agent 轨迹 JSONL 的目录 | None |
+| Flag / env | Meaning | Default |
+|------------|---------|---------|
+| `--model` / `MODEL_NAME` | LiteLLM model name | `anthropic/claude-sonnet-4-6` |
+| `--budget` / `BUDGET_USD` | total budget (USD); must be 20 to be ranked | 20.0 |
+| `--per-rule` / `PER_RULE_BUDGET` | per-rule cost cap | 0.5 |
+| `--price-in` / `--price-out` | your model price, USD / 1M tokens | built-in for known models |
+| `--safety-margin` | USD held back as overshoot headroom | 1.0 |
+| `--max-rules` | cap rules attempted (smoke runs) | all |
 
-### 3.4 验证结果格式
+### 3.4 Submit
 
-```bash
-python -c "
-import json, sys
-with open('results/YOUR_MODEL.json') as f:
-    d = json.load(f)
-required = ['model','library_commit','bugs_found','total_cost_usd',
-            'total_tokens_k','efficiency_bugs_per_ktok',
-            'efficiency_bugs_per_dollar','rules_tested','results']
-missing = [k for k in required if k not in d]
-print('MISSING:', missing if missing else 'none — schema OK')
-print(f'bugs={d[\"bugs_found\"]}, cost=\${d[\"total_cost_usd\"]:.4f}, tokens={d[\"total_tokens_k\"]}K')
-"
-```
-
-### 3.5 重建 Leaderboard
-
-```bash
-python benchmark/build_index.py
-# 生成 results/index.json，GitHub Pages 自动读取并渲染 leaderboard
-```
-
-### 3.6 提交结果（PR）
-
-```bash
-git checkout -b results/YOUR_MODEL_NAME
-git add results/YOUR_MODEL.json results/index.json
-git commit -m "add YOUR_MODEL results: N rules, XK tok, Y bugs"
-git push origin results/YOUR_MODEL_NAME
-# 然后在 GitHub 开 PR
-```
+Upload `out/submission.json` on the Space's Submit tab. The backend re-verifies every
+certificate with `pred` (zero trust) and ranks the run automatically. See `SUBMISSION.md`.
 
 ---
 
-## 四、值得展示的亮点
+## 4. Highlights worth showing
 
-### 4.1 完整 Pipeline 运行（Pipeline Demo）
+### 4.1 Single-rule pipeline demo
 
-运行一条 rule 的完整流程，展示 agent → certificate → verify → leaderboard 全链路：
+Run one rule end to end (agent → certificate → verify), ~$0.05:
 
 ```bash
-# 跑单条 rule，用 --rules 指定，只需 ~$0.05
 python -m benchmark.run_mini \
   --model deepseek/deepseek-chat \
   --api-base https://api.deepseek.com/v1 \
@@ -171,13 +158,12 @@ python -m benchmark.run_mini \
   --trajectory-dir results/demo_traj
 ```
 
-### 4.2 Agent 轨迹可视化（Trajectory Inspection）
+### 4.2 Trajectory inspection
 
-每条 rule 的 `--trajectory-dir` 会保存一个 JSONL 文件，记录 agent 的完整思考过程：
+With `--trajectory-dir`, each rule saves a JSONL file recording the agent's full reasoning:
 
 ```bash
-# 查看 agent 对某条 rule 的推理过程
-cat results/trajectories/deepseek_deepseek-chat_exactcoverby3sets_subsetproduct.jsonl \
+cat results/demo_traj/deepseek_deepseek-chat_exactcoverby3sets_subsetproduct.jsonl \
   | python -c "
 import sys, json
 for line in sys.stdin:
@@ -189,120 +175,136 @@ for line in sys.stdin:
 "
 ```
 
-可以看到 agent 实际执行的 `pred` 命令、对 reduction 逻辑的推理分析——验证模型真的在"思考"而不是猜测。
+You can see the actual `pred` commands the agent ran and its reasoning about the reduction —
+evidence the model is really *working through it*, not guessing.
 
-### 4.3 Leaderboard 实时数据
+### 4.3 Leaderboard
 
-访问 https://ferrari-72.github.io/problem-reductions-benchmark/ 展示：
-- 当前已有 DeepSeek (`deepseek/deepseek-chat`) 的真实跑分
-- `efficiency_bugs_per_ktok` 是横向对比不同模型的核心指标
-- 表格按该指标排序，新提交的模型会自动出现
+The leaderboard is a static site (`site/`) on GitHub Pages; submission is a GitHub PR:
+- `bugs_found` (distinct rules) is the headline cross-model metric
+- sorted by `bugs_found`, ties broken by `efficiency_bugs_per_ktok`; rows appear once the
+  backend re-verification passes
+- self-reported dollars are advisory only (the price is declared by the submitter); the
+  efficiency headline is bugs/Ktok
 
-### 4.4 独立 Verifier（Zero Trust）
+### 4.4 Independent verifier (zero trust)
 
-核心设计亮点：verifier **不信任** AI 提供的任何值，完全自己重跑：
+The design centerpiece: the verifier **trusts none** of the AI's values. It re-derives the
+bundle from `source` with `pred reduce`, then round-trips with `pred solve`:
 
 ```
-# unsound_extraction: verifier 自己重新 extract，再 evaluate
-# incomplete_reduction: verifier 自己 solve source 和 bundle
-# solve_mismatch: verifier 自己 solve 两边，比较结果
+# direct                 → pred solve source         → compare
+# via the reduction      → pred solve reduce(source) → value/feasibility mismatch = bug
+# with a target_config   → extract + evaluate independently to catch extraction bugs
 ```
 
-AI 无法"捏造" bug 凭证——即使提供假的 `claimed_source_solution`，verifier 也会独立验证并拒绝。
+The AI cannot fabricate a certificate — whatever values it writes are ignored; the verifier
+recomputes everything, and a wrong or non-minimal certificate is simply `rejected`.
 
-### 4.5 测试套件（185 tests，全 mock，无需 API key）
+### 4.5 Test suite (all mocked, no API key)
 
 ```bash
-cd benchmark && pytest tests/ -v 2>&1 | tail -5
-# 185 passed, 3 skipped
+pytest benchmark/tests/ -q 2>&1 | tail -3
+# 130 passed, 4 skipped
 ```
 
-所有测试 mock 了 `_run_pred`，不依赖真实 API key，任何人 clone 后可立即运行。
+Unit tests monkeypatch `PredSolver`, so no real API key is needed; only the integration
+tests (`-m integration`) require `pred`. Anyone can run the unit tests right after cloning.
 
 ---
 
-## 五、已知问题与注意事项
+## 5. Known issues and notes
 
-### 5.1 当前版本 (v0.6.0 / `aa2d1a1`) 的 bug 分布
+### 5.1 Bug distribution on the pinned version (v0.6.0 / `aa2d1a1`)
 
-**重要**：`aa2d1a1` 提交的 reduction rules 大部分是正确的。GitHub 上标注 "Wrong" 的 issue 描述的是**尚未实现的 rule**（future work），而不是现有 rule 的 bug。
+Most reduction rules on `aa2d1a1` are correct, but **real reduction bugs do exist** — we have
+confirmed several counterexamples on this fixed commit with the round-trip verifier + raw
+`pred` (concentrated in less-trodden, weighted / boundary-input rules). The specific
+counterexamples are the benchmark answer key and are **not** in the public repo (see the
+gitignored `benchmark/tests/fixtures/private/`).
 
-因此：
-- **在 `aa2d1a1` 上跑出 0 bugs 是正常结果**，说明 agent 分析是准确的
-- 若要测试 bug 发现能力，需要切换到包含已知 bug 的库提交版本
-- 后续可以在库的 `main` 分支（更新的 commit）上重新测试
+So:
+- **0 bugs doesn't mean the library is clean** — it means the agent missed them; that's where
+  models pull apart
+- the more obscure / less-trodden rules (and weighted / degenerate / empty-or-zero inputs)
+  are the most worth probing
+- scoring is based on `pred`-recheckable counterexamples on `aa2d1a1`; novelty is not scored
 
-### 5.2 Windows 特有问题
+### 5.2 Windows-specific issues
 
-| 问题 | 原因 | 解决方案 |
-|------|------|----------|
-| `UnicodeEncodeError 'gbk'` | minisweagent 输出 emoji，Windows 控制台默认 GBK | 运行前设置 `$env:PYTHONUTF8="1"` |
-| `pred` 不能读 stdin | Windows 管道限制 | agent 提示词已说明：先写文件再传路径 |
-| Git push 失败 | 需要代理 | `git config --global http.proxy http://127.0.0.1:7890` |
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| `UnicodeEncodeError 'gbk'` | mini-swe-agent prints emoji; the Windows console defaults to GBK | set `$env:PYTHONUTF8="1"` first |
+| `pred` can't read stdin | Windows pipe limitation | the agent prompt already says: write to a file first, then pass the path |
+| `git push` fails | needs a proxy | `git config --global http.proxy http://127.0.0.1:7890` |
 
-### 5.3 step_limit 调优
+### 5.3 Tuning step_limit
 
-默认 `step_limit=35`，建议范围：
+Default `step_limit=35`. Suggested ranges:
 
-| 场景 | 推荐值 |
-|------|--------|
-| 快速验证 pipeline 是否工作 | 20（够跑完一次 round-trip） |
-| 正式评测，有充足预算 | 35–50 |
-| 复杂 rule（如图论问题） | 50+ |
+| Scenario | Suggested |
+|----------|-----------|
+| Quick pipeline check | 20 (enough for one round-trip) |
+| Real evaluation, ample budget | 35–50 |
+| Complex rules (e.g. graph problems) | 50+ |
 
-step_limit 太低时，agent 会花完所有步数读代码，没有时间跑 `pred reduce/solve/extract`，直接返回 `no_certificate`。
+If `step_limit` is too low, the agent spends all its steps reading code and has no time to
+run `pred reduce/solve/extract`, returning `no_certificate`.
 
-### 5.4 Cost 估算
+### 5.4 Cost estimates
 
-| 模型 | 每条 rule 平均 cost | 15 rules 总计 |
-|------|-------------------|--------------|
+| Model | Avg cost / rule | 15 rules total |
+|-------|-----------------|----------------|
 | DeepSeek Chat | ~$0.04 | ~$0.63 |
 | Claude Sonnet 4.x | ~$0.15 | ~$2.25 |
 | GPT-4o | ~$0.10 | ~$1.50 |
 
-`--per-rule 0.5` 是安全上限，大多数模型每条 rule 花不到这个数。
+`--per-rule 0.5` is a safe ceiling; most models spend well under it per rule.
 
-### 5.5 Solver-based violations 的局限
+### 5.5 Solve-timeout limitation
 
-`incomplete_reduction` 和 `solve_mismatch` 需要运行 `pred solve`。对于大实例（节点数 > 15），默认 solver 可能超时（120s）。超时时 verifier 返回 `rejected`（不崩溃），但这类 violation 无法被检测到。
+The round-trip check needs `pred solve` on both sides (ILP first, brute-force fallback). For
+large instances solving can time out; the verifier then returns `rejected` (it does not
+crash — a timeout is not a proof), and a bug on that instance cannot be confirmed.
 
-**建议**：优先设计使用 solver-free violation 类型（`unsound_extraction`、`order_reversal`）的 agent 策略。
+**Tip:** use **minimal** counterexamples (a few nodes / clauses) — they are both faster and
+a stronger witness; the verifier also rejects oversized sources (> 256KB).
 
 ---
 
-## 六、目录结构速览
+## 6. Directory layout at a glance
 
 ```
 problem-reductions-benchmark/
 ├── benchmark/
-│   ├── run_mini.py          # 主入口
-│   ├── verify.py            # 独立 verifier（zero trust）
-│   ├── config.yaml          # agent prompt + step_limit
-│   ├── env_setup.py         # pred 环境检查
-│   └── tests/               # 185 个单元测试
-├── results/
-│   ├── deepseek_deepseek-chat.json   # 已有跑分
-│   ├── index.json           # leaderboard 数据源
-│   └── trajectories/        # agent 轨迹 JSONL
-├── docs/
-│   └── index.html           # GitHub Pages leaderboard
-└── SHOWCASE.md              # 本文件
+│   ├── run_submission.py     # main entry: budgeted session → submission.json
+│   ├── run_mini.py           # one agent session for a single rule
+│   ├── scheduler.py          # multi-model/rule scheduling + budget cap
+│   ├── cost.py               # token×price cost accounting (hard cap)
+│   ├── verify.py             # independent verifier (zero trust, round-trip)
+│   ├── verify_submission.py  # backend scoring (re-verifies every cert)
+│   ├── backend_score.py      # submission-queue scoring + webhook entry
+│   ├── config.yaml           # agent prompt + step_limit
+│   └── tests/                # unit tests
+├── site/                     # static leaderboard (published to GitHub Pages)
+├── docker/Dockerfile         # runner image (pred + agent)
+└── SHOWCASE.md               # this file
 ```
 
 ---
 
-## 七、快速开始（3 条命令）
+## 7. Quick start (3 commands)
 
 ```bash
-# 1. 准备环境
+# 1. Set up
 git clone https://github.com/Ferrari-72/problem-reductions-benchmark && cd problem-reductions-benchmark
 pip install -e ".[dev]"
 
-# 2. 设置 API key（以 DeepSeek 为例）
-export DEEPSEEK_API_KEY=your_key_here  # 或 $env:DEEPSEEK_API_KEY="..." on Windows
-export PYTHONUTF8=1  # Windows 必须
+# 2. Set the API key (DeepSeek shown)
+export DEEPSEEK_API_KEY=your_key_here  # or $env:DEEPSEEK_API_KEY="..." on Windows
+export PYTHONUTF8=1  # required on Windows
 
-# 3. 跑 1 条 rule 验证 pipeline
+# 3. Run one rule to validate the pipeline
 python -m benchmark.run_mini \
   --model deepseek/deepseek-chat \
   --api-base https://api.deepseek.com/v1 \
