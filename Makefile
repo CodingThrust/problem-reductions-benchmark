@@ -56,14 +56,14 @@ preflight:
 
 ## Run the budgeted bug-finding agent via Docker → writes ./out/submission.json.
 ## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
-## (open a GitHub PR adding the file, see SUBMISSION.md). Config lives in submission.env
+## (open a GitHub PR adding the file, see CONTRIBUTING.md). Config lives in submission.env
 ## (copy submission.env.example); run `make preflight` first to validate it.
 run:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Wrote ./out/submission.json — now submit it via a GitHub PR (see SUBMISSION.md)."
+	@echo "Wrote ./out/submission.json — now submit it via a GitHub PR (see CONTRIBUTING.md)."
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
 ## Writes scored results + leaderboard.json into SCORED.
