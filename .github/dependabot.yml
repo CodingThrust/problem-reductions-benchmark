@@ -20,7 +20,11 @@ updates:
     open-pull-requests-limit: 5
 
   # Base images in the scoring image (rust:1-slim-bookworm, python:3.12-slim-bookworm).
+  # Python is intentionally pinned to 3.12 (mini-swe-agent/litellm wheels, reproducibility) —
+  # do NOT propose bumps for it. The rust base still gets updates.
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "python"
