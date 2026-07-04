@@ -46,13 +46,13 @@ class MyRunner(AgentRunner):
 
 Then pass it to `Scheduler` in `benchmark/scheduler.py`. See `MiniSweRunner` for a full example.
 
-A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and submitted to the Space, where the backend re-verifies every certificate. See `SUBMISSION.md`.
+A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and submitted as a **GitHub pull request** that adds it under `submissions/`; the PR re-verifies every certificate with `pred` (after a maintainer approves the run) and must pass before merge. See `SUBMISSION.md`.
 
 ## How to run locally
 
 Requirements:
 - `pred` binary in PATH (pinned commit `aa2d1a1` of problem-reductions)
-- Python 3.11+ with dependencies: `pip install -r benchmark/requirements.txt`
+- Python 3.12 with dependencies: `pip install -r benchmark/requirements.txt`
 - An API key for your model
 
 ```bash
