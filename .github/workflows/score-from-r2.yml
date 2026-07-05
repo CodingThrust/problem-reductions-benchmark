@@ -44,6 +44,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # buildx with the docker-container driver — required for the type=gha build cache
+      # below (the default docker driver can't export cache).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Build scoring image (pred + verifier)
         uses: docker/build-push-action@v7
         with:
