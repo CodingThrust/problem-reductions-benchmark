@@ -40,9 +40,38 @@ export default {
         submitted_by: String(sub.submitted_by || "").slice(0, 128),
       },
     });
+
+    // Event-driven trigger: nudge the GitHub scoring workflow to pick up the new
+    // submission (it still waits for maintainer approval via the `scoring` environment).
+    // Best-effort — the submission is already safe in R2, so a dispatch failure is
+    // non-fatal (the maintainer can always trigger score-from-r2 manually).
+    await triggerScoring(env, key);
+
     return json({ submission_id: id, status: "accepted", key }, 201);
   },
 };
+
+// Fire a GitHub repository_dispatch so score-from-r2.yml runs. Requires:
+//   var    GH_DISPATCH_REPO  = "owner/repo"          (wrangler.toml [vars])
+//   secret GH_DISPATCH_TOKEN = fine-grained PAT, Contents: write on that repo
+// Skips silently if either is unset; never throws (best-effort).
+async function triggerScoring(env, key) {
+  if (!env.GH_DISPATCH_TOKEN || !env.GH_DISPATCH_REPO) return;
+  try {
+    await fetch(`https://api.github.com/repos/${env.GH_DISPATCH_REPO}/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "prb-intake",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ event_type: "prb-submission", client_payload: { key } }),
+    });
+  } catch (_) {
+    /* non-fatal: submission is already in R2; maintainer can trigger manually */
+  }
+}
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {

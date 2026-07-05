@@ -15,9 +15,12 @@ name: Score submissions from R2 (private → aggregate)
 # See intake/cloudflare-worker/README.md.
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch: {}          # manual trigger (maintainer)
+  repository_dispatch:           # event-driven: the intake Worker fires this on each new
+    types: [prb-submission]      # submission. The `scoring` environment still gates the run
+                                 # on maintainer approval, so it's "auto-trigger, you approve".
   # schedule:
-  #   - cron: "0 * * * *"   # optionally also run hourly
+  #   - cron: "0 * * * *"        # optionally also sweep hourly
 
 permissions:
   contents: write        # push the aggregate to a bot branch

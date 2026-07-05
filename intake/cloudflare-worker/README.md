@@ -22,12 +22,23 @@ wrangler r2 bucket create prb-submissions
 # 2. the bearer token submitters will use (pick a strong value)
 wrangler secret put PRB_API_KEY        # paste the token
 
-# 3. deploy
+# 3. event-driven trigger: a fine-grained PAT (Contents: write on the repo) so the Worker
+#    can fire repository_dispatch → score-from-r2 (which still waits for your approval).
+#    Create at github.com/settings/tokens?type=beta, scoped to the one repo.
+wrangler secret put GH_DISPATCH_TOKEN  # paste the PAT
+#    (GH_DISPATCH_REPO is a plain var in wrangler.toml — edit it if you fork.)
+
+# 4. deploy
 cd intake/cloudflare-worker
 wrangler deploy
 # → registers your workers.dev subdomain (e.g. prb-bench) and prints the endpoint,
 #   e.g. https://intake.prb-bench.workers.dev
 ```
+
+On each submission the Worker deposits the body in R2 **and** fires `repository_dispatch`,
+which starts the scoring workflow — it then pauses for maintainer approval (the `scoring`
+environment) before it scores and publishes the aggregate. If `GH_DISPATCH_TOKEN` is unset,
+the Worker just stores the submission and you trigger scoring manually.
 
 Give submitters the endpoint URL + a key:
 

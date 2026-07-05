@@ -8,5 +8,12 @@ compatibility_date = "2026-01-01"
 binding = "SUBMISSIONS"
 bucket_name = "prb-submissions"
 
-# Secret (NOT stored here) — the bearer token `prb submit` sends:
-#   wrangler secret put PRB_API_KEY
+# Repo to trigger for scoring (event-driven). Non-secret.
+[vars]
+GH_DISPATCH_REPO = "CodingThrust/problem-reductions-benchmark"
+
+# Secrets (NOT stored here):
+#   wrangler secret put PRB_API_KEY        # bearer token `prb submit` sends
+#   wrangler secret put GH_DISPATCH_TOKEN  # fine-grained PAT, Contents: write on the repo
+#                                          #   → lets the Worker fire repository_dispatch
+#                                          #     (score-from-r2 then waits for your approval)
