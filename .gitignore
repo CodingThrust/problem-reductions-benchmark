@@ -36,5 +36,9 @@ benchmark/PINNED_VERSION
 submission.env
 *.submission.env
 
+# Cloudflare Wrangler local state/cache (intake Worker)
+.wrangler/
+node_modules/
+
 # macOS
 .DS_Store
