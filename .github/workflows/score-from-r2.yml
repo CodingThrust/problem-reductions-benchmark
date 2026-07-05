@@ -1,0 +1,92 @@
+name: Score submissions from R2 (private → aggregate)
+
+# The scoring worker for the CLI→serverless→R2 intake. Maintainer-triggered (a human gate
+# on what becomes public — pred scoring itself is free, but we don't want raw spam auto-
+# published). It:
+#   1. pulls pending submissions (incoming/) + prior scored detail (results/) from private R2,
+#   2. re-verifies every certificate with pred (zero-trust) + the provenance gate, in a
+#      network-isolated container,
+#   3. publishes ONLY the aggregate leaderboard to the public repo (site/results.json),
+#      guarded so no certificate / rule identity can leak,
+#   4. keeps the scored detail (with certs) private — back in R2, never in git.
+#
+# Required repo secrets (Settings → Secrets → Actions), from a Cloudflare R2 "Object Read &
+# Write" API token:  R2_ACCOUNT_ID  R2_ACCESS_KEY_ID  R2_SECRET_ACCESS_KEY  R2_BUCKET
+# See intake/cloudflare-worker/README.md.
+
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "0 * * * *"   # optionally also run hourly
+
+permissions:
+  contents: write   # commit the refreshed site/results.json
+
+env:
+  PR_REF: v0.6.0
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  BUCKET: ${{ secrets.R2_BUCKET }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: auto
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build scoring image (pred + verifier)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          build-args: PR_REF=${{ env.PR_REF }}
+          load: true
+          tags: prb-scoring:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Pull pending submissions + prior scored detail from R2
+        run: |
+          mkdir -p incoming results/scored
+          # incoming/ = raw submissions to score; results/ = all prior scored detail, so the
+          # rebuilt leaderboard reflects the FULL history, not just this batch.
+          aws s3 sync "s3://$BUCKET/incoming" ./incoming --endpoint-url "$R2_ENDPOINT"
+          aws s3 sync "s3://$BUCKET/results"  ./results/scored --endpoint-url "$R2_ENDPOINT"
+          echo "pending: $(ls -1 incoming/*.json 2>/dev/null | wc -l) file(s)"
+
+      - name: Re-verify with pred (zero-trust + provenance), rebuild the leaderboard
+        run: |
+          docker run --rm --network none \
+            -v "$PWD/incoming:/app/submissions:ro" \
+            -v "$PWD/results:/app/results" \
+            --entrypoint python prb-scoring:latest \
+            -m benchmark.backend_score --local /app/submissions /app/results/scored
+
+      - name: Stage the aggregate → site, and GUARD it (no certs / rule identities)
+        run: |
+          test -f results/scored/leaderboard.json
+          cp results/scored/leaderboard.json site/results.json
+          python .github/scripts/check_aggregate.py site/results.json
+
+      - name: Persist scored detail privately (R2), archive processed submissions
+        run: |
+          # Scored detail carries certificates — it goes back to PRIVATE R2, never to git.
+          aws s3 sync ./results/scored "s3://$BUCKET/results" --endpoint-url "$R2_ENDPOINT"
+          # Move the now-scored raw submissions out of the queue.
+          aws s3 mv "s3://$BUCKET/incoming" "s3://$BUCKET/processed" \
+            --recursive --endpoint-url "$R2_ENDPOINT" || true
+
+      - name: Commit the refreshed public aggregate
+        run: |
+          git config user.name  "prb-bot"
+          git config user.email "prb-bot@users.noreply.github.com"
+          git add site/results.json
+          if git diff --cached --quiet; then
+            echo "No leaderboard change."
+          else
+            git commit -m "leaderboard: refresh aggregate from scored submissions"
+            git push
+          fi

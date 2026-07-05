@@ -1,0 +1,12 @@
+name = "prb-intake"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Private R2 bucket that holds raw submissions (the answer key). Create it first:
+#   wrangler r2 bucket create prb-submissions
+[[r2_buckets]]
+binding = "SUBMISSIONS"
+bucket_name = "prb-submissions"
+
+# Secret (NOT stored here) — the bearer token `prb submit` sends:
+#   wrangler secret put PRB_API_KEY

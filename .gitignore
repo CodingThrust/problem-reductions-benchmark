@@ -4,6 +4,11 @@ dataset/
 # Local scoring output (backend_score / score-local writes here)
 results/
 
+# R2 sync scratch (score-from-r2 workflow / local scoring pulls here) — holds raw
+# submissions with certificates; never commit.
+incoming/
+processed/
+
 # Raw submissions are the answer key (cert + trajectory) — they must NEVER enter the
 # public repo. They live in a private store (self-run: local; Phase 1: private HF dataset).
 # The public repo carries only the aggregate site/results.json. Keep submissions/README.md.
