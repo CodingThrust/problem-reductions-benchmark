@@ -20,7 +20,8 @@ on:
   #   - cron: "0 * * * *"   # optionally also run hourly
 
 permissions:
-  contents: write   # commit the refreshed site/results.json
+  contents: write        # push the aggregate to a bot branch
+  pull-requests: write   # open the PR that updates the public leaderboard
 
 env:
   PR_REF: v0.6.0
@@ -85,14 +86,20 @@ jobs:
           aws s3 mv "s3://$BUCKET/incoming" "s3://$BUCKET/processed" \
             --recursive --endpoint-url "$R2_ENDPOINT" || true
 
-      - name: Commit the refreshed public aggregate
+      - name: Open a PR with the refreshed aggregate (main is protected)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          if git diff --quiet -- site/results.json; then
+            echo "No leaderboard change — nothing to publish."; exit 0
+          fi
           git config user.name  "prb-bot"
           git config user.email "prb-bot@users.noreply.github.com"
+          BR="bot/leaderboard-${{ github.run_id }}"
+          git checkout -b "$BR"
           git add site/results.json
-          if git diff --cached --quiet; then
-            echo "No leaderboard change."
-          else
-            git commit -m "leaderboard: refresh aggregate from scored submissions"
-            git push
-          fi
+          git commit -m "leaderboard: refresh aggregate from scored submissions"
+          git push origin "$BR"
+          gh pr create --base main --head "$BR" \
+            --title "leaderboard: refresh aggregate" \
+            --body "Automated refresh of site/results.json from newly scored R2 submissions. Certificates stay private in R2; only aggregate counts (no rules/certs) change here. Merging deploys the site via publish-on-merge."
