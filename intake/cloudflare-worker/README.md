@@ -25,13 +25,14 @@ wrangler secret put PRB_API_KEY        # paste the token
 # 3. deploy
 cd intake/cloudflare-worker
 wrangler deploy
-# → prints the endpoint, e.g. https://prb-intake.<you>.workers.dev
+# → registers your workers.dev subdomain (e.g. prb-bench) and prints the endpoint,
+#   e.g. https://intake.prb-bench.workers.dev
 ```
 
 Give submitters the endpoint URL + a key:
 
 ```bash
-export PRB_SUBMIT_URL=https://prb-intake.<you>.workers.dev/submit
+export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
 export PRB_API_KEY=<token>
 python -m benchmark.submit --predictions out/submission.json
 ```
