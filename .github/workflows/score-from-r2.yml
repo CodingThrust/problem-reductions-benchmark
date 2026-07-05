@@ -24,15 +24,21 @@ permissions:
 
 env:
   PR_REF: v0.6.0
-  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-  BUCKET: ${{ secrets.R2_BUCKET }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  AWS_DEFAULT_REGION: auto
 
 jobs:
   score:
     runs-on: ubuntu-latest
+    # Required-reviewers gate: every run waits for maintainer approval before it starts.
+    # The R2_* secrets live in THIS environment (environment secrets, not repo secrets) —
+    # they resolve only inside a job that selects the environment, so they're set here at
+    # job level, not in the workflow-level env block above.
+    environment: scoring
+    env:
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      BUCKET: ${{ secrets.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
     steps:
       - uses: actions/checkout@v7
 
