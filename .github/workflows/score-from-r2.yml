@@ -73,7 +73,7 @@ jobs:
       - name: Re-verify with pred (zero-trust + provenance), rebuild the leaderboard
         run: |
           docker run --rm --network none \
-            -v "$PWD/incoming:/app/submissions:ro" \
+            -v "$PWD/incoming:/app/submissions" \
             -v "$PWD/results:/app/results" \
             --entrypoint python prb-scoring:latest \
             -m benchmark.backend_score --local /app/submissions /app/results/scored
