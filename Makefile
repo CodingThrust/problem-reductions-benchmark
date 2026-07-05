@@ -22,7 +22,7 @@ SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local publish-local serve
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -70,6 +70,15 @@ run:
 score-local:
 	python -m benchmark.backend_score --local $(SUBS_DIR) $(SCORED)
 
+## Refresh the public site's aggregate from local scored submissions. SUBS_DIR holds the
+## answer key (cert + trajectory) and is gitignored — it NEVER leaves your machine. This
+## scores it, copies ONLY the aggregate leaderboard into site/results.json, and guards that
+## no certificate / rule identity leaked. Commit site/results.json; SUBS_DIR stays local.
+publish-local: score-local
+	cp $(SCORED)/leaderboard.json site/results.json
+	python .github/scripts/check_aggregate.py site/results.json
+	@echo "Updated site/results.json (aggregate only). Commit it — SUBS_DIR stays local."
+
 ## Preview the leaderboard site locally (it's published to GitHub Pages on merge).
 serve:
 	@echo "Serving site/ at http://localhost:8000  (Ctrl-C to stop)"
@@ -92,7 +101,8 @@ help:
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
-	@echo "  serve               Preview the leaderboard site locally (published via Pages on merge)"
+	@echo "  publish-local       Score + refresh site/results.json (aggregate only; SUBS_DIR stays local)"
+	@echo "  serve               Preview the leaderboard site locally (published via Pages on push to site/)"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"
 	@echo ""

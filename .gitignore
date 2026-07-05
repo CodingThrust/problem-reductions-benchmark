@@ -4,6 +4,12 @@ dataset/
 # Local scoring output (backend_score / score-local writes here)
 results/
 
+# Raw submissions are the answer key (cert + trajectory) — they must NEVER enter the
+# public repo. They live in a private store (self-run: local; Phase 1: private HF dataset).
+# The public repo carries only the aggregate site/results.json. Keep submissions/README.md.
+submissions/*.json
+submissions/**/*.json
+
 # Runner output (docker run -v ./out:/out writes submission.json here)
 out/
 
