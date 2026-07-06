@@ -31,8 +31,8 @@ wrangler deploy
 
 The Worker only writes to R2 — no GitHub token needed. Scoring is picked up by
 `.github/workflows/score-from-r2.yml` on its **daily cron** (or trigger it manually via
-`workflow_dispatch`); each run still waits for maintainer approval (the `scoring`
-environment) before it scores and publishes the aggregate.
+`workflow_dispatch`). It scores privately and opens a PR; the maintainer reviewing +
+merging that aggregate PR is the single human checkpoint (no pre-run approval).
 
 Give submitters the endpoint URL + a key:
 
@@ -45,9 +45,10 @@ python -m benchmark.submit --predictions out/submission.json
 ## R2 credentials for the scoring worker
 
 The GitHub Actions scorer reads the bucket via the S3 API. In the Cloudflare dashboard →
-R2 → *Manage API Tokens*, create an **Object Read & Write** token, then add these repo
-secrets (Settings → Secrets → Actions): `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY`, `R2_BUCKET=prb-submissions`. See `.github/workflows/score-from-r2.yml`.
+R2 → *Manage API Tokens*, create an **Object Read & Write** token, then add these as
+**repository** secrets (Settings → Secrets and variables → Actions → Repository secrets):
+`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET=prb-submissions`.
+See `.github/workflows/score-from-r2.yml`.
 
 ## Notes
 - Bearer auth is a single shared secret for now; per-submitter keys / quotas can move to a

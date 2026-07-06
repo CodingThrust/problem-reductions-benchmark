@@ -316,8 +316,15 @@ def main() -> None:
         else:
             line += f"  ({s.get('error', '')})"
         print(line)
+    n_failed = sum(1 for s in summary if s["status"] == "FAILED")
     print(f"\n{sum(1 for s in summary if s['status'] == 'FINISHED')} scored, "
-          f"{sum(1 for s in summary if s['status'] == 'FAILED')} failed")
+          f"{n_failed} failed")
+    # A FAILED status is an infra/verification error (crash, pred error), NOT a legit
+    # "no bug" verdict (that is FINISHED with bugs_found=0). Exit non-zero so the caller
+    # (score-from-r2.yml) stops BEFORE archiving incoming/ → processed/ — an un-scored
+    # submission must stay queued for retry, never be silently lost.
+    if n_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

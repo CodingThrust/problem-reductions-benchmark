@@ -120,6 +120,25 @@ class TestProcessLocal:
         status = json.loads((subs / "bad.status.json").read_text())
         assert status["status"] == "FAILED"
 
+    def test_main_exits_nonzero_on_failure(self, tmp_path, monkeypatch):
+        # A FAILED submission must make the CLI exit non-zero, so score-from-r2.yml
+        # stops before archiving incoming/ → processed/ and the submission stays queued.
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        (subs / "bad.json").write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
+        with pytest.raises(SystemExit) as ei:
+            bs.main()
+        assert ei.value.code == 1
+
+    def test_main_exits_zero_when_all_scored(self, tmp_path, monkeypatch):
+        # A clean batch (no FAILED) exits 0 so the workflow proceeds to archive + publish.
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(subs, "a.json", [{"rule": "R", "result": "no_bug"}])
+        monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
+        bs.main()  # returns normally (no SystemExit) → exit 0
+
 
 class TestWebhook:
     def _payload(self, scope="repo.content", repo="org/subs", rtype="dataset"):
