@@ -98,11 +98,16 @@ jobs:
           fi
           git config user.name  "prb-bot"
           git config user.email "prb-bot@users.noreply.github.com"
+          # Summarize the new board for the PR title: how many models, how many total bugs.
+          MODELS=$(jq 'length' site/results.json)
+          BUGS=$(jq '[.[].bugs_found] | add // 0' site/results.json)
+          DATE=$(date -u +%Y-%m-%d)
+          TITLE="Update leaderboard — ${MODELS} models, ${BUGS} verified bugs (${DATE})"
           BR="bot/leaderboard-${{ github.run_id }}"
           git checkout -b "$BR"
           git add site/results.json
-          git commit -m "leaderboard: refresh aggregate from scored submissions"
+          git commit -m "$TITLE"
           git push origin "$BR"
           gh pr create --base main --head "$BR" \
-            --title "leaderboard: refresh aggregate" \
-            --body "Automated refresh of site/results.json from newly scored R2 submissions. Certificates stay private in R2; only aggregate counts (no rules/certs) change here. Merging deploys the site via publish-on-merge."
+            --title "$TITLE" \
+            --body "Automated refresh of \`site/results.json\` from newly scored submissions in private R2. Certificates and rule identities stay private in R2 — only the aggregate counts change here (guarded by \`check_aggregate.py\`). Merging deploys the public site via publish-on-merge."
