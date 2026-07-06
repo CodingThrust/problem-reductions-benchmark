@@ -15,7 +15,12 @@ name: Score submissions from R2 (private → aggregate)
 # See intake/cloudflare-worker/README.md.
 
 on:
-  workflow_dispatch: {}       # manual trigger (maintainer)
+  workflow_dispatch:          # manual trigger (maintainer)
+    inputs:
+      reset_results:
+        description: "Wipe R2 results/ before scoring (clear stale scored files)"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 16 * * *"      # daily sweep of R2 for new submissions (16:00 UTC).
 
@@ -61,8 +66,14 @@ jobs:
       - name: Pull pending submissions + prior scored detail from R2
         run: |
           mkdir -p incoming results/scored
+          # reset_results (manual): wipe prior scored detail so the board is rebuilt from
+          # scratch — clears stale/test entries that predate a rule change.
+          if [ "${{ github.event.inputs.reset_results }}" = "true" ]; then
+            echo "reset_results: wiping s3://$BUCKET/results"
+            aws s3 rm "s3://$BUCKET/results" --recursive --endpoint-url "$R2_ENDPOINT" || true
+          fi
           # incoming/ = raw submissions to score; results/ = all prior scored detail, so the
-          # rebuilt leaderboard reflects the FULL history, not just this batch.
+          # rebuilt board reflects the FULL history, not just this batch.
           aws s3 sync "s3://$BUCKET/incoming" ./incoming --endpoint-url "$R2_ENDPOINT"
           aws s3 sync "s3://$BUCKET/results"  ./results/scored --endpoint-url "$R2_ENDPOINT"
           echo "pending: $(ls -1 incoming/*.json 2>/dev/null | wc -l) file(s)"
@@ -75,43 +86,58 @@ jobs:
             --entrypoint python prb-scoring:latest \
             -m benchmark.backend_score --local /app/submissions /app/results/scored
 
-      - name: Stage the aggregate → site, and GUARD it (no certs / rule identities)
-        run: |
-          test -f results/scored/leaderboard.json
-          cp results/scored/leaderboard.json site/results.json
-          python .github/scripts/check_aggregate.py site/results.json
-
       - name: Persist scored detail privately (R2), archive processed submissions
         run: |
           # Scored detail carries certificates — it goes back to PRIVATE R2, never to git.
           aws s3 sync ./results/scored "s3://$BUCKET/results" --endpoint-url "$R2_ENDPOINT"
-          # Move the now-scored raw submissions out of the queue. This step only runs when
-          # the scoring step exited 0 (no FAILED submissions), so we never archive an
-          # un-scored item. Limitation: the archive is coarse (whole incoming/ at once), so a
-          # permanently-malformed submission FAILs every run and jams the queue until it is
-          # deleted from R2 incoming/ by hand. Follow-up: archive per-file by FINISHED status.
+          # Move the now-scored raw submissions out of the queue. Runs only when the scoring
+          # step exited 0 (no FAILED), so we never archive an un-scored item. Limitation: the
+          # archive is coarse (whole incoming/ at once), so a permanently-malformed submission
+          # FAILs every run and jams the queue until deleted from R2 incoming/ by hand.
           aws s3 mv "s3://$BUCKET/incoming" "s3://$BUCKET/processed" \
             --recursive --endpoint-url "$R2_ENDPOINT" || true
 
-      - name: Open a PR with the refreshed aggregate (main is protected)
+      - name: Open ONE PR per new/changed submission entry (main is protected)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- site/results.json; then
-            echo "No leaderboard change — nothing to publish."; exit 0
-          fi
+          # backend_score wrote one PUBLIC entry file per non-test submission into
+          # results/scored/board/<slug>.json (slug = model--time--id). Each becomes its own
+          # PR that adds site/results/<slug>.json — independently reviewed, merged, reverted.
+          # The slug is deterministic, so re-scoring the same submission force-updates the SAME
+          # branch/PR (idempotent — no duplicate PRs); a different submission is its own PR.
+          shopt -s nullglob
           git config user.name  "prb-bot"
           git config user.email "prb-bot@users.noreply.github.com"
-          # Summarize the new board for the PR title: how many models, how many total bugs.
-          MODELS=$(jq 'length' site/results.json)
-          BUGS=$(jq '[.[].bugs_found] | add // 0' site/results.json)
-          DATE=$(date -u +%Y-%m-%d)
-          TITLE="Update leaderboard — ${MODELS} models, ${BUGS} verified bugs (${DATE})"
-          BR="bot/leaderboard-${{ github.run_id }}"
-          git checkout -b "$BR"
-          git add site/results.json
-          git commit -m "$TITLE"
-          git push origin "$BR"
-          gh pr create --base main --head "$BR" \
-            --title "$TITLE" \
-            --body "Automated refresh of \`site/results.json\` from newly scored submissions in private R2. Certificates and rule identities stay private in R2 — only the aggregate counts change here (guarded by \`check_aggregate.py\`). Merging deploys the public site via publish-on-merge."
+          BASE="$(git rev-parse HEAD)"
+          mkdir -p site/results
+          opened=0
+          for f in results/scored/board/*.json; do
+            slug="$(basename "$f" .json)"
+            dest="site/results/${slug}.json"
+            # Skip if this exact entry is already published on the base branch.
+            if git cat-file -e "$BASE:$dest" 2>/dev/null && git show "$BASE:$dest" | cmp -s - "$f"; then
+              echo "unchanged, skip: $slug"; continue
+            fi
+            MODEL="$(jq -r .model "$f")"; BUGS="$(jq -r '.bugs_found // 0' "$f")"
+            TS="$(jq -r '.timestamp // "?"' "$f")"
+            TITLE="leaderboard: ${MODEL} — ${BUGS} bug(s) @ ${TS}"
+            BR="bot/leaderboard/${slug}"
+            git checkout -B "$BR" "$BASE" >/dev/null
+            cp "$f" "$dest"
+            python .github/scripts/check_aggregate.py "$dest"   # no certs / rule identities
+            git add "$dest"
+            git commit -q -m "$TITLE"
+            git push -f origin "$BR"
+            EXISTING="$(gh pr list --head "$BR" --state open --json number -q '.[0].number')"
+            if [ -n "$EXISTING" ]; then
+              gh pr edit "$EXISTING" --title "$TITLE"
+              echo "updated PR #$EXISTING ($slug)"
+            else
+              gh pr create --base "${{ github.ref_name }}" --head "$BR" --title "$TITLE" \
+                --body "One submission's public entry (\`$dest\`) — aggregate only (counts / cost / tokens / efficiency), no certificates or rule identities (guarded by \`check_aggregate.py\`). The full certificate stays private in R2. Merging rebuilds \`site/results.json\` from all entries and deploys via publish-on-merge. This PR is scoped to a single submission; merge/close/revert it independently."
+            fi
+            opened=$((opened+1))
+          done
+          echo "opened/updated $opened submission PR(s)"
+          git checkout -q "$BASE" 2>/dev/null || true

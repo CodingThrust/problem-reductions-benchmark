@@ -22,7 +22,7 @@ SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local publish-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local board publish-local serve
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -63,24 +63,33 @@ run:
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Wrote ./out/submission.json — now submit it via a GitHub PR (see CONTRIBUTING.md)."
+	@echo "Wrote ./out/submission.json — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
 
-## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred).
-## Writes scored results + leaderboard.json into SCORED.
+## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred). Writes scored
+## results + leaderboard.json into SCORED, and one public entry per submission into SCORED/board.
 score-local:
 	python -m benchmark.backend_score --local $(SUBS_DIR) $(SCORED)
 
-## Refresh the public site's aggregate from local scored submissions. SUBS_DIR holds the
-## answer key (cert + trajectory) and is gitignored — it NEVER leaves your machine. This
-## scores it, copies ONLY the aggregate leaderboard into site/results.json, and guards that
-## no certificate / rule identity leaked. Commit site/results.json; SUBS_DIR stays local.
-publish-local: score-local
-	cp $(SCORED)/leaderboard.json site/results.json
+## Build the deployed board (site/results.json) from the per-submission entries in
+## site/results/*.json (best run per model), then guard it. Generated — not committed.
+board:
+	python -m benchmark.backend_score --build-board site/results site/results.json
 	python .github/scripts/check_aggregate.py site/results.json
-	@echo "Updated site/results.json (aggregate only). Commit it — SUBS_DIR stays local."
+	@echo "Built site/results.json from site/results/*.json (aggregate only)."
 
-## Preview the leaderboard site locally (it's published to GitHub Pages on merge).
-serve:
+## Self-run publish: score SUBS_DIR (gitignored answer key, stays local), stage each
+## submission's public entry into site/results/, and rebuild the deployed board. Commit the
+## new site/results/<slug>.json files; SUBS_DIR stays local.
+publish-local: score-local
+	mkdir -p site/results
+	for f in $(SCORED)/board/*.json; do \
+	  python .github/scripts/check_aggregate.py "$$f" && cp "$$f" site/results/; done
+	$(MAKE) board
+	@echo "Staged site/results/<slug>.json + rebuilt site/results.json. Commit the entries."
+
+## Preview the leaderboard site locally (published to GitHub Pages on merge). Builds the
+## board first so results.json (gitignored) exists for the preview.
+serve: board
 	@echo "Serving site/ at http://localhost:8000  (Ctrl-C to stop)"
 	cd site && python3 -m http.server 8000
 
@@ -101,7 +110,8 @@ help:
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
-	@echo "  publish-local       Score + refresh site/results.json (aggregate only; SUBS_DIR stays local)"
+	@echo "  board               Build site/results.json from site/results/*.json (aggregate)"
+	@echo "  publish-local       Score + stage per-submission entries + rebuild board (SUBS_DIR stays local)"
 	@echo "  serve               Preview the leaderboard site locally (published via Pages on push to site/)"
 	@echo "  audit               Audit pred CLI capabilities"
 	@echo "  install-deps        Install Python requirements"

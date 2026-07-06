@@ -1,14 +1,10 @@
 name: Publish leaderboard (GitHub Pages)
 
 # Publishes the static leaderboard site to GitHub Pages. The public repo holds ONLY the
-# aggregate leaderboard (site/results.json: counts / cost / tokens / efficiency / Pareto —
-# never certificates or buggy-rule identities). Scoring happens OFF the public repo:
-#   * self-run:   `make publish-local` scores your local (gitignored) submissions and
-#                 commits the refreshed site/results.json here.
-#   * external:   the R2 scoring worker (score-from-r2.yml) re-verifies submissions pulled
-#                 from private R2 and opens a PR that updates site/results.json.
-# So this workflow never rebuilds from submissions/ — it just deploys site/, after guarding
-# that no answer-key field leaked into the aggregate.
+# aggregate leaderboard — never certificates or buggy-rule identities. The source of truth is
+# one file per submission under site/results/<slug>.json (each merged via its own PR by
+# score-from-r2.yml). This workflow builds the deployed site/results.json by aggregating them
+# (best run per model), guards that nothing leaked, and deploys site/.
 #
 # One-time repo setup: Settings → Pages → Source = "GitHub Actions".
 
@@ -37,8 +33,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Egress guard — the published aggregate must carry no certificates / rule identities
-        run: python .github/scripts/check_aggregate.py site/results.json
+      - name: Build the deployed board from the per-submission entries
+        run: |
+          # Aggregate site/results/<slug>.json (best run per model) → the deployed
+          # site/results.json. Guard every source entry AND the built board.
+          for f in site/results/*.json; do
+            [ -e "$f" ] || continue
+            python .github/scripts/check_aggregate.py "$f"
+          done
+          python -m benchmark.backend_score --build-board site/results site/results.json
+          python .github/scripts/check_aggregate.py site/results.json
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

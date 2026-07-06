@@ -18,6 +18,8 @@ ALLOWED_KEYS = {
     "model", "library_commit", "budget_cap", "bugs_found", "rules_tested",
     "total_cost_usd", "total_tokens_k", "efficiency_bugs_per_ktok",
     "efficiency_bugs_per_dollar", "submitted_by", "placeholder",
+    # per-submission entry files (site/results/<slug>.json) also carry provenance tags
+    "timestamp", "submission_id",
 }
 # Substrings that must never appear anywhere in the serialized aggregate — a belt behind
 # the per-entry allowlist, in case the shape ever changes.
@@ -36,10 +38,16 @@ def check(path: Path) -> list[str]:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         return [f"invalid JSON: {e}"]
-    if not isinstance(data, list):
-        return ["top-level value must be a list of leaderboard entries"]
+    # Accept either the built board (a list of entries) or one per-submission entry (an
+    # object) — both are guarded the same way, key by key.
+    if isinstance(data, dict):
+        entries = [data]
+    elif isinstance(data, list):
+        entries = data
+    else:
+        return ["top-level value must be a leaderboard entry object or a list of them"]
 
-    for i, entry in enumerate(data):
+    for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
             problems.append(f"entry {i}: not an object")
             continue
