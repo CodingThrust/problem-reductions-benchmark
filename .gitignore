@@ -1,8 +1,9 @@
-# Generated HF Dataset bundle (rebuild with `build_dataset.py`)
-dataset/
+# Local scoring output (backend_score / score-local writes here). Root-anchored so it does
+# NOT match the tracked per-submission board under site/results/.
+/results/
 
-# Local scoring output (backend_score / score-local writes here)
-results/
+# Deployed board — generated from site/results/*.json at publish (build-board); not committed.
+/site/results.json
 
 # R2 sync scratch (score-from-r2 workflow / local scoring pulls here) — holds raw
 # submissions with certificates; never commit.

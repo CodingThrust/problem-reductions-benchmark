@@ -155,6 +155,73 @@ class TestProcessLocal:
         assert "anthropic/tester" not in models  # test entry excluded
 
 
+class TestPerSubmissionBoard:
+    # R2 filenames are "<epoch_ms>-<uuid>.json" — the slug derives from them.
+    F1 = "1783317767895-dc9b2aae-c838-4c15-a5aa-2f4a25f6f82c.json"
+    F2 = "1783317781060-6fb1aeb1-da04-4e1b-b6c5-f0b53c0d29a3.json"
+
+    def _score(self, tmp_path, files):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        for name, model, test in files:
+            _write_submission(subs, name, [{"rule": "R", "result": "no_bug"}],
+                              model=model, test=test)
+        bs.process_local(str(subs), str(results))
+        return results
+
+    def test_slug_is_deterministic_and_tagged(self):
+        scored = {"model": "anthropic/claude-sonnet-4-6"}
+        stem = self.F1[:-5]
+        slug = bs.board_slug(scored, stem)
+        assert slug == bs.board_slug(scored, stem)                     # deterministic
+        assert slug == "anthropic-claude-sonnet-4-6--20260706T060247--dc9b2aae"
+        full = {**scored, "results": [], "bugs_found": 0, "rules_tested": 0,
+                "total_cost_usd": 0, "total_tokens_k": 0,
+                "efficiency_bugs_per_ktok": 0, "efficiency_bugs_per_dollar": 0}
+        e = bs.board_entry(full, stem)
+        assert e["timestamp"] == "20260706T060247" and e["submission_id"] == "dc9b2aae"
+
+    def test_one_entry_file_per_nontest_submission(self, tmp_path):
+        results = self._score(tmp_path, [
+            (self.F1, "anthropic/claude-sonnet-4-6", False),
+            (self.F2, "openai/gpt-5", False),
+            ("1783317799999-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json", "anthropic/claude-sonnet-4-6", True),
+        ])
+        board_files = sorted(p.name for p in (results / "board").glob("*.json"))
+        assert board_files == [
+            "anthropic-claude-sonnet-4-6--20260706T060247--dc9b2aae.json",
+            "openai-gpt-5--20260706T060301--6fb1aeb1.json",
+        ]  # two non-test entries; the test submission produced no public file
+
+    def test_write_board_entries_is_idempotent(self, tmp_path):
+        results = self._score(tmp_path, [(self.F1, "anthropic/x", False)])
+        before = {p.name for p in (results / "board").glob("*.json")}
+        bs.write_board_entries(results, results / "board")
+        after = {p.name for p in (results / "board").glob("*.json")}
+        assert before == after and len(after) == 1
+
+    def test_build_board_dedups_best_per_model(self, tmp_path):
+        d = tmp_path / "entries"
+        d.mkdir()
+        (d / "m--t1--a.json").write_text(json.dumps(
+            {"model": "m", "bugs_found": 1, "efficiency_bugs_per_ktok": 0.1}))
+        (d / "m--t2--b.json").write_text(json.dumps(
+            {"model": "m", "bugs_found": 3, "efficiency_bugs_per_ktok": 0.2}))
+        (d / "n--t1--c.json").write_text(json.dumps(
+            {"model": "n", "bugs_found": 2, "efficiency_bugs_per_ktok": 0.1}))
+        board = bs.build_board(d)
+        assert [(e["model"], e["bugs_found"]) for e in board] == [("m", 3), ("n", 2)]
+
+    def test_main_build_board(self, tmp_path, monkeypatch):
+        d = tmp_path / "entries"
+        d.mkdir()
+        (d / "m--t--a.json").write_text(json.dumps({"model": "m", "bugs_found": 1}))
+        out = tmp_path / "results.json"
+        monkeypatch.setattr("sys.argv", ["backend_score", "--build-board", str(d), str(out)])
+        bs.main()
+        assert json.loads(out.read_text())[0]["model"] == "m"
+
+
 @pytest.mark.integration
 class TestRealFixture:
     def test_genuine_bug_end_to_end_scores_via_real_pred(self, tmp_path):
