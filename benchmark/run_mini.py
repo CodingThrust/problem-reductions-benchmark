@@ -36,10 +36,20 @@ def list_rules(repo_dir: str) -> list[str]:
 _CERT_RE = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
 
 
+def _message_text(msg: dict) -> str:
+    """Full searchable text of one message: its ``content`` PLUS ``reasoning_content``.
+
+    Tool-calling models (e.g. Qwen via function-calling) leave ``content`` empty and put their
+    prose — including any CERTIFICATE block they narrate — in ``reasoning_content``. Reading
+    only ``content`` would miss those, so certificate parsing scans both channels."""
+    parts = [msg.get("content") or "", msg.get("reasoning_content") or ""]
+    return "\n".join(p for p in parts if p)
+
+
 def parse_certificate(messages: list) -> dict | None:
     """Extract the last structured certificate JSON from agent message history."""
     for msg in reversed(messages):
-        block = _CERT_RE.search(msg.get("content", "") or "")
+        block = _CERT_RE.search(_message_text(msg))
         if block:
             try:
                 return json.loads(block.group(1).strip())
@@ -53,7 +63,7 @@ def parse_all_certificates(messages: list) -> list[dict]:
     by (rule, source) in first-seen order. Unparseable blocks are skipped."""
     seen, out = set(), []
     for msg in messages:
-        for block in _CERT_RE.finditer(msg.get("content", "") or ""):
+        for block in _CERT_RE.finditer(_message_text(msg)):
             try:
                 cert = json.loads(block.group(1).strip())
             except json.JSONDecodeError:
@@ -76,11 +86,12 @@ def extract_total_tokens(messages: list) -> int:
 
 
 def save_trajectory(messages: list, path: Path) -> None:
-    """Save agent message history as JSONL — one JSON object per line."""
+    """Save agent message history as JSONL — one JSON object per line. ``content`` folds in
+    ``reasoning_content`` so a cert a tool-calling model narrated there is preserved."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for msg in messages:
-            f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
+            f.write(json.dumps({"role": msg.get("role", ""), "content": _message_text(msg)}) + "\n")
 
 
 def _session_cost(agent, price):
@@ -95,12 +106,18 @@ def _session_cost(agent, price):
 
 
 def _trajectory(agent) -> list[dict]:
-    """The agent's own message history — provenance proof carried on cert-bearing rows."""
-    return [{"role": m.get("role", ""), "content": m.get("content", "")} for m in agent.messages]
+    """The agent's own message history — provenance proof carried on cert-bearing rows.
+
+    ``content`` folds in ``reasoning_content`` so the backend (which re-parses + provenance-
+    checks certificates against the stored ``content``) also sees certs a tool-calling model
+    narrated in its reasoning channel rather than in ``content``."""
+    return [{"role": m.get("role", ""), "content": _message_text(m)} for m in agent.messages]
 
 
 def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None,
-                 model_kwargs: dict | None = None, api_key: str | None = None):
+                 model_kwargs: dict | None = None, api_key: str | None = None,
+                 observation_template: str | None = None,
+                 format_error_template: str | None = None):
     """A LitellmModel whose cost is OUR token×price figure, so mini-swe-agent's own
     per-step ``cost_limit`` enforces the per-rule budget with the authoritative number and
     never raises on an unpriceable model.
@@ -110,7 +127,13 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: 
     would otherwise be silently dropped. ``model_kwargs`` is the open-ended escape hatch for
     non-standard providers (Azure ``api_version``, OpenRouter / vLLM ``custom_llm_provider``,
     ``extra_headers``, ``temperature``, …); ``api_base``/``api_key``/``max_tokens`` are
-    convenience shortcuts that merge into it (explicit shortcuts win on conflict)."""
+    convenience shortcuts that merge into it (explicit shortcuts win on conflict).
+
+    ``observation_template`` / ``format_error_template`` are LitellmModel CONFIG fields (not
+    model_kwargs). They MUST be passed here or mini-swe-agent falls back to its default
+    observation_template — which does NOT truncate output, so a big command result (e.g.
+    ``pred list --rules --json``) floods the context and is re-sent every step. Our config's
+    ``model:`` section carries the truncating templates; the caller threads them through."""
     from minisweagent.models.litellm_model import LitellmModel
 
     class PricedLitellmModel(LitellmModel):
@@ -129,7 +152,13 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: 
         mk["api_base"] = api_base
     if api_key:
         mk["api_key"] = api_key  # generic key — no provider-specific env var name needed
-    return PricedLitellmModel(model_name=model_name, model_kwargs=mk)
+    # Only pass templates we actually have, so an absent one keeps mini-swe's default.
+    cfg = {}
+    if observation_template is not None:
+        cfg["observation_template"] = observation_template
+    if format_error_template is not None:
+        cfg["format_error_template"] = format_error_template
+    return PricedLitellmModel(model_name=model_name, model_kwargs=mk, **cfg)
 
 
 def run_one(
@@ -165,10 +194,13 @@ def run_one(
         strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
     agent_cfg = config.get("agent", {})
     agent_cfg["cost_limit"] = cost_limit
+    model_cfg = config.get("model", {}) or {}  # observation/format templates live here
 
     agent = DefaultAgent(
         _build_model(model_name, api_base, max_tokens, price,
-                     model_kwargs=model_kwargs, api_key=api_key),
+                     model_kwargs=model_kwargs, api_key=api_key,
+                     observation_template=model_cfg.get("observation_template"),
+                     format_error_template=model_cfg.get("format_error_template")),
         LocalEnvironment(),
         **agent_cfg,
     )
@@ -286,6 +318,7 @@ def run_repo_session(
     agent_cfg["cost_limit"] = cost_limit
     if step_limit is not None:
         agent_cfg["step_limit"] = step_limit
+    model_cfg = config.get("model", {}) or {}  # observation/format templates live here
 
     safe_model = model_name.replace("/", "_").replace(":", "_")
     # Per-step trajectory persistence (mini-swe-agent saves config.output_path after every
@@ -304,7 +337,9 @@ def run_repo_session(
 
     agent = DefaultAgent(
         _build_model(model_name, api_base, max_tokens, price,
-                     model_kwargs=model_kwargs, api_key=api_key),
+                     model_kwargs=model_kwargs, api_key=api_key,
+                     observation_template=model_cfg.get("observation_template"),
+                     format_error_template=model_cfg.get("format_error_template")),
         LocalEnvironment(),
         **agent_cfg,
     )
@@ -316,7 +351,16 @@ def run_repo_session(
         "certs_file": str(certs_path) if certs_path is not None else "/tmp/certs.txt",
     }
 
-    agent.run(task="find-bugs")
+    # Crash-safe: a fatal model error (quota/auth/network) is NOT a clean LimitsExceeded stop
+    # — it propagates out of agent.run. Catch it so we still salvage whatever the agent found
+    # before dying (from its messages + the durable certs.txt) and emit a fresh submission,
+    # instead of the run crashing and leaving a STALE submission.json on disk.
+    run_error = None
+    try:
+        agent.run(task="find-bugs")
+    except Exception as e:  # noqa: BLE001 — any failure still salvages partial results
+        run_error = f"{type(e).__name__}: {e}"
+
     cost, tokens_k, usage = _session_cost(agent, price)
     trajectory = _trajectory(agent)
     if trajectory_dir is not None:
@@ -332,9 +376,10 @@ def run_repo_session(
     # The whole session is ONE trajectory shared by every bug — return it once for the
     # envelope (build_submission) instead of copying it onto each row. ``usage`` is the
     # session-level 4-bucket token total (per-rule rows carry their own; whole-repo rows
-    # don't), so the envelope can re-price it — see build_submission.
+    # don't), so the envelope can re-price it — see build_submission. ``error`` is set when
+    # the session died on a fatal error (the partial results are still valid).
     return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory,
-            "usage": usage}
+            "usage": usage, "error": run_error}
 
 
 def _rows_from_certificates(certs: list[dict]) -> list[dict]:

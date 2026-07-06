@@ -83,14 +83,30 @@ environment:
     LESS: -R
 
 model:
+  # Head+tail elision (SWE-agent pattern): short output whole; long output keeps first + last
+  # 5000 chars + a notice, so a big command result can't flood the context and be re-sent every
+  # step. The runner MUST thread this into the model config (run_mini._build_model) or
+  # mini-swe-agent's non-truncating default template is used instead.
   observation_template: |
     {% if output.exception_info -%}
     <exception>{{output.exception_info}}</exception>
     {% endif -%}
     <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
     <output>
-    {{ output.output[:8000] -}}
+    {{ output.output -}}
     </output>
+    {%- else -%}
+    <warning>Output too long — showing head + tail only. Re-run narrowing it (head/tail/grep/sed) or write it to a file and read slices.</warning>
+    {%- set elided = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided>{{ elided }} characters elided</elided>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
   format_error_template: |
     Format error: {{error}}
     Provide exactly ONE bash command in triple backticks.

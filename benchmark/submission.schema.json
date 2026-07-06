@@ -116,6 +116,7 @@
     "runner_version": {"type": "string", "description": "Version tag of the runner image/script that produced this"},
     "pred_version": {"type": "string", "description": "Version of the pred binary used (must match the pinned tag; verified server-side)"},
     "agent_mode": {"type": ["string", "null"], "description": "Agent harness mode that produced this run: 'per-rule' or 'whole-repo'."},
+    "run_error": {"type": "string", "description": "Present only when the whole-repo session died on a fatal error (quota/auth/network). The results are the partial salvage, not a clean completion — distinguishes a crash from a genuine 0-bug run."},
     "created_at": {"type": "string", "description": "ISO-8601 timestamp the run finished"},
     "notes": {"type": "string"},
     "placeholder": {"type": "boolean", "description": "True for demo/placeholder rows, never ranked"},

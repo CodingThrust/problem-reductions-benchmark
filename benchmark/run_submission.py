@@ -58,6 +58,7 @@ def build_submission(
     price=None,
     usage_totals=None,
     agent_mode: str | None = None,
+    run_error: str | None = None,
 ) -> dict:
     """Assemble the submission envelope from the runner's result rows.
 
@@ -119,6 +120,11 @@ def build_submission(
         "created_at": created_at,
         "submitted_by": submitted_by,
     }
+    # Set only when the session died on a fatal error (quota/auth/network): the results are
+    # the partial salvage, not a clean "0 bugs" completion. Keeps a crash from masquerading
+    # as a finished run.
+    if run_error is not None:
+        envelope["run_error"] = run_error
     # whole-repo: the one shared session log, stored once here (not copied onto each row).
     if trajectory is not None:
         envelope["trajectory"] = trajectory
@@ -210,6 +216,9 @@ def run(
         rows, total_cost, total_tokens = session["rows"], session["cost"], session["tokens_k"]
         session_trajectory = session["trajectory"]
         session_usage = session.get("usage")  # session-level 4-bucket total to re-price
+        run_error = session.get("error")       # set if the session died on a fatal error
+        if run_error:
+            print(f"WARNING: session ended on error — salvaged partial results: {run_error}")
     else:
         rules = list_rules(str(repo))
         if max_rules is not None:
@@ -237,6 +246,9 @@ def run(
         rows, total_cost, total_tokens = completed[model], spent, None
         session_trajectory = None
         session_usage = None
+        # per-rule already isolates each rule's failure into an "error:" row (run_one), so the
+        # session as a whole never dies — no envelope-level error to record.
+        run_error = None
 
     sub = build_submission(
         model, rows, budget_cap=budget, library_commit=commit,
@@ -244,7 +256,7 @@ def run(
         total_cost_usd=total_cost, total_tokens_k=total_tokens, trajectory=session_trajectory,
         pred_version=getattr(ctx, "pred_version", ""),
         price=price, usage_totals=session_usage,
-        agent_mode=mode,
+        agent_mode=mode, run_error=run_error,
     )
 
     if output is not None:
