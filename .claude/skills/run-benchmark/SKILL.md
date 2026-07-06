@@ -15,17 +15,25 @@ problem-reductions at a pinned tag), the agent stack (mini-swe-agent + LiteLLM),
 rule sources are all baked into one image. The host only needs a **container engine** and
 **git** — no host-side Rust/pred/Python install. Your job here is to drive:
 **detect engine → build image → configure `submission.env` → preflight → run**, ending at
-`out/submission.json`. Do **not** submit it — that's a manual GitHub PR (see
-`CONTRIBUTING.md`), out of scope for this skill.
+`out/submission.json`. **First ask the user's goal** — run/test locally, or submit to the
+official benchmark. Steps 1–5 are identical either way; only Step 6 differs, and only the
+submit path needs intake secrets.
 
 Drive this with the user's real output at each step; don't assume success. Run each command,
 read what it printed, and branch. When a step needs installing software or changing the
 system, run it **visibly** (one command at a time) so the user sees it — never silently.
 
-## Before you start — confirm the user has
+## Step 0 — Ask the goal, and confirm prerequisites
 
-- A **model API key** and its **price per 1M tokens** (input + output). Both are *required*;
-  a real run hard-fails without `PRICE_IN`/`PRICE_OUT` (there is no built-in price table).
+First ask: **run/test locally**, or **submit to the official benchmark**? This only changes
+Step 6 — don't ask for intake secrets unless they're submitting.
+
+Confirm the user has:
+
+- A **model API key** and its **price per 1M tokens** (input + output) — needed for *either*
+  goal, since running the agent calls the model. Both *required*; a real run hard-fails
+  without `PRICE_IN`/`PRICE_OUT` (there is no built-in price table).
+- **Only if submitting**: `PRB_SUBMIT_URL` + `PRB_API_KEY`, from the maintainer.
 - **git** and a **container engine** (checked next).
 
 ## Step 1 — Detect the engine
@@ -104,11 +112,20 @@ name / pricing). Decode table in `references/env-and-troubleshoot.md`. Do not pr
 The run needs network only to reach the model API. When it finishes, confirm
 `out/submission.json` exists and report the result (bugs found, spend). 
 
-## Step 6 — Hand back
+## Step 6 — Hand back, or submit
 
-Tell the user the file is at `out/submission.json` and that **submitting is a separate manual
-step**: copy it to `submissions/<handle>/<model>.json`, open a GitHub PR (details in
-`CONTRIBUTING.md`). Do not open the PR for them unless they ask.
+`out/submission.json` now exists; report the result (bugs found, spend). Then branch on the
+goal from Step 0:
+
+- **Run/test locally** → done. `out/submission.json` is the deliverable; no secrets, no upload.
+- **Submit to the official benchmark** → with `PRB_SUBMIT_URL` + `PRB_API_KEY` set, upload:
+  ```bash
+  python -m benchmark.submit --predictions out/submission.json
+  #   --dry-run   validate locally without sending
+  #   --test      scored + stored privately, kept off the public board
+  ```
+  The backend re-verifies every certificate with `pred`; only the aggregate becomes public.
+  Details in `CONTRIBUTING.md`. Don't submit unless the user asked.
 
 ## Per-engine flag matrix (reference)
 
