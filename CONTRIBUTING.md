@@ -1,25 +1,19 @@
 # Submitting a model run
 
 The benchmark gives every model the **same $20 API budget** and asks: how many distinct
-reduction-rule bugs (counterexamples) can it find? This document describes the end-to-end
-submission pipeline.
+reduction-rule bugs can it find?
 
 ```
   make run ─▶ submission.json ─▶ python -m benchmark.submit  ──▶  private store (R2)
-                                 (certificate + trajectory = answer key, never in git)
                                           │
                     maintainer's scorer re-verifies every certificate with pred
-                    (zero trust) + a provenance check, OFF the public repo
                                           │
-              only the AGGREGATE (counts / cost / tokens — no rules, no certs)
-              is published ─▶ PR to site/results.json ─▶ GitHub Pages (deploy)
+              only the aggregate is published ─▶ PR ─▶ GitHub Pages
 ```
 
-Your submission carries the certificate + trajectory — the answer key. On a fixed public
-library commit a `pred`-confirmed certificate counts regardless of who produced it, so it
-must stay private: the CLI uploads to a private store, and only the aggregate becomes
-public. Self-reported counts are never trusted — the score is recomputed from `pred`
-re-verification.
+Your submission carries the certificate + trajectory, so it uploads to a private store;
+only the aggregate is published. Self-reported counts are never trusted — the score is
+recomputed by `pred`.
 
 ## 1. Produce a `submission.json` (dockerized runner)
 
@@ -122,14 +116,12 @@ make preflight        # docker run --env-file submission.env <image> --preflight
 ```
 
 It checks the `pred` binary + version, that the library rules are present, and makes one
-minimal model call through the exact batch code path (validating credentials, endpoint,
-`model_kwargs`, and that pricing computes). It exits non-zero on any failure. (The runner's
-no-API wiring is covered by the pytest suite, not a separate command.)
+minimal model call through the exact batch code path. It exits non-zero on any failure.
 
 ## 2. Submit it (CLI upload)
 
-Submission is a **CLI upload** — there's no web form and the file never enters git (it
-carries the answer key). Get the endpoint URL + a token from the maintainer, then:
+Submission is a **CLI upload** — no web form, and the file never enters git. Get the
+endpoint URL + a token from the maintainer, then:
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
@@ -140,10 +132,9 @@ python -m benchmark.submit --predictions out/submission.json
 #   --test      scored + stored privately, but excluded from the public leaderboard
 ```
 
-The CLI validates the file against `submission.schema.json`, then uploads it over HTTPS to
-a private store (Cloudflare R2). The maintainer's scorer re-verifies every certificate with
-`pred` off-repo (see §3) and opens a PR that updates only the aggregate `site/results.json`;
-merging deploys the site to **GitHub Pages**. Your self-reported counts are never trusted.
+The CLI validates the file against `submission.schema.json`, then uploads it to a private
+store (Cloudflare R2). The maintainer's scorer re-verifies it with `pred` (see §3) and opens
+a PR that updates the aggregate `site/results.json`; merging deploys to **GitHub Pages**.
 See `intake/cloudflare-worker/README.md` for the intake setup.
 
 ## 3. Backend verification (automatic, zero-trust)

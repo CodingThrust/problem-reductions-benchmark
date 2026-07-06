@@ -297,7 +297,7 @@
       <h2>From your model to the leaderboard</h2>
       <p>Give a model the same <b>$20</b> and see how many bugs it can find in the library's problem
          reductions. You run it on your own model and key; we independently re-check every bug before
-         it scores — so the ranking is earned, not claimed.</p>
+         it scores.</p>
     </div>
 
     <div class="lane you">You run it</div>
@@ -305,7 +305,7 @@
       <div class="fnode"><div class="fdot">1</div><div class="fcard"><h4>Get the runner</h4><p>One Docker image: the solver (<code>pred</code>) plus the rule library, pinned to the benchmark version.</p></div></div>
       <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key and the price.</p></div></div>
       <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model probes each rule for a counterexample until the $20 runs out; each find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
-      <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>One <code>hf upload</code> of <code>submission.json</code> to the dataset, or open a pull request — no web form.</p></div></div>
+      <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>Upload <code>submission.json</code> with <code>benchmark.submit</code>. No web form.</p></div></div>
     </div>
 
     <div class="trust"><div class="ln"></div></div>
@@ -319,11 +319,11 @@
     <div class="defs">
       <div class="def">
         <h4>What counts as a bug</h4>
-        <p>Each reduction turns problem <i>A</i> into an equivalent problem <i>B</i>. It's buggy on an input when solving that input directly gives a different answer than solving it through the reduction — a fact anyone can re-check, so a wrong claim simply fails to reproduce.</p>
+        <p>Each reduction turns problem <i>A</i> into an equivalent problem <i>B</i>. It's buggy on an input when solving that input directly gives a different answer than solving it through the reduction.</p>
       </div>
       <div class="def">
         <h4>Why the $20 is fair</h4>
-        <p>Every model gets the same budget, measured from real token usage at the price you declare — not a gateway's dollar guess. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+        <p>Every model gets the same budget, measured from real token usage at the price you declare. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
       </div>
     </div>
   </section>
@@ -331,30 +331,29 @@
   <section class="tab" id="tab-submit">
     <div class="prose">
       <h2>Submit a run</h2>
-      <p>Run the dockerized runner at the fixed <b>$20</b> budget against problem-reductions <code>v0.6.0</code> — any provider, all config in one <code>submission.env</code> — then add the <code>submission.json</code> it produces to the submissions dataset. Every certificate is re-verified by <code>pred</code> on the backend before it counts.</p>
+      <p>Run the dockerized runner at the fixed <b>$20</b> budget against problem-reductions <code>v0.6.0</code>, then upload the <code>submission.json</code> it produces. Every certificate is re-verified by <code>pred</code> before it counts.</p>
     </div>
     <div class="steps" style="margin-top:18px">
       <div class="step"><div class="num">1</div><div>
         <h4>Produce <code>submission.json</code></h4>
-        <p>Configure once (model · key · price), validate with one tiny real call, then run.</p>
-        <pre class="cmd"><span class="c"># configure once (model · key · price — any provider), then:</span>
-cp submission.env.example submission.env
+        <p>Configure once, validate with one tiny real call, then run.</p>
+        <pre class="cmd">cp submission.env.example submission.env   <span class="c"># model · key · price</span>
 make preflight   <span class="c"># validate config with one tiny real call</span>
 make run         <span class="c"># → ./out/submission.json</span></pre>
       </div></div>
       <div class="step"><div class="num">2</div><div>
         <h4>Upload it</h4>
-        <p>It lands as <code>PENDING</code>; the backend picks it up and re-verifies every certificate.</p>
-        <pre class="cmd">hf upload isPANN/problem-reductions-submissions submission.json \
-  submissions/&lt;your-handle&gt;/&lt;model&gt;.json --repo-type dataset</pre>
+        <p>The backend picks it up and re-verifies every certificate.</p>
+        <pre class="cmd">export PRB_SUBMIT_URL=… PRB_API_KEY=…
+python -m benchmark.submit --predictions out/submission.json</pre>
       </div></div>
     </div>
-    <p class="note" style="margin-top:14px">…or open a pull request adding it to the GitHub repo. Self-reported counts are advisory — only confirmed, distinct-rule bugs are ranked.</p>
+    <p class="note" style="margin-top:14px">Self-reported counts are advisory; only confirmed distinct-rule bugs are ranked.</p>
   </section>
 
   <section class="tab" id="tab-about">
     <h3 class="about-h">About the benchmark</h3>
-    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library — each reduction is meant to translate one computational problem into an equivalent one. Every model gets the same <b>$20</b>, and every claimed bug is independently re-verified server-side, so the ranking reflects confirmed findings, not self-reported counts.</p>
+    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets the same <b>$20</b>, and every claimed bug is independently re-verified server-side.</p>
     <div class="panel" style="margin-top:26px">
       <h3>How to cite</h3>
       <pre class="cmd" style="margin-top:12px">@misc{TODO_citation_key,
@@ -541,7 +540,7 @@ function renderInspector(model){
     <div><dt>Bugs / Ktok</dt><dd>${row.effNum.toFixed(4)}</dd></div>
     <div><dt>Bugs / $</dt><dd>${row.spentEff.toFixed(3)}</dd></div>
   </dl>
-  <p class="note" style="margin-top:14px">Which rules each model found bugs in is not published — a confirmed certificate on this fixed commit counts regardless of provenance, so the buggy-rule identities are kept private to protect the benchmark.</p>`;
+  <p class="note" style="margin-top:14px">Buggy-rule identities are not published.</p>`;
   openDrawer();
 }
 

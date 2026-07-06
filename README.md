@@ -2,7 +2,7 @@
 
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
-The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a **private store** — the certificate + trajectory are the answer key, so they never enter the public repo. The maintainer re-verifies every certificate with `pred` off-repo, and only the **aggregate** (counts, no rules/certs) becomes public. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
+The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a private store; the maintainer re-verifies it with `pred` and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
 
 ## What this measures
 
@@ -46,7 +46,7 @@ class MyRunner(AgentRunner):
 
 Then pass it to `Scheduler` in `benchmark/scheduler.py`. See `MiniSweRunner` for a full example.
 
-A run is packaged as a `submission.json` (envelope around the per-rule rows, see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit` to a private store; the maintainer re-verifies every certificate with `pred` off-repo and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md).
+A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How to run locally
 
