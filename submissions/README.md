@@ -1,17 +1,12 @@
 # Submissions
 
-**Submissions are never committed to this public repo.** A submission carries the
-certificate + trajectory — the answer key. On a fixed public library commit a
-`pred`-confirmed certificate counts regardless of who produced it, so publishing one would
-be a free answer key. Everything under `submissions/*.json` is `.gitignore`d.
-
-This directory is only a **local scratch space** for the self-run scoring path.
+**Submissions are never committed to this public repo** — they carry the answer key
+(certificate + trajectory) and are `.gitignore`d. This directory is only local scratch for
+the self-run scoring path.
 
 ## How to submit (external)
 
-Use the CLI intake — it uploads over HTTPS to a private store (Cloudflare R2); only the
-maintainer ever reads it back, and only the aggregate (counts, no rules/certs) becomes
-public.
+Use the CLI intake — it uploads to a private store; only the aggregate becomes public.
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
@@ -26,8 +21,8 @@ the public leaderboard. See `intake/cloudflare-worker/README.md`.
 ## Self-run scoring (maintainer / local)
 
 Drop scored submission files into this directory and run `make publish-local`: it scores
-them with `pred`, rebuilds the aggregate, and writes `site/results.json` (guarded so no
-answer-key field leaks). The files here stay local — they never enter git.
+them with `pred`, rebuilds the aggregate, and writes `site/results.json`. The files here
+stay local; they never enter git.
 
 ## Notes
 
