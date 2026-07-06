@@ -59,6 +59,16 @@ agent:
     }
     CERTIFICATE_END
 
+    THEN, immediately, append the SAME block to the durable log so the bug survives even if
+    the run is cut off (budget/crash) — one command, append only, never overwrite:
+      cat >> {{certs_file}} <<'CERT'
+      CERTIFICATE_START
+      { ...the identical certificate JSON... }
+      CERTIFICATE_END
+      CERT
+    Do this every time, the moment you find a bug, before moving to the next rule. The file
+    is your safety net: anything written there is recoverable even if you never reach submit.
+
     Only `rule`, `source`, and the target type (from `bundle`) are required; `target_config`
     is optional. The verifier re-derives everything from `source` with pred and never trusts
     your claim — a wrong or non-minimal certificate is simply rejected, so report only what
@@ -74,9 +84,10 @@ agent:
 
     Enumerate the rules with `pred list --rules --json`, triage by suspicion, and test the
     round-trip correctness of each with pred. Emit a CERTIFICATE_START...CERTIFICATE_END
-    block for every bug — many are expected; do not stop after the first. You have a limited
-    budget — be efficient and spend it on the most suspicious rules first. When done, run:
-    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+    block for every bug — many are expected; do not stop after the first — AND append the
+    same block to {{certs_file}} as you go, so no bug is lost if the run stops early. You
+    have a limited budget — be efficient and spend it on the most suspicious rules first.
+    When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     </task>
 
   step_limit: 300

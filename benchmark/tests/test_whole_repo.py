@@ -49,6 +49,31 @@ class TestRowsFromCertificates:
         assert rows[0]["certificate"]["rule"] == "r1"
 
 
+class TestDurableCertRecovery:
+    def test_cert_only_in_disk_log_is_harvested(self, monkeypatch):
+        # run_repo_session harvests from the trajectory AND the durable {{certs_file}} log
+        # (deduped). A bug the agent wrote to disk but whose block never survived into the
+        # parsed messages must still count — this is what makes an early-stop crash-safe.
+        monkeypatch.setattr(run_mini, "verify",
+                            lambda c, r=None: Verdict(c.get("rule") == "r9", "ok"))
+        trajectory = [{"role": "assistant", "content": "chatter, no certificate here"}]
+        disk_log = {"content": "CERTIFICATE_START\n"
+                    + json.dumps({"rule": "r9", "source": {"n": 1}}) + "\nCERTIFICATE_END\n"}
+        rows = run_mini._rows_from_certificates(
+            run_mini.parse_all_certificates(trajectory + [disk_log]))
+        assert [r["rule"] for r in rows] == ["r9"]
+        assert rows[0]["result"] == "bug_found"
+
+    def test_trajectory_and_disk_log_dedup(self, monkeypatch):
+        # The same cert in both the trajectory and the disk log collapses to one row.
+        monkeypatch.setattr(run_mini, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}}
+        block = "CERTIFICATE_START\n" + json.dumps(cert) + "\nCERTIFICATE_END\n"
+        rows = run_mini._rows_from_certificates(run_mini.parse_all_certificates(
+            [{"role": "assistant", "content": block}, {"content": block}]))
+        assert len(rows) == 1
+
+
 class TestBuildSubmissionTotals:
     def test_explicit_session_totals_override_row_sums(self):
         # whole-repo rows carry 0 cost/tokens; the session totals come in as explicit args.

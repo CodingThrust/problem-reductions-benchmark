@@ -89,7 +89,13 @@ must keep `BUDGET_USD=20` and omit `MAX_RULES`.
 per rule with the budget split evenly; `whole-repo` runs ONE session over the whole library
 and lets the agent enumerate and triage the rules itself under a single budget. Both produce
 the same `out/submission.json` and are scored identically — set `AGENT_MODE=whole-repo` to try
-it. (`MAX_RULES` only applies to `per-rule`.)
+it. (`MAX_RULES` only applies to `per-rule`.) In `whole-repo`, the agent also writes each
+certificate to `TRAJECTORY_DIR/certs.txt` (default `/out`) as it finds it, and the trajectory
+is persisted every step — so an early-stop/crash still leaves the found bugs on disk.
+
+**Output is versioned.** `out/submission.json` is the stable "latest" pointer; every run ALSO
+writes a versioned archive `out/submission-<model>-<timestamp>.json` beside it, so runs don't
+overwrite each other.
 
 **Confirm the experiment parameters with the user — don't silently default them.** These
 shape the result and the spend, so state the resolved set and get an explicit OK before

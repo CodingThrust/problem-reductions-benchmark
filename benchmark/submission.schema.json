@@ -31,12 +31,32 @@
     "total_cost_usd": {
       "type": "number",
       "minimum": 0,
-      "description": "Total spend in USD (from LiteLLM cost tracking inside the runner)"
+      "description": "Total spend in USD. DERIVED from token_usage × the declared prices (see usage_totals + prices); ADVISORY — the backend re-meters it from those and never trusts this figure. Falls back to the runner's cost tracking only when no prices are declared."
     },
     "total_tokens_k": {
       "type": "number",
       "minimum": 0,
-      "description": "Total tokens used (in thousands)"
+      "description": "Total tokens used (in thousands); the sum of usage_totals / 1000."
+    },
+    "usage_totals": {
+      "type": "object",
+      "description": "Aggregate token usage split into the four billed buckets — the reproducible primitive the backend re-prices. Cost = input×price.input + output×price.output + cache_read×price.cache_read + cache_write×price.cache_write (USD per 1M).",
+      "properties": {
+        "input": {"type": "integer", "minimum": 0, "description": "Uncached prompt tokens"},
+        "output": {"type": "integer", "minimum": 0, "description": "Completion tokens (includes reasoning/thinking tokens, billed at the output rate)"},
+        "cache_read": {"type": "integer", "minimum": 0, "description": "Prompt tokens served from cache"},
+        "cache_write": {"type": "integer", "minimum": 0, "description": "Prompt tokens written to cache"}
+      }
+    },
+    "prices": {
+      "type": ["object", "null"],
+      "description": "Declared per-token price snapshot (USD per 1,000,000 tokens), dated by created_at. The submitter pays the bill so supplies the rate; the backend re-meters cost as usage_totals × prices. null when no price was declared (e.g. a FAKE-mode run).",
+      "properties": {
+        "input": {"type": "number", "minimum": 0},
+        "output": {"type": "number", "minimum": 0},
+        "cache_read": {"type": "number", "minimum": 0},
+        "cache_write": {"type": "number", "minimum": 0}
+      }
     },
     "rules_tested": {
       "type": "integer",
@@ -95,6 +115,7 @@
     "submitted_by": {"type": ["string", "null"], "description": "Submitter identity (HF username / contact), filled at submit time"},
     "runner_version": {"type": "string", "description": "Version tag of the runner image/script that produced this"},
     "pred_version": {"type": "string", "description": "Version of the pred binary used (must match the pinned tag; verified server-side)"},
+    "agent_mode": {"type": ["string", "null"], "description": "Agent harness mode that produced this run: 'per-rule' or 'whole-repo'."},
     "created_at": {"type": "string", "description": "ISO-8601 timestamp the run finished"},
     "notes": {"type": "string"},
     "placeholder": {"type": "boolean", "description": "True for demo/placeholder rows, never ranked"},

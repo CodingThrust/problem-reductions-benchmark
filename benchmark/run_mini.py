@@ -253,6 +253,7 @@ def run_repo_session(
     *,
     api_base: str | None = None,
     trajectory_dir: Path | None = None,
+    certs_path: Path | None = None,
     price: Price | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     step_limit: int | None = None,
@@ -266,6 +267,12 @@ def run_repo_session(
     per bug. Returns ``{"rows": [...], "cost": float, "tokens_k": float}`` — one result row
     per distinct emitted certificate, each re-verified with pred and carrying the shared
     session trajectory for provenance. Contrast with ``run_one`` (one isolated rule/session).
+
+    Durability: the agent is prompted to append each certificate to ``certs_path`` the moment
+    it finds it (the {{certs_file}} slot), so bugs survive an early stop; certificates are
+    harvested from BOTH the trajectory and that file (deduped). ``output_path`` is pointed at
+    ``trajectory_dir`` so mini-swe-agent persists the full trajectory to disk after every
+    step (crash-proof) rather than only at the end.
     """
     from minisweagent.agents.default import DefaultAgent
     from minisweagent.environments.local import LocalEnvironment
@@ -280,6 +287,21 @@ def run_repo_session(
     if step_limit is not None:
         agent_cfg["step_limit"] = step_limit
 
+    safe_model = model_name.replace("/", "_").replace(":", "_")
+    # Per-step trajectory persistence (mini-swe-agent saves config.output_path after every
+    # step): point it at trajectory_dir so a mid-run crash still leaves the latest trajectory
+    # on disk. Was previously unset (None → nothing written).
+    if trajectory_dir is not None:
+        Path(trajectory_dir).mkdir(parents=True, exist_ok=True)
+        agent_cfg["output_path"] = str(Path(trajectory_dir) / f"{safe_model}_whole-repo.step.json")
+
+    # The durable incremental cert log the prompt appends to — start each run from empty so it
+    # only ever holds THIS run's bugs.
+    if certs_path is not None:
+        certs_path = Path(certs_path)
+        certs_path.parent.mkdir(parents=True, exist_ok=True)
+        certs_path.write_text("", encoding="utf-8")
+
     agent = DefaultAgent(
         _build_model(model_name, api_base, max_tokens, price,
                      model_kwargs=model_kwargs, api_key=api_key),
@@ -291,19 +313,28 @@ def run_repo_session(
         "commit_hash": ctx.commit_hash[:7],
         "cost_limit": cost_limit,
         "strategy": strategy,
+        "certs_file": str(certs_path) if certs_path is not None else "/tmp/certs.txt",
     }
 
     agent.run(task="find-bugs")
-    cost, tokens_k, _usage = _session_cost(agent, price)
+    cost, tokens_k, usage = _session_cost(agent, price)
     trajectory = _trajectory(agent)
     if trajectory_dir is not None:
-        safe_model = model_name.replace("/", "_").replace(":", "_")
         save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_whole-repo.jsonl")
 
-    rows = _rows_from_certificates(parse_all_certificates(agent.messages))
+    # Harvest from the trajectory AND the durable incremental log (parse_all_certificates
+    # dedups by rule+source across both), so a cert the agent wrote to disk still counts even
+    # if it never made it into the parsed messages.
+    sources = list(agent.messages)
+    if certs_path is not None and certs_path.exists():
+        sources.append({"content": certs_path.read_text(encoding="utf-8")})
+    rows = _rows_from_certificates(parse_all_certificates(sources))
     # The whole session is ONE trajectory shared by every bug — return it once for the
-    # envelope (build_submission) instead of copying it onto each row.
-    return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory}
+    # envelope (build_submission) instead of copying it onto each row. ``usage`` is the
+    # session-level 4-bucket token total (per-rule rows carry their own; whole-repo rows
+    # don't), so the envelope can re-price it — see build_submission.
+    return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory,
+            "usage": usage}
 
 
 def _rows_from_certificates(certs: list[dict]) -> list[dict]:
