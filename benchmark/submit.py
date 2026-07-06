@@ -116,8 +116,7 @@ def submit(path: Path, url: str, api_key: str, *, dry_run: bool = False,
     bugs = sum(1 for r in sub.get("results", []) if r.get("result") == "bug_found")
     if dry_run:
         return {"status": "dry-run (not sent)", "model": sub.get("model"),
-                "claimed_bugs": bugs, "bytes": len(path.read_bytes()),
-                "test": bool(sub.get("test"))}
+                "claimed_bugs": bugs, "bytes": len(path.read_bytes())}
 
     if not url:
         raise ValueError("no endpoint URL — set PRB_SUBMIT_URL or pass --url")

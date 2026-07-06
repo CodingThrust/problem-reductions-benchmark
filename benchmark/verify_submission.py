@@ -119,7 +119,7 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         # Test submissions (end-to-end checks) are scored and stored privately like any
         # other, but aggregate_leaderboard() excludes them so they never reach the public
         # board. Carried through here so the flag survives in the private scored file.
-        "test": bool(submission.get("test", False)),
+        "test": bool(submission.get("test")),
         "bugs_found": bugs,
         "total_cost_usd": cost,
         "total_tokens_k": tokens_k,
