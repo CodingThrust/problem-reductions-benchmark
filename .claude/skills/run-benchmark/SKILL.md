@@ -85,6 +85,18 @@ PRICE_OUT=15.0               # USD / 1M output tokens — REQUIRED
 For a cheap smoke run (don't spend the full $20) add `MAX_RULES=1`. A **ranked** submission
 must keep `BUDGET_USD=20` and omit `MAX_RULES`.
 
+**Agent mode** (`AGENT_MODE`, default `per-rule`): `per-rule` runs one isolated agent session
+per rule with the budget split evenly; `whole-repo` runs ONE session over the whole library
+and lets the agent enumerate and triage the rules itself under a single budget. Both produce
+the same `out/submission.json` and are scored identically — set `AGENT_MODE=whole-repo` to try
+it. (`MAX_RULES` only applies to `per-rule`.)
+
+**Confirm the experiment parameters with the user — don't silently default them.** These
+shape the result and the spend, so state the resolved set and get an explicit OK before
+running: **mode** (`AGENT_MODE`), **budget** (a full ranked run at `BUDGET_USD=20`, or a
+cheap smoke run via `MAX_RULES=1` / a smaller budget), and — only if they care —
+`PER_RULE_BUDGET` and `MAX_TOKENS`. Ranked runs require `BUDGET_USD=20` and no `MAX_RULES`.
+
 ## Step 4 — Preflight (one tiny real API call, ~a fraction of a cent)
 
 Always run this before the full run; it validates key/endpoint/price + pred/rules through the
@@ -98,6 +110,9 @@ the detail and fix it — the `model call` line carries the real error (auth / e
 name / pricing). Decode table in `references/env-and-troubleshoot.md`. Do not proceed on a FAIL.
 
 ## Step 5 — Full run → out/submission.json
+
+**Gate**: a full run spends real money and takes a while. Restate the resolved parameters
+(model, mode, budget, any smoke caps) and get an explicit OK before you launch it.
 
 - **docker**: `make run`
 - **podman/raw**: use the `RUN_FLAGS` from Step 1, e.g.

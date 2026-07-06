@@ -50,20 +50,25 @@ def build_submission(
     created_at: str | None = None,
     submitted_by: str | None = None,
     total_cost_usd: float | None = None,
+    total_tokens_k: float | None = None,
+    trajectory: list[dict] | None = None,
     pred_version: str = "",
 ) -> dict:
-    """Assemble the submission envelope from the scheduler's per-rule result rows.
+    """Assemble the submission envelope from the runner's result rows.
 
-    ``rules_tested`` counts only rules actually attempted (skipped_budget rows don't
-    count as "reached"); ``bugs_found`` is distinct rules with a confirmed bug.
-    ``total_cost_usd`` defaults to the sum of row costs; pass the scheduler's tracked
-    spend to get the budget-faithful figure (the cap is enforced there, not per-row).
+    ``rules_tested`` is the number of DISTINCT rules with a result (skipped_budget rows
+    don't count as "reached"). For per-rule that is the rules attempted; for whole-repo it
+    is the distinct rules the agent emitted a certificate for — a floor, since rules the
+    agent probed but found clean aren't represented as rows. ``bugs_found`` is distinct
+    rules with a confirmed bug. ``total_cost_usd`` / ``total_tokens_k`` default to the sum
+    of row values; pass explicit session totals (per-rule: the scheduler's tracked spend;
+    whole-repo: the one session's cost/tokens, which don't live on individual rows).
     """
     attempted = [r for r in rows if r.get("result") != "skipped_budget"]
     bugs = count_bugs(rows)
     cost = total_cost_usd if total_cost_usd is not None else sum(r.get("cost", 0.0) for r in rows)
-    tokens_k = sum(r.get("tokens_k", 0.0) for r in rows)
-    return {
+    tokens_k = total_tokens_k if total_tokens_k is not None else sum(r.get("tokens_k", 0.0) for r in rows)
+    envelope = {
         "schema_version": SCHEMA_VERSION,
         "model": model,
         "library_commit": library_commit,
@@ -73,13 +78,17 @@ def build_submission(
         "total_tokens_k": round(tokens_k, 2),
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
         "efficiency_bugs_per_dollar": round(bugs / cost, 4) if cost else 0,
-        "rules_tested": len(attempted),
+        "rules_tested": len({r.get("rule") for r in attempted}),
         "results": rows,
         "runner_version": runner_version,
         "pred_version": pred_version,
         "created_at": created_at,
         "submitted_by": submitted_by,
     }
+    # whole-repo: the one shared session log, stored once here (not copied onto each row).
+    if trajectory is not None:
+        envelope["trajectory"] = trajectory
+    return envelope
 
 
 def run(
@@ -104,15 +113,20 @@ def run(
     strategy: str | None = None,
     model_kwargs: dict | None = None,
     api_key: str | None = None,
+    mode: str = "per-rule",
 ) -> dict:
     """Run the full budgeted session for one model and return the submission dict.
+
+    ``mode`` selects the runner: ``per-rule`` (default) schedules one isolated agent session
+    per rule under a shared budget; ``whole-repo`` runs ONE session over the whole library —
+    the agent enumerates and triages the rules itself and emits a certificate per bug.
 
     ``price`` is the submitter's per-token rate (benchmark.cost.Price); with it, spend is
     recomputed from token usage so the budget is a hard cap. ``safety_margin`` is held back
     from the budget so the boundary-crossing call still lands under it.
 
     In ``fake`` mode no API key or pred binary is needed (FakeRunner) — used by tests
-    and for smoke-running the container wiring.
+    and for smoke-running the container wiring; ``fake`` always uses the per-rule path.
     """
     repo = Path(repo_dir)
     commit = library_commit or pinned_commit()
@@ -129,35 +143,52 @@ def run(
         pred_ver = verify_pred_version(pred_binary)  # fail fast if pred != pinned version
         ctx = EnvContext(repo_path=repo, pred_binary=pred_binary, commit_hash=commit,
                          pred_version=pred_ver)
+        # Only the per-rule path uses this, but the constructor just stores kwargs (no I/O),
+        # so building it unconditionally keeps `runner` assigned in exactly one place.
         runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens,
                                config_path=config_path, strategy=strategy,
                                model_kwargs=model_kwargs, api_key=api_key)
 
-    rules = list_rules(str(repo))
-    if max_rules is not None:
-        rules = rules[:max_rules]
-
-    with tempfile.TemporaryDirectory() as tmp:
-        scheduler = Scheduler(
-            runner=runner,
-            models=[model],
-            rules=rules,
-            total_budget=budget,
-            per_rule_budget=per_rule_budget,
-            results_dir=Path(tmp) / "results",
-            checkpoint_path=Path(tmp) / "checkpoint.json",
-            ctx=ctx,
-            resume=False,
-            parallelism=1,
-            safety_margin=safety_margin,
+    if mode == "whole-repo" and not fake:
+        from benchmark.run_mini import run_repo_session
+        session = run_repo_session(
+            model, ctx, cost_limit=max(budget - safety_margin, 0.0),
+            api_base=api_base, price=price, max_tokens=max_tokens,
+            config_path=config_path, strategy=strategy,
+            model_kwargs=model_kwargs, api_key=api_key,
         )
-        completed = scheduler.run_all()
-        spent = scheduler._spent.get(model)
+        rows, total_cost, total_tokens = session["rows"], session["cost"], session["tokens_k"]
+        session_trajectory = session["trajectory"]
+    else:
+        rules = list_rules(str(repo))
+        if max_rules is not None:
+            rules = rules[:max_rules]
 
-    rows = completed[model]
+        with tempfile.TemporaryDirectory() as tmp:
+            scheduler = Scheduler(
+                runner=runner,
+                models=[model],
+                rules=rules,
+                total_budget=budget,
+                per_rule_budget=per_rule_budget,
+                results_dir=Path(tmp) / "results",
+                checkpoint_path=Path(tmp) / "checkpoint.json",
+                ctx=ctx,
+                resume=False,
+                parallelism=1,
+                safety_margin=safety_margin,
+            )
+            completed = scheduler.run_all()
+            spent = scheduler._spent.get(model)
+        # per-rule totals: cost is the scheduler's tracked spend; tokens sum from the rows.
+        # Per-rule rows carry their own trajectories, so there is no envelope-level one.
+        rows, total_cost, total_tokens = completed[model], spent, None
+        session_trajectory = None
+
     sub = build_submission(
         model, rows, budget_cap=budget, library_commit=commit,
-        created_at=created_at, submitted_by=submitted_by, total_cost_usd=spent,
+        created_at=created_at, submitted_by=submitted_by,
+        total_cost_usd=total_cost, total_tokens_k=total_tokens, trajectory=session_trajectory,
         pred_version=getattr(ctx, "pred_version", ""),
     )
 
@@ -232,6 +263,11 @@ def main() -> None:
                              "checks, then exit (run this before the full batch).")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
                         help="No API/pred — FakeRunner wiring run (mostly covered by tests)")
+    parser.add_argument("--mode", choices=("per-rule", "whole-repo"),
+                        default=_env("AGENT_MODE", "per-rule"),
+                        help="per-rule: one isolated agent session per rule (default). "
+                             "whole-repo: ONE session over the whole library, the agent picks "
+                             "which rules to probe (env AGENT_MODE).")
     args = parser.parse_args()
 
     if not args.model:
@@ -283,8 +319,9 @@ def main() -> None:
     import datetime
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    detail = f"per-rule ${args.per_rule:.2f}" if args.mode == "per-rule" else "whole-repo"
     print(f"Running {args.model} at ${args.budget:.0f} budget "
-          f"(per-rule ${args.per_rule:.2f}){' [FAKE]' if args.fake else ''}...")
+          f"({detail}){' [FAKE]' if args.fake else ''}...")
     sub = run(
         args.model,
         args.repo_dir,
@@ -303,6 +340,7 @@ def main() -> None:
         strategy=strategy,
         model_kwargs=model_kwargs,
         api_key=args.api_key,
+        mode=args.mode,
     )
     print(f"\n{sub['bugs_found']} claimed bugs | ${sub['total_cost_usd']:.4f} | "
           f"{sub['rules_tested']} rules attempted")

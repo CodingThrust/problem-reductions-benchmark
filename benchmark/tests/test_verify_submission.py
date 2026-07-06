@@ -90,6 +90,39 @@ class TestScoreSubmission:
         scored, _ = vs.score_submission(sub)
         assert scored["bugs_found"] == 0
 
+    def test_multi_cert_trajectory_provenance(self, monkeypatch):
+        # A whole-repo session emits MANY certificates in one shared trajectory. Each bug row
+        # must pass provenance against ANY matching block — not just the last one.
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        c1 = {"rule": "r1", "violation": "solve_mismatch", "source": {"n": 1}, "bundle": {}}
+        c2 = {"rule": "r2", "violation": "solve_mismatch", "source": {"n": 2}, "bundle": {}}
+        shared = _traj(c1) + _traj(c2)  # both certs in the one session trajectory
+        sub = _submission([_bug_row(c1, trajectory=shared),
+                           _bug_row(c2, trajectory=shared)])
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 2  # both counted, even though c1 is not the last block
+        assert all(r["result"] == "bug_found" for r in scored["results"])
+
+    def test_envelope_trajectory_provenance(self, monkeypatch):
+        # whole-repo: rows carry NO trajectory; the shared session log is on the envelope,
+        # parsed once. Each bug's cert is matched against it.
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        c1 = {"rule": "r1", "violation": "solve_mismatch", "source": {"n": 1}, "bundle": {}}
+        c2 = {"rule": "r2", "violation": "solve_mismatch", "source": {"n": 2}, "bundle": {}}
+        rows = [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c1},
+                {"rule": "r2", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c2}]
+        sub = _submission(rows, trajectory=_traj(c1) + _traj(c2))
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 2
+
+    def test_no_trajectory_anywhere_not_counted(self, monkeypatch):
+        # A cert with neither a row trajectory nor an envelope trajectory fails provenance.
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        c1 = {"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}
+        rows = [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c1}]
+        scored, _ = vs.score_submission(_submission(rows))
+        assert scored["bugs_found"] == 0
+
     def test_distinct_rule_dedup(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         cert = lambda rule, v: {"rule": rule, "violation": v, "source": {"r": rule}, "bundle": {}}

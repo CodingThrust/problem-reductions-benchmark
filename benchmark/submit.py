@@ -43,9 +43,10 @@ def load_submission(path: Path) -> dict:
 def validate_submission(sub: dict) -> list[str]:
     """Client-side courtesy check. Returns a list of problems ([] == ok).
 
-    Mirrors submission.schema.json's hard requirement: a self-reported ``bug_found`` row
-    must carry both a ``certificate`` and a ``trajectory`` (provenance) — else the backend
-    would reject it, so catch it here before spending a submission.
+    Mirrors submission.schema.json's requirement: a self-reported ``bug_found`` row must
+    carry a ``certificate``, plus a provenance ``trajectory`` — on the row (per-rule) or once
+    at the envelope level (whole-repo). Else the backend rejects it, so catch it here before
+    spending a submission.
     """
     problems: list[str] = []
     if not isinstance(sub, dict):
@@ -57,6 +58,7 @@ def validate_submission(sub: dict) -> list[str]:
     if not isinstance(results, list):
         problems.append("results must be a list")
         return problems
+    envelope_traj = bool(sub.get("trajectory"))
     for i, row in enumerate(results):
         if not isinstance(row, dict):
             problems.append(f"results[{i}] is not an object")
@@ -65,9 +67,9 @@ def validate_submission(sub: dict) -> list[str]:
             rule = row.get("rule", "?")
             if not row.get("certificate"):
                 problems.append(f"results[{i}] ({rule}): bug_found row has no certificate")
-            if not row.get("trajectory"):
+            if not row.get("trajectory") and not envelope_traj:
                 problems.append(f"results[{i}] ({rule}): bug_found row has no trajectory "
-                                "(required as provenance)")
+                                "(required as provenance — on the row or the envelope)")
     return problems
 
 

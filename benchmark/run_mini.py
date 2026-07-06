@@ -7,6 +7,7 @@ emits counterexample certificates. Independent checker validates each certificat
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,7 @@ from benchmark.env_setup import setup_env
 from benchmark.verify import count_bugs, verify
 
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
+REPO_CONFIG_FILE = Path(__file__).parent / "config_repo.yaml"
 SKIP_RULES = {"mod", "traits", "graph_helpers", "analysis", "cost", "registry", "graph"}
 
 # Rough average cost per 1K tokens (used as fallback when model doesn't report usage)
@@ -31,18 +33,37 @@ def list_rules(repo_dir: str) -> list[str]:
     return [f.stem for f in sorted(rules_dir.glob("*.rs")) if f.stem not in SKIP_RULES]
 
 
+_CERT_RE = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
+
+
 def parse_certificate(messages: list) -> dict | None:
-    """Extract structured certificate JSON from agent message history."""
-    import re
+    """Extract the last structured certificate JSON from agent message history."""
     for msg in reversed(messages):
-        content = msg.get("content", "")
-        block = re.search(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", content, re.DOTALL)
+        block = _CERT_RE.search(msg.get("content", "") or "")
         if block:
             try:
                 return json.loads(block.group(1).strip())
             except json.JSONDecodeError:
                 return None
     return None
+
+
+def parse_all_certificates(messages: list) -> list[dict]:
+    """Every certificate block in the trajectory (a whole-repo run emits many), de-duplicated
+    by (rule, source) in first-seen order. Unparseable blocks are skipped."""
+    seen, out = set(), []
+    for msg in messages:
+        for block in _CERT_RE.finditer(msg.get("content", "") or ""):
+            try:
+                cert = json.loads(block.group(1).strip())
+            except json.JSONDecodeError:
+                continue
+            key = (cert.get("rule"), json.dumps(cert.get("source"), sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(cert)
+    return out
 
 
 def extract_total_tokens(messages: list) -> int:
@@ -60,6 +81,22 @@ def save_trajectory(messages: list, path: Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for msg in messages:
             f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
+
+
+def _session_cost(agent, price):
+    """Authoritative session spend from the trajectory. ``agent.cost`` is already our
+    token×price figure (see _build_model); cross-check against a fresh recompute and take
+    the max — never under-count for the budget guard. Returns (cost, tokens_k, usage)."""
+    usage = extract_usage(agent.messages)
+    cost = max(agent.cost, price.cost(usage) if price is not None else 0.0)
+    total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
+    tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
+    return cost, tokens_k, usage
+
+
+def _trajectory(agent) -> list[dict]:
+    """The agent's own message history — provenance proof carried on cert-bearing rows."""
+    return [{"role": m.get("role", ""), "content": m.get("content", "")} for m in agent.messages]
 
 
 def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None,
@@ -148,23 +185,11 @@ def run_one(
     cert = None
     try:
         agent.run(task=rule_name)
-        # agent.cost is already our token×price figure (see _build_model), which is what
-        # mini-swe-agent's per-step cost_limit enforced. Cross-check it against a fresh
-        # recompute over the whole trajectory and take the max — never under-count.
-        usage = extract_usage(agent.messages)
-        agent_cost = agent.cost
-        recomputed = price.cost(usage) if price is not None else 0.0
-        cost = max(agent_cost, recomputed)
-        total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
-        tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
+        cost, tokens_k, usage = _session_cost(agent, price)
         usage_row = {"input": usage.input_tokens, "output": usage.output_tokens,
                      "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
-                     "accounted_cost_usd": round(agent_cost, 6)}
-        # Provenance record: the agent's own message history. The backend requires this on a
-        # bug_found row and checks the certificate was emitted here (not pasted from a public
-        # answer key), so we carry it on every cert-bearing row.
-        trajectory = [{"role": m.get("role", ""), "content": m.get("content", "")}
-                      for m in agent.messages]
+                     "accounted_cost_usd": round(agent.cost, 6)}
+        trajectory = _trajectory(agent)
         cert = parse_certificate(agent.messages)
         if trajectory_dir is not None:
             safe_model = model_name.replace("/", "_").replace(":", "_")
@@ -219,6 +244,88 @@ def run_one(
         "verify_details": verdict.details,
         "usage": usage_row,
     }
+
+
+def run_repo_session(
+    model_name: str,
+    ctx: EnvContext,
+    cost_limit: float,
+    *,
+    api_base: str | None = None,
+    trajectory_dir: Path | None = None,
+    price: Price | None = None,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    step_limit: int | None = None,
+    config_path: str | Path | None = None,
+    strategy: str | None = None,
+    model_kwargs: dict | None = None,
+    api_key: str | None = None,
+) -> dict:
+    """One WHOLE-REPO bug-hunting session: the agent gets the entire library + pred and the
+    full budget as its ``cost_limit``, chooses which rules to probe, and emits a certificate
+    per bug. Returns ``{"rows": [...], "cost": float, "tokens_k": float}`` — one result row
+    per distinct emitted certificate, each re-verified with pred and carrying the shared
+    session trajectory for provenance. Contrast with ``run_one`` (one isolated rule/session).
+    """
+    from minisweagent.agents.default import DefaultAgent
+    from minisweagent.environments.local import LocalEnvironment
+
+    cfg_file = Path(config_path) if config_path else REPO_CONFIG_FILE
+    config = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    if strategy is None:
+        strat_file = os.environ.get("AGENT_STRATEGY_FILE")
+        strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
+    agent_cfg = config.get("agent", {})
+    agent_cfg["cost_limit"] = cost_limit
+    if step_limit is not None:
+        agent_cfg["step_limit"] = step_limit
+
+    agent = DefaultAgent(
+        _build_model(model_name, api_base, max_tokens, price,
+                     model_kwargs=model_kwargs, api_key=api_key),
+        LocalEnvironment(),
+        **agent_cfg,
+    )
+    agent.extra_template_vars = {
+        "repo_dir": str(ctx.repo_path),
+        "commit_hash": ctx.commit_hash[:7],
+        "cost_limit": cost_limit,
+        "strategy": strategy,
+    }
+
+    agent.run(task="find-bugs")
+    cost, tokens_k, _usage = _session_cost(agent, price)
+    trajectory = _trajectory(agent)
+    if trajectory_dir is not None:
+        safe_model = model_name.replace("/", "_").replace(":", "_")
+        save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_whole-repo.jsonl")
+
+    rows = _rows_from_certificates(parse_all_certificates(agent.messages))
+    # The whole session is ONE trajectory shared by every bug — return it once for the
+    # envelope (build_submission) instead of copying it onto each row.
+    return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory}
+
+
+def _rows_from_certificates(certs: list[dict]) -> list[dict]:
+    """Verify each certificate with pred and build one result row per cert. bug_found when
+    pred confirms, else rejected. No per-row trajectory — a whole-repo run's provenance
+    trajectory lives once at the envelope level (submission["trajectory"])."""
+    rows = []
+    for cert in certs:
+        verdict = verify(cert)
+        row = {
+            "rule": cert.get("rule"),
+            "result": "bug_found" if verdict.accepted else "rejected",
+            "cost": 0.0,        # session cost/tokens live on the submission envelope, not per row
+            "tokens_k": 0.0,
+            "certificate": cert,
+        }
+        if verdict.accepted:
+            row["verify_details"] = verdict.details
+        else:
+            row["reject_reason"] = verdict.reason
+        rows.append(row)
+    return rows
 
 
 def main() -> None:
