@@ -7,9 +7,10 @@ independently re-verified by `pred` (one rule = one bug).
 
 `index.html` reads two data files served alongside it:
 
-- `results.json` — the scored leaderboard (rebuilt from `submissions/` on each merge)
+- `results.json` — the scored aggregate leaderboard (refreshed by `score-from-r2.yml`,
+  which re-verifies submissions off-repo and opens a PR; merging deploys the site)
 - `tasks.json` — the rule set shown on the Tasks tab
 
 Preview locally with `make serve` (the data files are loaded via `fetch`, so open it over
-HTTP, not `file://`). The published `results.json` is regenerated on every merge; the copy
-checked into the repo is a seed for local preview.
+HTTP, not `file://`). `results.json` holds only aggregate counts — never certificates or
+buggy-rule identities.

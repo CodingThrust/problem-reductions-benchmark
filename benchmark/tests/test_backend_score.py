@@ -139,52 +139,20 @@ class TestProcessLocal:
         monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
         bs.main()  # returns normally (no SystemExit) → exit 0
 
-
-class TestWebhook:
-    def _payload(self, scope="repo.content", repo="org/subs", rtype="dataset"):
-        return {"event": {"action": "update", "scope": scope},
-                "repo": {"type": rtype, "name": repo},
-                "webhook": {"id": "w", "version": 3}}
-
-    def test_parse_payload(self):
-        info = bs.parse_webhook_payload(self._payload())
-        assert info == {"repo_id": "org/subs", "repo_type": "dataset",
-                        "action": "update", "scope": "repo.content"}
-
-    def test_content_change_triggers_scoring(self, monkeypatch):
-        called = {}
-        monkeypatch.setattr(bs, "process_hf",
-                            lambda subs, results, repo_dir=None, token=None:
-                            called.update(subs=subs, results=results) or [{"status": "FINISHED"}])
-        out = bs.process_webhook(self._payload(repo="org/subs"),
-                                 results_repo="org/results")
-        assert out == [{"status": "FINISHED"}]
-        assert called == {"subs": "org/subs", "results": "org/results"}
-
-    def test_discussion_event_ignored(self, monkeypatch):
-        monkeypatch.setattr(bs, "process_hf",
-                            lambda *a, **k: pytest.fail("should not score on discussion"))
-        assert bs.process_webhook(self._payload(scope="discussion"),
-                                  results_repo="org/results") == []
-
-    def test_secret_mismatch_raises(self):
-        with pytest.raises(PermissionError):
-            bs.process_webhook(self._payload(), results_repo="org/results",
-                               expected_secret="s3cret", provided_secret="wrong")
-
-    def test_missing_results_repo_raises(self, monkeypatch):
-        monkeypatch.delenv("RESULTS_REPO", raising=False)
-        with pytest.raises(RuntimeError):
-            bs.process_webhook(self._payload(), results_repo=None)
-
-    def test_payload_from_env(self, monkeypatch):
-        monkeypatch.setenv("WEBHOOK_PAYLOAD", json.dumps(self._payload(repo="org/s")))
-        monkeypatch.setenv("RESULTS_REPO", "org/r")
-        monkeypatch.setattr(bs, "process_hf",
-                            lambda subs, results, repo_dir=None, token=None:
-                            [{"subs": subs, "results": results}])
-        out = bs.process_webhook()
-        assert out == [{"subs": "org/s", "results": "org/r"}]
+    def test_test_submission_excluded_from_board(self, tmp_path):
+        # A submission marked test=true is scored + stored, but kept off the public board.
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(subs, "prod.json", [{"rule": "R", "result": "no_bug"}],
+                          model="anthropic/prod")
+        _write_submission(subs, "t.json", [{"rule": "R", "result": "no_bug"}],
+                          model="anthropic/tester", test=True)
+        summary = bs.process_local(str(subs), str(results))
+        assert {s["status"] for s in summary} == {"FINISHED"}  # both scored
+        board = json.loads((results / "leaderboard.json").read_text())
+        models = {e["model"] for e in board}
+        assert "anthropic/prod" in models
+        assert "anthropic/tester" not in models  # test entry excluded
 
 
 @pytest.mark.integration

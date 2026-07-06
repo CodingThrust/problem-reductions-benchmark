@@ -5,23 +5,21 @@ reduction-rule bugs (counterexamples) can it find? This document describes the e
 submission pipeline.
 
 ```
-  make run ─▶ submission.json ─▶ open a GitHub PR  (submissions/<handle>/<model>.json)
+  make run ─▶ submission.json ─▶ python -m benchmark.submit  ──▶  private store (R2)
+                                 (certificate + trajectory = answer key, never in git)
                                           │
-                       PR check: schema-validate (auto, no pred)
+                    maintainer's scorer re-verifies every certificate with pred
+                    (zero trust) + a provenance check, OFF the public repo
                                           │
-                 maintainer APPROVES the scoring run   ← trust boundary
-                                          │
-            pred re-verifies on the PR (zero trust) → verified result shown
-                                          │
-                 result is a REQUIRED check → maintainer MERGES
-                                          │
-              on merge: rebuild leaderboard.json ─▶ GitHub Pages (deploy)
+              only the AGGREGATE (counts / cost / tokens — no rules, no certs)
+              is published ─▶ PR to site/results.json ─▶ GitHub Pages (deploy)
 ```
 
-The verified result is produced **on the PR, before merge** — you never merge a number you
-haven't seen. Scoring (running `pred` on submitted input) only runs after a maintainer
-approves it, and the result is a required check, so a PR can't be merged without one.
-Self-reported counts are never trusted. Merge only publishes the already-verified result.
+Your submission carries the certificate + trajectory — the answer key. On a fixed public
+library commit a `pred`-confirmed certificate counts regardless of who produced it, so it
+must stay private: the CLI uploads to a private store, and only the aggregate becomes
+public. Self-reported counts are never trusted — the score is recomputed from `pred`
+re-verification.
 
 ## 1. Produce a `submission.json` (dockerized runner)
 
@@ -128,34 +126,30 @@ minimal model call through the exact batch code path (validating credentials, en
 `model_kwargs`, and that pricing computes). It exits non-zero on any failure. (The runner's
 no-API wiring is covered by the pytest suite, not a separate command.)
 
-## 2. Submit it (GitHub pull request)
+## 2. Submit it (CLI upload)
 
-Submission is a **pull request** — there's no web upload form and no auto-running upload.
-Add the file the runner produced as `submissions/<your-handle>/<model>.json` and open a PR:
+Submission is a **CLI upload** — there's no web form and the file never enters git (it
+carries the answer key). Get the endpoint URL + a token from the maintainer, then:
 
 ```bash
-# in your fork of the benchmark repo
-mkdir -p submissions/<your-handle>
-cp out/submission.json submissions/<your-handle>/<model>.json
-git add submissions/<your-handle>/<model>.json
-git commit -m "submit: <model>"
-git push   # then open the PR on GitHub
+export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
+export PRB_API_KEY=<token>                 # from the maintainer
+
+python -m benchmark.submit --predictions out/submission.json
+#   --dry-run   validate locally, don't send
+#   --test      scored + stored privately, but excluded from the public leaderboard
 ```
 
-On the PR, an automated check validates the file against `submission.schema.json`
-(structure only). Then a **maintainer approves the scoring run** (running `pred` on
-submitted input is the trust boundary), CI re-verifies every certificate with `pred`, and
-the **verified result appears on the PR as a required check** — so you never merge a number
-nobody has seen. After a maintainer merges, CI rebuilds the leaderboard and publishes the
-static site to **GitHub Pages**. See `submissions/README.md`.
+The CLI validates the file against `submission.schema.json`, then uploads it over HTTPS to
+a private store (Cloudflare R2). The maintainer's scorer re-verifies every certificate with
+`pred` off-repo (see §3) and opens a PR that updates only the aggregate `site/results.json`;
+merging deploys the site to **GitHub Pages**. Your self-reported counts are never trusted.
+See `intake/cloudflare-worker/README.md` for the intake setup.
 
 ## 3. Backend verification (automatic, zero-trust)
 
 `benchmark/backend_score.py` is the queue worker. It runs inside the same Docker image
-(which has `pred`):
-
-This is exactly what `.github/workflows/publish-on-merge.yml` runs after a submission PR
-merges — you can reproduce the leaderboard locally:
+(which has `pred`). You can reproduce the scoring locally on a directory of submissions:
 
 ```bash
 # Local directory of submissions → scored results + leaderboard.json:
@@ -167,15 +161,16 @@ For each `PENDING` submission it:
 1. flips status `PENDING → RUNNING`,
 2. re-runs `benchmark/verify_submission.py` — which calls `verify()` on **every**
    certificate and re-derives the bundle from `pred`, so a fabricated or tampered
-   counterexample is rejected,
+   counterexample is rejected, and checks the certificate is reproduced in the model's own
+   trajectory (provenance),
 3. recomputes `bugs_found` as **distinct rules with a confirmed bug** (many certificates
    for one rule collapse to one — no count padding),
 4. writes the scored result + a ranked `leaderboard.json`, and sets status
    `FINISHED` (or `FAILED` with a reason).
 
-In production this runs unattended inside GitHub Actions: `score-pr.yml` verifies on the PR
-and `publish-on-merge.yml` rebuilds and deploys the leaderboard on merge — no external
-service to host.
+In production this runs unattended inside GitHub Actions: `score-from-r2.yml` pulls pending
+submissions from private R2, re-verifies them, and opens a PR with the refreshed aggregate;
+`publish-on-merge.yml` deploys the site when that PR merges — no external service to host.
 
 ## Certificate format
 

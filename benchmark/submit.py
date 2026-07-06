@@ -99,21 +99,25 @@ def _maybe_json(text: str):
 
 
 def submit(path: Path, url: str, api_key: str, *, dry_run: bool = False,
-           timeout: float = 60.0) -> dict:
+           timeout: float = 60.0, mark_test: bool = False) -> dict:
     """Validate and (unless dry_run) upload a submission. Returns a result dict.
 
     Raises ValueError on local validation failure or a non-2xx endpoint response, so the
-    CLI can exit non-zero.
+    CLI can exit non-zero. ``mark_test`` stamps ``test: true`` so the backend scores and
+    stores the submission privately but excludes it from the public leaderboard.
     """
     sub = load_submission(path)
     problems = validate_submission(sub)
     if problems:
         raise ValueError("submission failed local validation:\n  - " + "\n  - ".join(problems))
+    if mark_test:
+        sub["test"] = True
 
     bugs = sum(1 for r in sub.get("results", []) if r.get("result") == "bug_found")
     if dry_run:
         return {"status": "dry-run (not sent)", "model": sub.get("model"),
-                "claimed_bugs": bugs, "bytes": len(path.read_bytes())}
+                "claimed_bugs": bugs, "bytes": len(path.read_bytes()),
+                "test": bool(sub.get("test"))}
 
     if not url:
         raise ValueError("no endpoint URL — set PRB_SUBMIT_URL or pass --url")
@@ -139,6 +143,9 @@ def main() -> None:
                         help="Bearer token for the endpoint (env PRB_API_KEY)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate the file locally and report what would be sent; no upload")
+    parser.add_argument("--test", action="store_true",
+                        help="Mark as a TEST submission: scored + stored privately but kept "
+                             "out of the public leaderboard (for end-to-end checks)")
     parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout seconds")
     args = parser.parse_args()
 
@@ -147,17 +154,19 @@ def main() -> None:
         parser.error(f"no such file: {path}")
 
     try:
-        result = submit(path, args.url, args.api_key, dry_run=args.dry_run, timeout=args.timeout)
+        result = submit(path, args.url, args.api_key, dry_run=args.dry_run,
+                        timeout=args.timeout, mark_test=args.test)
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(f"✗ {e}", file=sys.stderr)
         raise SystemExit(1)
 
+    tag = " [TEST — excluded from public board]" if args.test else ""
     if args.dry_run:
         print(f"✓ valid — {result['model']}: {result['claimed_bugs']} claimed bug(s), "
-              f"{result['bytes']} bytes (dry-run, not sent)")
+              f"{result['bytes']} bytes (dry-run, not sent){tag}")
     else:
         sid = result.get("submission_id", "(no id returned)")
-        print(f"✓ submitted — id {sid} ({result.get('status', 'accepted')})")
+        print(f"✓ submitted — id {sid} ({result.get('status', 'accepted')}){tag}")
         print("The backend re-verifies every certificate with pred; only the aggregate "
               "(counts, no rules/certs) becomes public.")
 

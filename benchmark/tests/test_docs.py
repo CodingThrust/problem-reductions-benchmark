@@ -46,6 +46,7 @@ class TestGuide:
         t = _text(GUIDE)
         assert "source" in t and "bundle" in t and "violation" in t
 
-    def test_guide_has_github_pr_flow(self):
+    def test_guide_has_submit_flow(self):
+        # The CLI upload flow: `benchmark.submit` → private store → aggregate on Pages.
         t = _text(GUIDE)
-        assert "pull request" in t and "github pages" in t
+        assert "benchmark.submit" in t and "github pages" in t

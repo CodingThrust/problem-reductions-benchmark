@@ -43,6 +43,10 @@
       "minimum": 0,
       "description": "Number of rules the run attempted before the budget ran out"
     },
+    "test": {
+      "type": "boolean",
+      "description": "Optional. When true, the backend scores and stores the submission privately but EXCLUDES it from the public leaderboard (for end-to-end tests). Set via `prb submit --test`."
+    },
     "results": {
       "type": "array",
       "description": "Per-rule results, byte-compatible with results.schema.json items",

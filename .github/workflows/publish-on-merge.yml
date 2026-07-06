@@ -3,11 +3,12 @@ name: Publish leaderboard (GitHub Pages)
 # Publishes the static leaderboard site to GitHub Pages. The public repo holds ONLY the
 # aggregate leaderboard (site/results.json: counts / cost / tokens / efficiency / Pareto —
 # never certificates or buggy-rule identities). Scoring happens OFF the public repo:
-#   * self-run (now):      `make publish-local` scores your local (gitignored) submissions
-#                          and commits the refreshed site/results.json here.
-#   * external (Phase 1):  the private HF scoring worker pushes site/results.json here.
-# So this workflow no longer rebuilds from submissions/ (there are none in the repo) — it
-# just deploys site/, after guarding that no answer-key field leaked into the aggregate.
+#   * self-run:   `make publish-local` scores your local (gitignored) submissions and
+#                 commits the refreshed site/results.json here.
+#   * external:   the R2 scoring worker (score-from-r2.yml) re-verifies submissions pulled
+#                 from private R2 and opens a PR that updates site/results.json.
+# So this workflow never rebuilds from submissions/ — it just deploys site/, after guarding
+# that no answer-key field leaked into the aggregate.
 #
 # One-time repo setup: Settings → Pages → Source = "GitHub Actions".
 

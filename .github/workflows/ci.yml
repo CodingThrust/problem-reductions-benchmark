@@ -27,7 +27,7 @@ jobs:
       # Calibration needs the real `pred` binary (Rust, built from problem-reductions at
       # PR_REF). The bare runner has no pred, so run it inside the scoring image — the same
       # pinned-pred environment used to score submissions. The image's default CMD is the
-      # calibration self-test. GHA cache is shared with score-pr.yml / publish-on-merge.yml.
+      # calibration self-test. GHA cache is shared with score-from-r2.yml.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 

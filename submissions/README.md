@@ -1,36 +1,37 @@
 # Submissions
 
-Each model run is one JSON file committed here via **pull request**:
+**Submissions are never committed to this public repo.** A submission carries the
+certificate + trajectory — the answer key. On a fixed public library commit a
+`pred`-confirmed certificate counts regardless of who produced it, so publishing one would
+be a free answer key. Everything under `submissions/*.json` is `.gitignore`d.
 
+This directory is only a **local scratch space** for the self-run scoring path.
+
+## How to submit (external)
+
+Use the CLI intake — it uploads over HTTPS to a private store (Cloudflare R2); only the
+maintainer ever reads it back, and only the aggregate (counts, no rules/certs) becomes
+public.
+
+```bash
+export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
+export PRB_API_KEY=<token>                 # from the maintainer
+make run                                   # → out/submission.json
+python -m benchmark.submit --predictions out/submission.json
 ```
-submissions/<your-handle>/<model>.json
-```
 
-## How to submit
+Add `--test` to run an end-to-end check that is scored + stored privately but excluded from
+the public leaderboard. See `intake/cloudflare-worker/README.md`.
 
-1. **Produce the file.** Run the dockerized runner at the fixed $20 budget (see
-   `../CONTRIBUTING.md`): `make run` → `out/submission.json`.
-2. **Open a PR** adding it as `submissions/<your-handle>/<model>.json` — and nothing else
-   (a PR that also changes code won't be auto-scored; keep submissions in their own PR).
-   - An automated check validates the file against `benchmark/submission.schema.json`
-     (structure only).
-3. **A maintainer approves the scoring run.** Running `pred` on submitted input is the
-   trust boundary, so it doesn't run automatically — a maintainer approves it on the PR.
-4. **The verified result appears on the PR** (zero-trust `pred` re-check) and is a required
-   check. **A maintainer reviews the result and merges.** You never merge a number nobody
-   has seen.
+## Self-run scoring (maintainer / local)
 
-## What happens after merge
-
-Merge publishes the already-verified result: CI rebuilds the leaderboard from all merged
-submissions (re-verifying with `pred` — deterministic, so it reproduces the number shown on
-your PR) and publishes the static site to **GitHub Pages**. Your self-reported `bugs_found`
-is ignored throughout; the score is the number of **distinct rules** with a `pred`-confirmed
-bug.
+Drop scored submission files into this directory and run `make publish-local`: it scores
+them with `pred`, rebuilds the aggregate, and writes `site/results.json` (guarded so no
+answer-key field leaks). The files here stay local — they never enter git.
 
 ## Notes
 
 - `budget_cap` must be `20` to be ranked.
-- Counterexamples must be minimal; the verifier sandboxes each `pred` call (CPU/memory/
-  timeout) and rejects oversized sources.
+- Your self-reported `bugs_found` is advisory only; the score is the number of **distinct
+  rules** with a `pred`-confirmed bug, recomputed by the backend (zero-trust).
 - Re-submitting the same model is fine — the leaderboard keeps your best run.
