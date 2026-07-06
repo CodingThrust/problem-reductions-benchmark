@@ -85,7 +85,11 @@ jobs:
         run: |
           # Scored detail carries certificates — it goes back to PRIVATE R2, never to git.
           aws s3 sync ./results/scored "s3://$BUCKET/results" --endpoint-url "$R2_ENDPOINT"
-          # Move the now-scored raw submissions out of the queue.
+          # Move the now-scored raw submissions out of the queue. This step only runs when
+          # the scoring step exited 0 (no FAILED submissions), so we never archive an
+          # un-scored item. Limitation: the archive is coarse (whole incoming/ at once), so a
+          # permanently-malformed submission FAILs every run and jams the queue until it is
+          # deleted from R2 incoming/ by hand. Follow-up: archive per-file by FINISHED status.
           aws s3 mv "s3://$BUCKET/incoming" "s3://$BUCKET/processed" \
             --recursive --endpoint-url "$R2_ENDPOINT" || true
 
