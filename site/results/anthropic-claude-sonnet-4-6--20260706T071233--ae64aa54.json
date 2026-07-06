@@ -1,0 +1,15 @@
+{
+  "model": "anthropic/claude-sonnet-4-6",
+  "library_commit": "aa2d1a1",
+  "budget_cap": 20,
+  "bugs_found": 1,
+  "rules_tested": 1,
+  "total_cost_usd": 0.42,
+  "total_tokens_k": 18.3,
+  "efficiency_bugs_per_ktok": 0.0546,
+  "efficiency_bugs_per_dollar": 2.381,
+  "submitted_by": null,
+  "placeholder": false,
+  "timestamp": "20260706T071233",
+  "submission_id": "ae64aa54"
+}
