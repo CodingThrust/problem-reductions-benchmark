@@ -83,6 +83,22 @@ def save_trajectory(messages: list, path: Path) -> None:
             f.write(json.dumps({"role": msg.get("role", ""), "content": msg.get("content", "")}) + "\n")
 
 
+def _session_cost(agent, price):
+    """Authoritative session spend from the trajectory. ``agent.cost`` is already our
+    token×price figure (see _build_model); cross-check against a fresh recompute and take
+    the max — never under-count for the budget guard. Returns (cost, tokens_k, usage)."""
+    usage = extract_usage(agent.messages)
+    cost = max(agent.cost, price.cost(usage) if price is not None else 0.0)
+    total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
+    tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
+    return cost, tokens_k, usage
+
+
+def _trajectory(agent) -> list[dict]:
+    """The agent's own message history — provenance proof carried on cert-bearing rows."""
+    return [{"role": m.get("role", ""), "content": m.get("content", "")} for m in agent.messages]
+
+
 def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None,
                  model_kwargs: dict | None = None, api_key: str | None = None):
     """A LitellmModel whose cost is OUR token×price figure, so mini-swe-agent's own
@@ -169,23 +185,11 @@ def run_one(
     cert = None
     try:
         agent.run(task=rule_name)
-        # agent.cost is already our token×price figure (see _build_model), which is what
-        # mini-swe-agent's per-step cost_limit enforced. Cross-check it against a fresh
-        # recompute over the whole trajectory and take the max — never under-count.
-        usage = extract_usage(agent.messages)
-        agent_cost = agent.cost
-        recomputed = price.cost(usage) if price is not None else 0.0
-        cost = max(agent_cost, recomputed)
-        total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
-        tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
+        cost, tokens_k, usage = _session_cost(agent, price)
         usage_row = {"input": usage.input_tokens, "output": usage.output_tokens,
                      "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
-                     "accounted_cost_usd": round(agent_cost, 6)}
-        # Provenance record: the agent's own message history. The backend requires this on a
-        # bug_found row and checks the certificate was emitted here (not pasted from a public
-        # answer key), so we carry it on every cert-bearing row.
-        trajectory = [{"role": m.get("role", ""), "content": m.get("content", "")}
-                      for m in agent.messages]
+                     "accounted_cost_usd": round(agent.cost, 6)}
+        trajectory = _trajectory(agent)
         cert = parse_certificate(agent.messages)
         if trajectory_dir is not None:
             safe_model = model_name.replace("/", "_").replace(":", "_")
@@ -286,16 +290,12 @@ def run_repo_session(
         "repo_dir": str(ctx.repo_path),
         "commit_hash": ctx.commit_hash[:7],
         "cost_limit": cost_limit,
-        "strategy": strategy or "",
+        "strategy": strategy,
     }
 
     agent.run(task="find-bugs")
-    usage = extract_usage(agent.messages)
-    cost = max(agent.cost, price.cost(usage) if price is not None else 0.0)
-    total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
-    tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
-    trajectory = [{"role": m.get("role", ""), "content": m.get("content", "")}
-                  for m in agent.messages]
+    cost, tokens_k, _usage = _session_cost(agent, price)
+    trajectory = _trajectory(agent)
     if trajectory_dir is not None:
         safe_model = model_name.replace("/", "_").replace(":", "_")
         save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_whole-repo.jsonl")

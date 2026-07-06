@@ -55,11 +55,13 @@ def build_submission(
 ) -> dict:
     """Assemble the submission envelope from the runner's result rows.
 
-    ``rules_tested`` counts only rules actually attempted (skipped_budget rows don't
-    count as "reached"); ``bugs_found`` is distinct rules with a confirmed bug.
-    ``total_cost_usd`` / ``total_tokens_k`` default to the sum of row values; pass explicit
-    session totals (per-rule: the scheduler's tracked spend; whole-repo: the one session's
-    cost/tokens, which don't live on individual rows) to get the budget-faithful figure.
+    ``rules_tested`` is the number of DISTINCT rules with a result (skipped_budget rows
+    don't count as "reached"). For per-rule that is the rules attempted; for whole-repo it
+    is the distinct rules the agent emitted a certificate for — a floor, since rules the
+    agent probed but found clean aren't represented as rows. ``bugs_found`` is distinct
+    rules with a confirmed bug. ``total_cost_usd`` / ``total_tokens_k`` default to the sum
+    of row values; pass explicit session totals (per-rule: the scheduler's tracked spend;
+    whole-repo: the one session's cost/tokens, which don't live on individual rows).
     """
     attempted = [r for r in rows if r.get("result") != "skipped_budget"]
     bugs = count_bugs(rows)
@@ -75,7 +77,7 @@ def build_submission(
         "total_tokens_k": round(tokens_k, 2),
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
         "efficiency_bugs_per_dollar": round(bugs / cost, 4) if cost else 0,
-        "rules_tested": len(attempted),
+        "rules_tested": len({r.get("rule") for r in attempted}),
         "results": rows,
         "runner_version": runner_version,
         "pred_version": pred_version,
@@ -136,6 +138,11 @@ def run(
         pred_ver = verify_pred_version(pred_binary)  # fail fast if pred != pinned version
         ctx = EnvContext(repo_path=repo, pred_binary=pred_binary, commit_hash=commit,
                          pred_version=pred_ver)
+        # Only the per-rule path uses this, but the constructor just stores kwargs (no I/O),
+        # so building it unconditionally keeps `runner` assigned in exactly one place.
+        runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens,
+                               config_path=config_path, strategy=strategy,
+                               model_kwargs=model_kwargs, api_key=api_key)
 
     if mode == "whole-repo" and not fake:
         from benchmark.run_mini import run_repo_session
@@ -145,17 +152,8 @@ def run(
             config_path=config_path, strategy=strategy,
             model_kwargs=model_kwargs, api_key=api_key,
         )
-        sub = build_submission(
-            model, session["rows"], budget_cap=budget, library_commit=commit,
-            created_at=created_at, submitted_by=submitted_by,
-            total_cost_usd=session["cost"], total_tokens_k=session["tokens_k"],
-            pred_version=getattr(ctx, "pred_version", ""),
-        )
+        rows, total_cost, total_tokens = session["rows"], session["cost"], session["tokens_k"]
     else:
-        if not fake:
-            runner = MiniSweRunner(api_base=api_base, price=price, max_tokens=max_tokens,
-                                   config_path=config_path, strategy=strategy,
-                                   model_kwargs=model_kwargs, api_key=api_key)
         rules = list_rules(str(repo))
         if max_rules is not None:
             rules = rules[:max_rules]
@@ -176,12 +174,15 @@ def run(
             )
             completed = scheduler.run_all()
             spent = scheduler._spent.get(model)
+        # per-rule totals: cost is the scheduler's tracked spend; tokens sum from the rows.
+        rows, total_cost, total_tokens = completed[model], spent, None
 
-        sub = build_submission(
-            model, completed[model], budget_cap=budget, library_commit=commit,
-            created_at=created_at, submitted_by=submitted_by, total_cost_usd=spent,
-            pred_version=getattr(ctx, "pred_version", ""),
-        )
+    sub = build_submission(
+        model, rows, budget_cap=budget, library_commit=commit,
+        created_at=created_at, submitted_by=submitted_by,
+        total_cost_usd=total_cost, total_tokens_k=total_tokens,
+        pred_version=getattr(ctx, "pred_version", ""),
+    )
 
     if output is not None:
         output = Path(output)
