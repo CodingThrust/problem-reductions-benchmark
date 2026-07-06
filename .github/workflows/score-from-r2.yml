@@ -30,11 +30,10 @@ env:
 jobs:
   score:
     runs-on: ubuntu-latest
-    # Required-reviewers gate: every run waits for maintainer approval before it starts.
-    # The R2_* secrets live in THIS environment (environment secrets, not repo secrets) —
-    # they resolve only inside a job that selects the environment, so they're set here at
-    # job level, not in the workflow-level env block above.
-    environment: scoring
+    # No pre-run approval gate: the single human checkpoint is reviewing + merging the
+    # aggregate PR this job opens (you see the actual numbers before they go public). cron
+    # (1×/day) + the bearer key bound abuse; the PR merge stops junk from being published.
+    # R2_* are Repository secrets, so no environment is needed to read them.
     env:
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       BUCKET: ${{ secrets.R2_BUCKET }}
