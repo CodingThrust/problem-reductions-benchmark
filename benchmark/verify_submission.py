@@ -28,45 +28,44 @@ from benchmark.verify import count_bugs, verify
 CERT_BLOCK = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
 
 
-def _cert_from_trajectory(trajectory) -> dict | None:
-    """Parse the last CERTIFICATE_START…END block emitted in an agent trajectory.
+def _certs_from_trajectory(trajectory) -> list[dict]:
+    """Parse every CERTIFICATE_START…END block emitted in an agent trajectory.
 
-    ``trajectory`` is a list of {role, content} messages (as saved by the runner).
-    Returns the parsed certificate dict, or None if absent/unparseable.
+    ``trajectory`` is a list of {role, content} messages (as saved by the runner). A
+    whole-repo run emits many certificates in one trajectory, so return all of them;
+    unparseable blocks are skipped.
     """
-    if not trajectory:
-        return None
-    for msg in reversed(trajectory):
+    certs: list[dict] = []
+    for msg in trajectory or []:
         content = msg.get("content", "") or ""
-        m = CERT_BLOCK.search(content)
-        if m:
+        for m in CERT_BLOCK.finditer(content):
             try:
-                return json.loads(m.group(1).strip())
+                certs.append(json.loads(m.group(1).strip()))
             except json.JSONDecodeError:
-                return None
-    return None
+                continue
+    return certs
 
 
 def _provenance_ok(row: dict, cert: dict) -> tuple[bool, str]:
     """Check the certificate was actually produced by this model's own run.
 
-    Guards against copied answer keys: a scored bug must appear in a CERTIFICATE block the
-    agent emitted in its trajectory, with the same rule and source instance. This can't
-    make copying impossible (the target library is public), but it lifts the bar from
-    "paste a rule name" to "produce a full run artifact whose source still round-trip-fails
-    under pred".
+    Guards against copied answer keys: a scored bug must appear as a CERTIFICATE block the
+    agent emitted in its trajectory, matching both rule and source instance. One trajectory
+    may carry many certificates (a whole-repo run), so any emitted block that matches counts.
+    This can't make copying impossible (the target library is public), but it lifts the bar
+    from "paste a rule name" to "produce a run artifact whose source still round-trip-fails".
     """
     traj = row.get("trajectory")
     if not traj:
         return False, "no trajectory attached (required for a scored bug)"
-    emitted = _cert_from_trajectory(traj)
-    if emitted is None:
+    emitted = _certs_from_trajectory(traj)
+    if not emitted:
         return False, "no CERTIFICATE block found in trajectory"
-    if emitted.get("rule") not in (cert.get("rule"), row.get("rule")):
-        return False, "trajectory certificate targets a different rule"
-    if emitted.get("source") != cert.get("source"):
-        return False, "trajectory certificate source does not match the submitted source"
-    return True, "reproduced in the model's own trajectory"
+    want_rules = (cert.get("rule"), row.get("rule"))
+    for e in emitted:
+        if e.get("rule") in want_rules and e.get("source") == cert.get("source"):
+            return True, "reproduced in the model's own trajectory"
+    return False, "no trajectory certificate matches the submitted rule + source"
 
 
 def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dict, list[dict]]:
