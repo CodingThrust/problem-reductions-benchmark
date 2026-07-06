@@ -30,10 +30,11 @@ env:
 jobs:
   score:
     runs-on: ubuntu-latest
-    # No pre-run approval gate: the single human checkpoint is reviewing + merging the
-    # aggregate PR this job opens (you see the actual numbers before they go public). cron
-    # (1×/day) + the bearer key bound abuse; the PR merge stops junk from being published.
-    # R2_* are Repository secrets, so no environment is needed to read them.
+    # The `scoring` environment is kept ONLY so this job can read the R2_* environment
+    # secrets. Remove its deployment-protection (required reviewers) in repo settings, so
+    # there is NO pre-run approval — the single human checkpoint is reviewing + merging the
+    # aggregate PR this job opens. cron (1x/day) + the bearer key bound abuse.
+    environment: scoring
     env:
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       BUCKET: ${{ secrets.R2_BUCKET }}
