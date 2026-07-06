@@ -51,6 +51,7 @@ def build_submission(
     submitted_by: str | None = None,
     total_cost_usd: float | None = None,
     total_tokens_k: float | None = None,
+    trajectory: list[dict] | None = None,
     pred_version: str = "",
 ) -> dict:
     """Assemble the submission envelope from the runner's result rows.
@@ -67,7 +68,7 @@ def build_submission(
     bugs = count_bugs(rows)
     cost = total_cost_usd if total_cost_usd is not None else sum(r.get("cost", 0.0) for r in rows)
     tokens_k = total_tokens_k if total_tokens_k is not None else sum(r.get("tokens_k", 0.0) for r in rows)
-    return {
+    envelope = {
         "schema_version": SCHEMA_VERSION,
         "model": model,
         "library_commit": library_commit,
@@ -84,6 +85,10 @@ def build_submission(
         "created_at": created_at,
         "submitted_by": submitted_by,
     }
+    # whole-repo: the one shared session log, stored once here (not copied onto each row).
+    if trajectory is not None:
+        envelope["trajectory"] = trajectory
+    return envelope
 
 
 def run(
@@ -153,6 +158,7 @@ def run(
             model_kwargs=model_kwargs, api_key=api_key,
         )
         rows, total_cost, total_tokens = session["rows"], session["cost"], session["tokens_k"]
+        session_trajectory = session["trajectory"]
     else:
         rules = list_rules(str(repo))
         if max_rules is not None:
@@ -175,12 +181,14 @@ def run(
             completed = scheduler.run_all()
             spent = scheduler._spent.get(model)
         # per-rule totals: cost is the scheduler's tracked spend; tokens sum from the rows.
+        # Per-rule rows carry their own trajectories, so there is no envelope-level one.
         rows, total_cost, total_tokens = completed[model], spent, None
+        session_trajectory = None
 
     sub = build_submission(
         model, rows, budget_cap=budget, library_commit=commit,
         created_at=created_at, submitted_by=submitted_by,
-        total_cost_usd=total_cost, total_tokens_k=total_tokens,
+        total_cost_usd=total_cost, total_tokens_k=total_tokens, trajectory=session_trajectory,
         pred_version=getattr(ctx, "pred_version", ""),
     )
 

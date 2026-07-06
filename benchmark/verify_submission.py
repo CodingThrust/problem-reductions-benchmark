@@ -46,21 +46,20 @@ def _certs_from_trajectory(trajectory) -> list[dict]:
     return certs
 
 
-def _provenance_ok(row: dict, cert: dict) -> tuple[bool, str]:
+def _provenance_ok(row: dict, cert: dict, session_certs: list[dict] = ()) -> tuple[bool, str]:
     """Check the certificate was actually produced by this model's own run.
 
     Guards against copied answer keys: a scored bug must appear as a CERTIFICATE block the
-    agent emitted in its trajectory, matching both rule and source instance. One trajectory
-    may carry many certificates (a whole-repo run), so any emitted block that matches counts.
-    This can't make copying impossible (the target library is public), but it lifts the bar
-    from "paste a rule name" to "produce a run artifact whose source still round-trip-fails".
+    agent emitted in its trajectory, matching both rule and source instance. The trajectory
+    is either the row's own (per-rule: one session per row) or the shared session log at the
+    envelope level (whole-repo: one session, many bugs) — ``session_certs`` is that envelope
+    log pre-parsed once. Any emitted block that matches counts. This can't make copying
+    impossible (the library is public), but it lifts the bar from "paste a rule name" to
+    "produce a run artifact whose source still round-trip-fails".
     """
-    traj = row.get("trajectory")
-    if not traj:
-        return False, "no trajectory attached (required for a scored bug)"
-    emitted = _certs_from_trajectory(traj)
+    emitted = _certs_from_trajectory(row.get("trajectory")) + list(session_certs)
     if not emitted:
-        return False, "no CERTIFICATE block found in trajectory"
+        return False, "no trajectory attached (required for a scored bug)"
     want_rules = (cert.get("rule"), row.get("rule"))
     for e in emitted:
         if e.get("rule") in want_rules and e.get("source") == cert.get("source"):
@@ -78,6 +77,9 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
     """
     rescored: list[dict] = []
     report: list[dict] = []
+    # Whole-repo runs store ONE session trajectory at the envelope level; parse it once here
+    # rather than re-parsing a copy on every bug row.
+    session_certs = _certs_from_trajectory(submission.get("trajectory"))
 
     for row in submission.get("results", []):
         cert = row.get("certificate")
@@ -87,7 +89,7 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
 
         cert.setdefault("rule", row.get("rule"))
         verdict = verify(cert, repo_dir)
-        prov_ok, prov_reason = _provenance_ok(row, cert) if verdict.accepted else (False, "")
+        prov_ok, prov_reason = _provenance_ok(row, cert, session_certs) if verdict.accepted else (False, "")
         accepted = verdict.accepted and prov_ok
         new = dict(row)
         if accepted:

@@ -300,13 +300,16 @@ def run_repo_session(
         safe_model = model_name.replace("/", "_").replace(":", "_")
         save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_whole-repo.jsonl")
 
-    rows = _rows_from_certificates(parse_all_certificates(agent.messages), trajectory)
-    return {"rows": rows, "cost": cost, "tokens_k": tokens_k}
+    rows = _rows_from_certificates(parse_all_certificates(agent.messages))
+    # The whole session is ONE trajectory shared by every bug — return it once for the
+    # envelope (build_submission) instead of copying it onto each row.
+    return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory}
 
 
-def _rows_from_certificates(certs: list[dict], trajectory: list[dict]) -> list[dict]:
-    """Verify each certificate with pred and build one result row per cert, all sharing the
-    session ``trajectory`` (provenance). bug_found when pred confirms, else rejected."""
+def _rows_from_certificates(certs: list[dict]) -> list[dict]:
+    """Verify each certificate with pred and build one result row per cert. bug_found when
+    pred confirms, else rejected. No per-row trajectory — a whole-repo run's provenance
+    trajectory lives once at the envelope level (submission["trajectory"])."""
     rows = []
     for cert in certs:
         verdict = verify(cert)
@@ -316,7 +319,6 @@ def _rows_from_certificates(certs: list[dict], trajectory: list[dict]) -> list[d
             "cost": 0.0,        # session cost/tokens live on the submission envelope, not per row
             "tokens_k": 0.0,
             "certificate": cert,
-            "trajectory": trajectory,
         }
         if verdict.accepted:
             row["verify_details"] = verdict.details

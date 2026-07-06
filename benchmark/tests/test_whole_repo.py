@@ -41,11 +41,11 @@ class TestRowsFromCertificates:
         # r1 confirmed, r2 rejected by pred; both rows carry the same session trajectory.
         monkeypatch.setattr(run_mini, "verify",
                             lambda c, r=None: Verdict(c.get("rule") == "r1", "ok"))
-        traj = [{"role": "assistant", "content": "..."}]
         certs = [{"rule": "r1", "source": {}}, {"rule": "r2", "source": {}}]
-        rows = run_mini._rows_from_certificates(certs, traj)
+        rows = run_mini._rows_from_certificates(certs)
         assert [r["result"] for r in rows] == ["bug_found", "rejected"]
-        assert all(r["trajectory"] is traj for r in rows)
+        # No per-row trajectory — the whole-repo trajectory lives once on the envelope.
+        assert all("trajectory" not in r for r in rows)
         assert rows[0]["certificate"]["rule"] == "r1"
 
 
@@ -67,11 +67,13 @@ class TestRunWholeRepoWiring:
         # without touching the per-rule Scheduler.
         captured = {}
 
+        traj = [{"role": "assistant", "content": "run log"}]
+
         def fake_repo_session(model, ctx, cost_limit, **kw):
             captured["cost_limit"] = cost_limit
             return {"rows": [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0,
-                              "certificate": {"rule": "r1", "source": {}}, "trajectory": []}],
-                    "cost": 5.0, "tokens_k": 30.0}
+                              "certificate": {"rule": "r1", "source": {}}}],
+                    "cost": 5.0, "tokens_k": 30.0, "trajectory": traj}
 
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
@@ -86,3 +88,5 @@ class TestRunWholeRepoWiring:
         assert captured["cost_limit"] == 19.0            # budget - safety_margin
         assert sub["total_cost_usd"] == 5.0
         assert sub["bugs_found"] == 1
+        assert sub["trajectory"] is traj                 # stored once on the envelope
+        assert "trajectory" not in sub["results"][0]     # not duplicated onto rows
