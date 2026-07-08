@@ -109,3 +109,43 @@ def extract_usage(messages: list) -> Usage:
         if resp is not None and _get(resp, "usage", None) is not None:
             total = total + usage_from_response(_get(resp, "usage", None))
     return total
+
+
+# ── (de)serialization: the 4-bucket token totals + the declared price snapshot ──────
+# These travel in the submission so the backend can RE-METER cost as tokens × price
+# (zero-trust, mirroring the bug re-verification) instead of trusting a self-reported
+# dollar total. Tokens are the reproducible primitive; the declared price (dated by the
+# submission's created_at) is a snapshot anyone can swap to recompute under other prices.
+
+def usage_as_dict(u: Usage) -> dict:
+    """Serialize a Usage to the 4-bucket dict shape used on rows and the envelope."""
+    return {"input": u.input_tokens, "output": u.output_tokens,
+            "cache_read": u.cache_read_tokens, "cache_write": u.cache_write_tokens}
+
+
+def usage_from_dict(d) -> Usage:
+    """Parse a 4-bucket dict (or None/missing → all zeros) back into a Usage."""
+    return Usage(
+        input_tokens=int(_get(d, "input")),
+        output_tokens=int(_get(d, "output")),
+        cache_read_tokens=int(_get(d, "cache_read")),
+        cache_write_tokens=int(_get(d, "cache_write")),
+    )
+
+
+def price_as_dict(p: Price) -> dict:
+    """Serialize a Price to a plain dict (USD per 1M tokens, per bucket)."""
+    return {"input": p.input, "output": p.output,
+            "cache_read": p.cache_read, "cache_write": p.cache_write}
+
+
+def price_from_dict(d) -> Price | None:
+    """Parse a price dict back into a Price, or None if absent (legacy submission)."""
+    if not d:
+        return None
+    return Price(
+        input=float(_get(d, "input")),
+        output=float(_get(d, "output")),
+        cache_read=float(_get(d, "cache_read")),
+        cache_write=float(_get(d, "cache_write")),
+    )

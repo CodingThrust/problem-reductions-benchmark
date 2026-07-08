@@ -26,9 +26,11 @@ AGENT_STRATEGY_FILE; FAKE (1 → no API/pred, used by tests).
 import argparse
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
+from benchmark.cost import Usage, price_as_dict, usage_as_dict, usage_from_dict
 from benchmark.env_context import EnvContext
 from benchmark.env_setup import find_pred_binary, pinned_commit, verify_pred_version
 from benchmark.run_mini import list_rules
@@ -53,6 +55,10 @@ def build_submission(
     total_tokens_k: float | None = None,
     trajectory: list[dict] | None = None,
     pred_version: str = "",
+    price=None,
+    usage_totals=None,
+    agent_mode: str | None = None,
+    run_error: str | None = None,
 ) -> dict:
     """Assemble the submission envelope from the runner's result rows.
 
@@ -60,14 +66,35 @@ def build_submission(
     don't count as "reached"). For per-rule that is the rules attempted; for whole-repo it
     is the distinct rules the agent emitted a certificate for — a floor, since rules the
     agent probed but found clean aren't represented as rows. ``bugs_found`` is distinct
-    rules with a confirmed bug. ``total_cost_usd`` / ``total_tokens_k`` default to the sum
-    of row values; pass explicit session totals (per-rule: the scheduler's tracked spend;
-    whole-repo: the one session's cost/tokens, which don't live on individual rows).
+    rules with a confirmed bug.
+
+    Cost is metered from tokens, not hand-reported: when ``price`` (the submitter's declared
+    per-token rate) is given, ``total_cost_usd`` is DERIVED as ``price × token_usage`` — the
+    same authoritative figure the backend recomputes (benchmark/verify_submission.py), so the
+    self-reported total is never trusted. The 4-bucket token total is either passed in
+    (``usage_totals`` — whole-repo, one session) or summed from each row's ``usage`` block
+    (per-rule). It rides on the envelope as ``usage_totals`` (the reproducible primitive) next
+    to the ``prices`` snapshot, so any reader can recompute spend under other prices. Without a
+    ``price`` (e.g. FAKE mode) it falls back to explicit session totals or the row-sum.
     """
     attempted = [r for r in rows if r.get("result") != "skipped_budget"]
     bugs = count_bugs(rows)
-    cost = total_cost_usd if total_cost_usd is not None else sum(r.get("cost", 0.0) for r in rows)
-    tokens_k = total_tokens_k if total_tokens_k is not None else sum(r.get("tokens_k", 0.0) for r in rows)
+
+    # 4-bucket token usage: the reproducible primitive the backend re-prices.
+    if usage_totals is None:
+        usage_totals = Usage()
+        for r in rows:
+            usage_totals = usage_totals + usage_from_dict(r.get("usage"))
+    elif isinstance(usage_totals, dict):
+        usage_totals = usage_from_dict(usage_totals)
+
+    if price is not None:
+        cost = price.cost(usage_totals)
+        tokens_k = usage_totals.total_tokens / 1000
+    else:
+        cost = total_cost_usd if total_cost_usd is not None else sum(r.get("cost", 0.0) for r in rows)
+        tokens_k = total_tokens_k if total_tokens_k is not None else sum(r.get("tokens_k", 0.0) for r in rows)
+
     envelope = {
         "schema_version": SCHEMA_VERSION,
         "model": model,
@@ -79,12 +106,25 @@ def build_submission(
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
         "efficiency_bugs_per_dollar": round(bugs / cost, 4) if cost else 0,
         "rules_tested": len({r.get("rule") for r in attempted}),
+        # Aggregate token totals + the declared price snapshot — the backend re-meters cost
+        # from these (zero-trust); dated by created_at, recomputable under any price table.
+        "usage_totals": usage_as_dict(usage_totals),
+        "prices": price_as_dict(price) if price is not None else None,
         "results": rows,
+        # Version/provenance stamp so a produced file self-identifies its run (no more
+        # "everything overwrites one submission.json"). agent_mode + created_at + the
+        # runner/pred/library pins together pin down exactly what produced this file.
         "runner_version": runner_version,
         "pred_version": pred_version,
+        "agent_mode": agent_mode,
         "created_at": created_at,
         "submitted_by": submitted_by,
     }
+    # Set only when the session died on a fatal error (quota/auth/network): the results are
+    # the partial salvage, not a clean "0 bugs" completion. Keeps a crash from masquerading
+    # as a finished run.
+    if run_error is not None:
+        envelope["run_error"] = run_error
     # whole-repo: the one shared session log, stored once here (not copied onto each row).
     if trajectory is not None:
         envelope["trajectory"] = trajectory
@@ -114,8 +154,14 @@ def run(
     model_kwargs: dict | None = None,
     api_key: str | None = None,
     mode: str = "per-rule",
+    trajectory_dir: str | Path | None = None,
 ) -> dict:
     """Run the full budgeted session for one model and return the submission dict.
+
+    ``trajectory_dir`` is where the whole-repo agent's trajectory + the durable incremental
+    cert log are persisted (default: the output file's directory). Beside the stable
+    ``output`` a versioned archive (``submission-<model>-<timestamp>.json``) is also written
+    so successive runs don't all overwrite one submission.json.
 
     ``mode`` selects the runner: ``per-rule`` (default) schedules one isolated agent session
     per rule under a shared budget; ``whole-repo`` runs ONE session over the whole library —
@@ -149,16 +195,30 @@ def run(
                                config_path=config_path, strategy=strategy,
                                model_kwargs=model_kwargs, api_key=api_key)
 
+    # Where to persist the whole-repo trajectory + durable cert log. An explicit
+    # TRAJECTORY_DIR wins; otherwise default to the output file's directory (the mounted
+    # /out). Exposed as a parameter so it shows up in the runner's config surface, not
+    # hardcoded — a crash/early-stop then still leaves the found bugs on disk.
+    traj_dir = Path(trajectory_dir) if trajectory_dir else (
+        Path(output).parent if output is not None else None)
+
     if mode == "whole-repo" and not fake:
         from benchmark.run_mini import run_repo_session
+        out_dir = traj_dir
         session = run_repo_session(
             model, ctx, cost_limit=max(budget - safety_margin, 0.0),
             api_base=api_base, price=price, max_tokens=max_tokens,
+            trajectory_dir=out_dir,
+            certs_path=(out_dir / "certs.txt") if out_dir is not None else None,
             config_path=config_path, strategy=strategy,
             model_kwargs=model_kwargs, api_key=api_key,
         )
         rows, total_cost, total_tokens = session["rows"], session["cost"], session["tokens_k"]
         session_trajectory = session["trajectory"]
+        session_usage = session.get("usage")  # session-level 4-bucket total to re-price
+        run_error = session.get("error")       # set if the session died on a fatal error
+        if run_error:
+            print(f"WARNING: session ended on error — salvaged partial results: {run_error}")
     else:
         rules = list_rules(str(repo))
         if max_rules is not None:
@@ -181,23 +241,47 @@ def run(
             completed = scheduler.run_all()
             spent = scheduler._spent.get(model)
         # per-rule totals: cost is the scheduler's tracked spend; tokens sum from the rows.
-        # Per-rule rows carry their own trajectories, so there is no envelope-level one.
+        # Per-rule rows carry their own trajectories AND their own 4-bucket ``usage``, so the
+        # envelope aggregates usage from the rows (session_usage=None).
         rows, total_cost, total_tokens = completed[model], spent, None
         session_trajectory = None
+        session_usage = None
+        # per-rule already isolates each rule's failure into an "error:" row (run_one), so the
+        # session as a whole never dies — no envelope-level error to record.
+        run_error = None
 
     sub = build_submission(
         model, rows, budget_cap=budget, library_commit=commit,
         created_at=created_at, submitted_by=submitted_by,
         total_cost_usd=total_cost, total_tokens_k=total_tokens, trajectory=session_trajectory,
         pred_version=getattr(ctx, "pred_version", ""),
+        price=price, usage_totals=session_usage,
+        agent_mode=mode, run_error=run_error,
     )
 
     if output is not None:
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(sub, indent=2), encoding="utf-8")
+        blob = json.dumps(sub, indent=2)
+        output.write_text(blob, encoding="utf-8")
+        # ALSO write a versioned archive copy so runs don't clobber each other: the stable
+        # `output` is the "latest" pointer (what `prb submit` reads); the archive keeps history.
+        archive = output.with_name(_versioned_name(output, model, created_at))
+        if archive.name != output.name:
+            archive.write_text(blob, encoding="utf-8")
 
     return sub
+
+
+def _versioned_name(output: Path, model: str, created_at: str | None) -> str:
+    """Archive filename that encodes the run: ``<stem>-<model>-<timestamp><suffix>``.
+
+    ``model`` is made filesystem-safe; ``timestamp`` is the compact UTC created_at
+    (digits + 'T'). Keeps each run's output as a distinct, self-identifying file next to
+    the stable ``output`` pointer."""
+    label = model.replace("/", "_").replace(":", "_")
+    stamp = re.sub(r"[^0-9T]", "", created_at)[:15] if created_at else "unknown"
+    return f"{output.stem}-{label}-{stamp}{output.suffix}"
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -219,7 +303,11 @@ def main() -> None:
     parser.add_argument("--repo-dir", default=_env("REPO_DIR", "/app/pr-src"),
                         help="problem-reductions source tree (env REPO_DIR)")
     parser.add_argument("--output", default=_env("OUTPUT", "/out/submission.json"),
-                        help="Where to write submission.json (env OUTPUT)")
+                        help="Stable 'latest' submission path (env OUTPUT). A versioned archive "
+                             "copy (submission-<label>-<timestamp>.json) is also written beside it.")
+    parser.add_argument("--trajectory-dir", default=_env("TRAJECTORY_DIR"),
+                        help="Where to persist the whole-repo trajectory + durable cert log "
+                             "(env TRAJECTORY_DIR; default: the output file's directory).")
     parser.add_argument("--api-base", default=_env("API_BASE"), help="Custom API base (env API_BASE)")
     parser.add_argument("--api-key", default=_env("API_KEY"),
                         help="Generic API key, any provider (env API_KEY). Avoids needing the "
@@ -341,10 +429,12 @@ def main() -> None:
         model_kwargs=model_kwargs,
         api_key=args.api_key,
         mode=args.mode,
+        trajectory_dir=args.trajectory_dir,
     )
     print(f"\n{sub['bugs_found']} claimed bugs | ${sub['total_cost_usd']:.4f} | "
           f"{sub['rules_tested']} rules attempted")
-    print(f"Submission → {args.output}")
+    archive = _versioned_name(Path(args.output), args.model, created_at)
+    print(f"Submission → {args.output}  (archive: {archive})")
     print("Self-reported counts are advisory; the backend re-verifies every certificate "
           "with pred before it counts.")
 

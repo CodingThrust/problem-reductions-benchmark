@@ -35,6 +35,23 @@ class TestParseAllCertificates:
         bad = {"role": "assistant", "content": "CERTIFICATE_START\n{not json\nCERTIFICATE_END"}
         assert run_mini.parse_all_certificates([bad]) == []
 
+    def test_reads_reasoning_content(self):
+        # Tool-calling models (Qwen via function-calling) leave content="" and narrate the
+        # certificate in reasoning_content — it must still be parsed.
+        c = {"rule": "r1", "source": {"n": 1}}
+        msg = {"role": "assistant", "content": "",
+               "reasoning_content": "found a bug:\nCERTIFICATE_START\n"
+               + json.dumps(c) + "\nCERTIFICATE_END\nmoving on"}
+        assert [x["rule"] for x in run_mini.parse_all_certificates([msg])] == ["r1"]
+
+    def test_dedups_across_content_and_reasoning(self):
+        # Same cert in content of one msg and reasoning_content of another → one.
+        c = {"rule": "r1", "source": {"n": 1}}
+        block = "CERTIFICATE_START\n" + json.dumps(c) + "\nCERTIFICATE_END"
+        msgs = [{"role": "assistant", "content": block},
+                {"role": "assistant", "content": "", "reasoning_content": block}]
+        assert len(run_mini.parse_all_certificates(msgs)) == 1
+
 
 class TestRowsFromCertificates:
     def test_bug_and_rejected_rows_share_trajectory(self, monkeypatch):
@@ -49,6 +66,31 @@ class TestRowsFromCertificates:
         assert rows[0]["certificate"]["rule"] == "r1"
 
 
+class TestDurableCertRecovery:
+    def test_cert_only_in_disk_log_is_harvested(self, monkeypatch):
+        # run_repo_session harvests from the trajectory AND the durable {{certs_file}} log
+        # (deduped). A bug the agent wrote to disk but whose block never survived into the
+        # parsed messages must still count — this is what makes an early-stop crash-safe.
+        monkeypatch.setattr(run_mini, "verify",
+                            lambda c, r=None: Verdict(c.get("rule") == "r9", "ok"))
+        trajectory = [{"role": "assistant", "content": "chatter, no certificate here"}]
+        disk_log = {"content": "CERTIFICATE_START\n"
+                    + json.dumps({"rule": "r9", "source": {"n": 1}}) + "\nCERTIFICATE_END\n"}
+        rows = run_mini._rows_from_certificates(
+            run_mini.parse_all_certificates(trajectory + [disk_log]))
+        assert [r["rule"] for r in rows] == ["r9"]
+        assert rows[0]["result"] == "bug_found"
+
+    def test_trajectory_and_disk_log_dedup(self, monkeypatch):
+        # The same cert in both the trajectory and the disk log collapses to one row.
+        monkeypatch.setattr(run_mini, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}}
+        block = "CERTIFICATE_START\n" + json.dumps(cert) + "\nCERTIFICATE_END\n"
+        rows = run_mini._rows_from_certificates(run_mini.parse_all_certificates(
+            [{"role": "assistant", "content": block}, {"content": block}]))
+        assert len(rows) == 1
+
+
 class TestBuildSubmissionTotals:
     def test_explicit_session_totals_override_row_sums(self):
         # whole-repo rows carry 0 cost/tokens; the session totals come in as explicit args.
@@ -59,6 +101,27 @@ class TestBuildSubmissionTotals:
         assert sub["total_cost_usd"] == 3.5
         assert sub["total_tokens_k"] == 42.0
         assert sub["efficiency_bugs_per_dollar"] == round(1 / 3.5, 4)
+
+
+class TestCrashSalvage:
+    def test_run_error_recorded_when_session_dies(self, monkeypatch):
+        # A fatal session error must still produce a submission (partial salvage) tagged with
+        # run_error — not crash and leave a stale submission.json.
+        def dying_session(model, ctx, cost_limit, **kw):
+            return {"rows": [], "cost": 0.3, "tokens_k": 5.0, "trajectory": [],
+                    "usage": None, "error": "APIError: quota exhausted"}
+        monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
+        monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
+        monkeypatch.setattr(run_submission, "EnvContext",
+                            lambda **kw: type("C", (), {"pred_version": "1.2.3", **kw})())
+        monkeypatch.setattr("benchmark.run_mini.run_repo_session", dying_session)
+        sub = run_submission.run("m", "/repo", budget=5, library_commit="c", mode="whole-repo")
+        assert sub["run_error"] == "APIError: quota exhausted"
+        assert sub["bugs_found"] == 0
+
+    def test_no_run_error_key_on_clean_run(self):
+        sub = run_submission.build_submission("m", [], budget_cap=5, library_commit="c")
+        assert "run_error" not in sub
 
 
 class TestRunWholeRepoWiring:

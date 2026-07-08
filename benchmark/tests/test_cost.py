@@ -10,9 +10,37 @@ from benchmark.cost import (
     Price,
     Usage,
     extract_usage,
+    price_as_dict,
+    price_from_dict,
     resolve_price,
+    usage_as_dict,
+    usage_from_dict,
     usage_from_response,
 )
+
+
+class TestSerialization:
+    def test_usage_roundtrips_through_dict(self):
+        u = Usage(input_tokens=10, output_tokens=20, cache_read_tokens=5, cache_write_tokens=3)
+        assert usage_from_dict(usage_as_dict(u)) == u
+
+    def test_usage_from_dict_tolerates_missing_and_none(self):
+        assert usage_from_dict(None) == Usage()
+        assert usage_from_dict({"input": 7}) == Usage(input_tokens=7)
+
+    def test_price_roundtrips_through_dict(self):
+        p = Price(input=3.0, output=15.0, cache_read=0.3, cache_write=3.75)
+        assert price_from_dict(price_as_dict(p)) == p
+
+    def test_price_from_dict_none_is_none(self):
+        assert price_from_dict(None) is None
+        assert price_from_dict({}) is None
+
+    def test_reprice_from_serialized_matches_direct(self):
+        # A submission stores usage_as_dict + price_as_dict; the backend re-prices from them.
+        u = Usage(input_tokens=1_000_000, output_tokens=500_000, cache_read_tokens=200_000)
+        p = Price(input=3.0, output=15.0, cache_read=0.3)
+        assert price_from_dict(price_as_dict(p)).cost(usage_from_dict(usage_as_dict(u))) == p.cost(u)
 
 
 class TestPriceCost:

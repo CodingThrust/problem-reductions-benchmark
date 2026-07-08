@@ -143,6 +143,37 @@ class TestScoreSubmission:
         assert scored["bugs_found"] == 0
         assert report == []
 
+    def test_remeters_cost_from_prices_and_usage(self, monkeypatch):
+        # Zero-trust cost: the submission self-reports a bogus total_cost_usd, but carries
+        # prices + usage_totals — the scorer recomputes cost = usage × price and ignores the
+        # bogus figure (mirrors ignoring self-reported bugs_found).
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        sub = _submission(
+            [_bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}})],
+            total_cost_usd=0.0001,  # bogus — must be ignored
+            total_tokens_k=0.001,
+            prices={"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75},
+            usage_totals={"input": 1_000_000, "output": 1_000_000,
+                          "cache_read": 0, "cache_write": 0},
+        )
+        scored, _ = vs.score_submission(sub)
+        assert scored["total_cost_usd"] == 18.0                 # 3 + 15, not 0.0001
+        assert scored["total_tokens_k"] == 2000.0
+        assert scored["efficiency_bugs_per_dollar"] == round(1 / 18.0, 4)
+        # the primitive + snapshot survive into the scored result (→ leaderboard entry)
+        assert scored["usage_totals"]["input"] == 1_000_000
+        assert scored["prices"]["output"] == 15.0
+
+    def test_legacy_submission_without_prices_uses_self_reported(self, monkeypatch):
+        # No prices/usage_totals (legacy) → fall back to the self-reported figures.
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        sub = _submission(
+            [_bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}})],
+            total_cost_usd=2.0, total_tokens_k=50.0)
+        scored, _ = vs.score_submission(sub)
+        assert scored["total_cost_usd"] == 2.0
+        assert scored["total_tokens_k"] == 50.0
+
     def test_scored_is_results_schema_shaped(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([

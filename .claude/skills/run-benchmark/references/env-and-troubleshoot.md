@@ -25,12 +25,14 @@ these as env vars (CLI flags would override, but the skill uses the env-file).
 | `PER_RULE_BUDGET` | 0.5 | per-rule cost cap |
 | `SAFETY_MARGIN` | 1.0 | USD held back so the budget-crossing call stays under cap |
 | `MAX_TOKENS` | 8192 | per-call output ceiling |
-| `MAX_RULES` | all | cap rules attempted — **smoke runs only**; omit for a ranked run |
+| `MAX_RULES` | all | cap rules attempted — **smoke runs only**; omit for a ranked run (per-rule only) |
+| `AGENT_MODE` | `per-rule` | `per-rule` (isolated session/rule, budget split evenly) or `whole-repo` (ONE session, the agent triages the rules itself) |
+| `TRAJECTORY_DIR` | `OUTPUT`'s dir (`/out`) | where **whole-repo** persists the trajectory + the durable incremental cert log (`certs.txt`); the agent writes each certificate here the moment it finds it, so an early-stop/crash still leaves the found bugs on disk |
 | `AGENT_CONFIG` / `AGENT_STRATEGY_FILE` | bundled | bring-your-own prompt; the files must be **mounted** into the container (`-v "$PWD/cfg:/cfg"`) and the path given as a container path |
 | `SUBMITTED_BY` | — | your handle, recorded in the envelope |
 | `EXPECTED_PRED_VERSION` / `EXPECTED_PRED_COMMIT` | baked | debugging only; `EXPECTED_PRED_VERSION=""` disables the version check |
 
-`REPO_DIR` and `OUTPUT` are container-internal and already baked — don't set them.
+`OUTPUT` (default `/out/submission.json`) is the stable "latest" pointer `prb submit` reads; every run **also** writes a versioned archive `submission-<model>-<timestamp>.json` beside it, so history isn't clobbered. `REPO_DIR` is container-internal and baked — don't set it.
 
 Non-standard endpoint example:
 ```ini

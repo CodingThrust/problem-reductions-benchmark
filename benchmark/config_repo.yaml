@@ -59,6 +59,16 @@ agent:
     }
     CERTIFICATE_END
 
+    THEN, immediately, append the SAME block to the durable log so the bug survives even if
+    the run is cut off (budget/crash) — one command, append only, never overwrite:
+      cat >> {{certs_file}} <<'CERT'
+      CERTIFICATE_START
+      { ...the identical certificate JSON... }
+      CERTIFICATE_END
+      CERT
+    Do this every time, the moment you find a bug, before moving to the next rule. The file
+    is your safety net: anything written there is recoverable even if you never reach submit.
+
     Only `rule`, `source`, and the target type (from `bundle`) are required; `target_config`
     is optional. The verifier re-derives everything from `source` with pred and never trusts
     your claim — a wrong or non-minimal certificate is simply rejected, so report only what
@@ -74,9 +84,10 @@ agent:
 
     Enumerate the rules with `pred list --rules --json`, triage by suspicion, and test the
     round-trip correctness of each with pred. Emit a CERTIFICATE_START...CERTIFICATE_END
-    block for every bug — many are expected; do not stop after the first. You have a limited
-    budget — be efficient and spend it on the most suspicious rules first. When done, run:
-    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+    block for every bug — many are expected; do not stop after the first — AND append the
+    same block to {{certs_file}} as you go, so no bug is lost if the run stops early. You
+    have a limited budget — be efficient and spend it on the most suspicious rules first.
+    When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     </task>
 
   step_limit: 300
@@ -90,14 +101,31 @@ environment:
     LESS: -R
 
 model:
+  # Head+tail elision (SWE-agent pattern): keep short output whole; for long output keep the
+  # first and last 5000 chars + a notice, so a big result (e.g. `pred list --rules --json`,
+  # 290 rules) can't flood the context and get re-sent every step. The runner MUST thread this
+  # into the model config (see run_mini._build_model) or mini-swe-agent's non-truncating
+  # default template is used instead.
   observation_template: |
     {% if output.exception_info -%}
     <exception>{{output.exception_info}}</exception>
     {% endif -%}
     <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
     <output>
-    {{ output.output[:8000] -}}
+    {{ output.output -}}
     </output>
+    {%- else -%}
+    <warning>Output too long — showing head + tail only. Re-run narrowing it (head/tail/grep/sed) or write it to a file and read slices.</warning>
+    {%- set elided = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided>{{ elided }} characters elided</elided>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
   format_error_template: |
     Format error: {{error}}
     Provide exactly ONE bash command in triple backticks.

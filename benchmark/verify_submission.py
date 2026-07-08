@@ -23,6 +23,7 @@ import re
 import sys
 from pathlib import Path
 
+from benchmark.cost import price_from_dict, usage_from_dict
 from benchmark.verify import count_bugs, verify
 
 CERT_BLOCK = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
@@ -111,8 +112,20 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         })
 
     bugs = count_bugs(rescored)
-    tokens_k = submission.get("total_tokens_k", 0.0) or 0.0
-    cost = submission.get("total_cost_usd", 0.0) or 0.0
+    # Cost re-metering, zero-trust like the bug re-verification: when the submission carries
+    # the declared per-token ``prices`` + the 4-bucket ``usage_totals``, recompute spend as
+    # tokens × price and IGNORE the self-reported total_cost_usd/total_tokens_k. Tokens are
+    # the reproducible primitive; the price is a dated snapshot (created_at). Legacy
+    # submissions without these fields fall back to their self-reported figures.
+    price = price_from_dict(submission.get("prices"))
+    usage = submission.get("usage_totals")
+    if price is not None and usage is not None:
+        u = usage_from_dict(usage)
+        cost = price.cost(u)
+        tokens_k = u.total_tokens / 1000
+    else:
+        tokens_k = submission.get("total_tokens_k", 0.0) or 0.0
+        cost = submission.get("total_cost_usd", 0.0) or 0.0
     attempted = [r for r in rescored if r.get("result") != "skipped_budget"]
     scored = {
         "model": submission.get("model", "unknown"),
@@ -122,8 +135,12 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         # board. Carried through here so the flag survives in the private scored file.
         "test": bool(submission.get("test")),
         "bugs_found": bugs,
-        "total_cost_usd": cost,
-        "total_tokens_k": tokens_k,
+        "total_cost_usd": round(cost, 6),
+        "total_tokens_k": round(tokens_k, 2),
+        # The reproducible primitive + the price snapshot the cost was metered from —
+        # carried through so the public entry stays recomputable under other prices.
+        "usage_totals": submission.get("usage_totals"),
+        "prices": submission.get("prices"),
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
         "efficiency_bugs_per_dollar": round(bugs / cost, 4) if cost else 0,
         "rules_tested": submission.get("rules_tested", len(attempted)),
@@ -150,6 +167,10 @@ def leaderboard_entry(submission: dict, scored: dict) -> dict:
         "rules_tested": scored["rules_tested"],
         "total_cost_usd": scored["total_cost_usd"],
         "total_tokens_k": scored["total_tokens_k"],
+        # Aggregate token totals + the price snapshot — safe to publish (no rule identities)
+        # and the whole point: cost stays recomputable under any future/alternative price.
+        "usage_totals": scored.get("usage_totals"),
+        "prices": scored.get("prices"),
         "efficiency_bugs_per_ktok": scored["efficiency_bugs_per_ktok"],
         "efficiency_bugs_per_dollar": scored["efficiency_bugs_per_dollar"],
         "submitted_by": submission.get("submitted_by"),

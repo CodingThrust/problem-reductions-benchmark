@@ -10,6 +10,45 @@ from pathlib import Path
 import pytest
 
 from benchmark import run_submission as rs
+from benchmark.cost import Price, Usage
+
+
+# ── cost is metered from tokens × declared price, not hand-reported ────────────
+
+class TestCostMetering:
+    def test_per_rule_cost_derived_from_row_usage(self):
+        # price given → total_cost_usd is price × summed row usage, and usage_totals/prices
+        # ride on the envelope. The self-reported per-row cost is NOT summed here.
+        price = Price(input=3.0, output=15.0)
+        rows = [
+            {"rule": "r1", "result": "no_certificate", "cost": 999.0, "tokens_k": 0.0,
+             "usage": {"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0}},
+            {"rule": "r2", "result": "no_certificate", "cost": 999.0, "tokens_k": 0.0,
+             "usage": {"input": 0, "output": 1_000_000, "cache_read": 0, "cache_write": 0}},
+        ]
+        sub = rs.build_submission("m", rows, budget_cap=20.0, library_commit="c", price=price)
+        assert sub["total_cost_usd"] == 18.0            # 3 (input) + 15 (output), not 1998
+        assert sub["total_tokens_k"] == 2000.0
+        assert sub["usage_totals"] == {"input": 1_000_000, "output": 1_000_000,
+                                       "cache_read": 0, "cache_write": 0}
+        assert sub["prices"] == {"input": 3.0, "output": 15.0,
+                                 "cache_read": 0.0, "cache_write": 0.0}
+
+    def test_whole_repo_cost_derived_from_session_usage(self):
+        price = Price(input=3.0, output=15.0)
+        usage = Usage(input_tokens=2_000_000, output_tokens=0)
+        rows = [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0,
+                 "certificate": {"rule": "r1"}}]
+        sub = rs.build_submission("m", rows, budget_cap=20.0, library_commit="c",
+                                  price=price, usage_totals=usage)
+        assert sub["total_cost_usd"] == 6.0             # 2M input @ $3
+        assert sub["usage_totals"]["input"] == 2_000_000
+
+    def test_no_price_falls_back_and_prices_null(self):
+        rows = [{"rule": "r1", "result": "no_certificate", "cost": 0.4, "tokens_k": 2.0}]
+        sub = rs.build_submission("m", rows, budget_cap=20.0, library_commit="c")
+        assert sub["total_cost_usd"] == 0.4             # row-sum fallback
+        assert sub["prices"] is None
 
 
 def _fake_repo(tmp_path: Path, rules: list[str]) -> Path:

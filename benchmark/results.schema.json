@@ -19,15 +19,39 @@
       "minimum": 0,
       "description": "Number of verified, novel bugs found"
     },
+    "test": {
+      "type": "boolean",
+      "description": "Carried through from the submission: scored + stored privately but excluded from the public leaderboard."
+    },
     "total_cost_usd": {
       "type": "number",
       "minimum": 0,
-      "description": "Total spend in USD"
+      "description": "Total spend in USD — re-metered by the backend as usage_totals × prices (falls back to the self-reported figure only for legacy submissions without those)."
     },
     "total_tokens_k": {
       "type": "number",
       "minimum": 0,
-      "description": "Total tokens used (in thousands)"
+      "description": "Total tokens used (in thousands); the sum of usage_totals / 1000."
+    },
+    "usage_totals": {
+      "type": ["object", "null"],
+      "description": "Aggregate token usage in the four billed buckets (input/output/cache_read/cache_write) the cost was metered from. The reproducible primitive — lets any reader recompute cost under other prices.",
+      "properties": {
+        "input": {"type": "integer", "minimum": 0},
+        "output": {"type": "integer", "minimum": 0},
+        "cache_read": {"type": "integer", "minimum": 0},
+        "cache_write": {"type": "integer", "minimum": 0}
+      }
+    },
+    "prices": {
+      "type": ["object", "null"],
+      "description": "Declared per-token price snapshot (USD per 1M tokens) the cost was metered from; dated by the submission's created_at. null for legacy/FAKE submissions.",
+      "properties": {
+        "input": {"type": "number", "minimum": 0},
+        "output": {"type": "number", "minimum": 0},
+        "cache_read": {"type": "number", "minimum": 0},
+        "cache_write": {"type": "number", "minimum": 0}
+      }
     },
     "efficiency_bugs_per_ktok": {
       "type": "number",
