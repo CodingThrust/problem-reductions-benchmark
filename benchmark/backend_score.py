@@ -64,9 +64,9 @@ def board_slug(scored: dict, stem: str) -> str:
 
 def board_entry(scored: dict, stem: str) -> dict:
     """The public per-submission leaderboard entry, tagged with its time + id."""
-    sub_view = {"model": scored["model"], "budget_cap": scored.get("budget_cap", 20),
-                "submitted_by": scored.get("submitted_by")}
-    entry = leaderboard_entry(sub_view, scored)
+    # leaderboard_entry reads only ``submitted_by`` from its first arg; the scored file
+    # carries it when present, so it doubles as the submission view.
+    entry = leaderboard_entry(scored, scored)
     entry["timestamp"] = _submission_ts(scored, stem)
     entry["submission_id"] = _submission_id(stem)
     return entry
@@ -220,11 +220,9 @@ def aggregate_leaderboard(results_dir: Path) -> list[dict]:
         # leaderboard — skip them here so an end-to-end test can't pollute production.
         if scored.get("test"):
             continue
-        # Reconstruct a minimal submission view for the entry (budget_cap lives in the
-        # scored file only if we put it there; default to RANKED 20 for scored results).
-        sub_view = {"model": scored["model"], "budget_cap": scored.get("budget_cap", 20),
-                    "submitted_by": scored.get("submitted_by")}
-        entries.append(leaderboard_entry(sub_view, scored))
+        # leaderboard_entry reads only ``submitted_by`` from its first arg, which the
+        # scored file carries when present — it doubles as the submission view.
+        entries.append(leaderboard_entry(scored, scored))
     ranked = _dedup_best(entries)
     (results_dir / "leaderboard.json").write_text(json.dumps(ranked, indent=2), encoding="utf-8")
     return ranked

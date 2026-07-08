@@ -12,19 +12,16 @@ from pathlib import Path
 
 import yaml
 
-from benchmark.cost import Price, extract_usage, usage_from_response
 from benchmark.env_context import EnvContext
 from benchmark.env_setup import setup_env
+from benchmark.usage import extract_usage, usage_as_dict
 from benchmark.verify import count_bugs, verify
 
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
 REPO_CONFIG_FILE = Path(__file__).parent / "config_repo.yaml"
 SKIP_RULES = {"mod", "traits", "graph_helpers", "analysis", "cost", "registry", "graph"}
 
-# Rough average cost per 1K tokens (used as fallback when model doesn't report usage)
-AVG_COST_PER_KTOK = 6.0
-# Per-call output-token ceiling — bounds the single call that may cross the budget line to
-# well under $1 even at premium prices. The submitter can override via --max-tokens.
+# Per-call output-token ceiling. The submitter can override via --max-tokens.
 DEFAULT_MAX_TOKENS = 8192
 
 
@@ -94,15 +91,12 @@ def save_trajectory(messages: list, path: Path) -> None:
             f.write(json.dumps({"role": msg.get("role", ""), "content": _message_text(msg)}) + "\n")
 
 
-def _session_cost(agent, price):
-    """Authoritative session spend from the trajectory. ``agent.cost`` is already our
-    token×price figure (see _build_model); cross-check against a fresh recompute and take
-    the max — never under-count for the budget guard. Returns (cost, tokens_k, usage)."""
+def _session_usage(agent):
+    """Session token usage summed from the trajectory. Returns (tokens_k, usage)."""
     usage = extract_usage(agent.messages)
-    cost = max(agent.cost, price.cost(usage) if price is not None else 0.0)
     total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
-    tokens_k = round(total_tokens / 1000, 2) if total_tokens else round(cost / AVG_COST_PER_KTOK * 1000, 2)
-    return cost, tokens_k, usage
+    tokens_k = round(total_tokens / 1000, 2)
+    return tokens_k, usage
 
 
 def _trajectory(agent) -> list[dict]:
@@ -114,13 +108,11 @@ def _trajectory(agent) -> list[dict]:
     return [{"role": m.get("role", ""), "content": _message_text(m)} for m in agent.messages]
 
 
-def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: Price | None,
+def _build_model(model_name: str, api_base: str | None, max_tokens: int,
                  model_kwargs: dict | None = None, api_key: str | None = None,
                  observation_template: str | None = None,
                  format_error_template: str | None = None):
-    """A LitellmModel whose cost is OUR token×price figure, so mini-swe-agent's own
-    per-step ``cost_limit`` enforces the per-rule budget with the authoritative number and
-    never raises on an unpriceable model.
+    """A LitellmModel configured for this benchmark's runs.
 
     Everything that configures the API call flows through ``model_kwargs`` (forwarded to
     litellm.completion) — these are NOT top-level config fields in mini-swe-agent v2 and
@@ -136,18 +128,9 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: 
     ``model:`` section carries the truncating templates; the caller threads them through."""
     from minisweagent.models.litellm_model import LitellmModel
 
-    class PricedLitellmModel(LitellmModel):
-        def _calculate_cost(self, response):
-            if price is not None:
-                try:
-                    return {"cost": price.cost(usage_from_response(getattr(response, "usage", None)))}
-                except Exception:
-                    pass
-            return super()._calculate_cost(response)
-
     mk: dict = dict(model_kwargs or {})  # arbitrary passthrough for non-standard providers
     if max_tokens:
-        mk["max_tokens"] = max_tokens  # per-call ceiling → bounds the budget-crossing call
+        mk["max_tokens"] = max_tokens  # per-call output ceiling
     if api_base:
         mk["api_base"] = api_base
     if api_key:
@@ -158,17 +141,33 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int, price: 
         cfg["observation_template"] = observation_template
     if format_error_template is not None:
         cfg["format_error_template"] = format_error_template
-    return PricedLitellmModel(model_name=model_name, model_kwargs=mk, **cfg)
+    return LitellmModel(model_name=model_name, model_kwargs=mk, **cfg)
+
+
+def _load_agent_config(config_path: str | Path | None, default_file: Path,
+                       strategy: str | None) -> tuple[dict, dict, str]:
+    """Resolve the prompt config + strategy hints shared by both session runners.
+
+    Returns (agent_cfg, model_cfg, strategy). ``cost_limit`` is force-disabled HERE — one
+    place — so mini-swe-agent's default ($3) can never bound a run, including under a
+    user-supplied AGENT_CONFIG; the config's step_limit is the only run bound."""
+    cfg_file = Path(config_path) if config_path else default_file
+    config = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    if strategy is None:
+        strat_file = os.environ.get("AGENT_STRATEGY_FILE")
+        strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
+    agent_cfg = config.get("agent", {})
+    agent_cfg["cost_limit"] = 0
+    model_cfg = config.get("model", {}) or {}  # observation/format templates live here
+    return agent_cfg, model_cfg, strategy
 
 
 def run_one(
     model_name: str,
     ctx: EnvContext,
     rule_name: str,
-    cost_limit: float,
     api_base: str | None = None,
     trajectory_dir: Path | None = None,
-    price: Price | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     config_path: str | Path | None = None,
     strategy: str | None = None,
@@ -187,17 +186,10 @@ def run_one(
     safe_name = rule_name.replace("-", "_")
     rule_file = ctx.repo_path / "src" / "rules" / f"{rule_name}.rs"
 
-    cfg_file = Path(config_path) if config_path else CONFIG_FILE
-    config = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-    if strategy is None:
-        strat_file = os.environ.get("AGENT_STRATEGY_FILE")
-        strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
-    agent_cfg = config.get("agent", {})
-    agent_cfg["cost_limit"] = cost_limit
-    model_cfg = config.get("model", {}) or {}  # observation/format templates live here
+    agent_cfg, model_cfg, strategy = _load_agent_config(config_path, CONFIG_FILE, strategy)
 
     agent = DefaultAgent(
-        _build_model(model_name, api_base, max_tokens, price,
+        _build_model(model_name, api_base, max_tokens,
                      model_kwargs=model_kwargs, api_key=api_key,
                      observation_template=model_cfg.get("observation_template"),
                      format_error_template=model_cfg.get("format_error_template")),
@@ -210,17 +202,14 @@ def run_one(
         "safe_name": safe_name,
         "rule_file": str(rule_file),
         "commit_hash": ctx.commit_hash[:7],
-        "cost_limit": cost_limit,
-        "strategy": strategy or "",
+        "strategy": strategy,
     }
 
     cert = None
     try:
         agent.run(task=rule_name)
-        cost, tokens_k, usage = _session_cost(agent, price)
-        usage_row = {"input": usage.input_tokens, "output": usage.output_tokens,
-                     "cache_read": usage.cache_read_tokens, "cache_write": usage.cache_write_tokens,
-                     "accounted_cost_usd": round(agent.cost, 6)}
+        tokens_k, usage = _session_usage(agent)
+        usage_row = usage_as_dict(usage)
         trajectory = _trajectory(agent)
         cert = parse_certificate(agent.messages)
         if trajectory_dir is not None:
@@ -230,7 +219,6 @@ def run_one(
         return {
             "rule": rule_name,
             "result": f"error: {e}",
-            "cost": getattr(agent, "cost", 0.0),
             "tokens_k": 0,
         }
 
@@ -238,7 +226,6 @@ def run_one(
         return {
             "rule": rule_name,
             "result": "no_certificate",
-            "cost": cost,
             "tokens_k": tokens_k,
             "steps": agent.n_calls,
             "usage": usage_row,
@@ -254,7 +241,6 @@ def run_one(
         return {
             "rule": rule_name,
             "result": "rejected",
-            "cost": cost,
             "tokens_k": tokens_k,
             "steps": agent.n_calls,
             "reject_reason": verdict.reason,
@@ -268,7 +254,6 @@ def run_one(
     return {
         "rule": rule_name,
         "result": "bug_found",
-        "cost": cost,
         "tokens_k": tokens_k,
         "steps": agent.n_calls,
         "certificate": cert,
@@ -281,24 +266,21 @@ def run_one(
 def run_repo_session(
     model_name: str,
     ctx: EnvContext,
-    cost_limit: float,
     *,
     api_base: str | None = None,
     trajectory_dir: Path | None = None,
     certs_path: Path | None = None,
-    price: Price | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-    step_limit: int | None = None,
     config_path: str | Path | None = None,
     strategy: str | None = None,
     model_kwargs: dict | None = None,
     api_key: str | None = None,
 ) -> dict:
-    """One WHOLE-REPO bug-hunting session: the agent gets the entire library + pred and the
-    full budget as its ``cost_limit``, chooses which rules to probe, and emits a certificate
-    per bug. Returns ``{"rows": [...], "cost": float, "tokens_k": float}`` — one result row
-    per distinct emitted certificate, each re-verified with pred and carrying the shared
-    session trajectory for provenance. Contrast with ``run_one`` (one isolated rule/session).
+    """One WHOLE-REPO bug-hunting session: the agent gets the entire library + pred, chooses
+    which rules to probe within the config's ``step_limit``, and emits a certificate per bug.
+    Returns ``{"rows": [...], "tokens_k": float, ...}`` — one result row per distinct emitted
+    certificate, each re-verified with pred and carrying the shared session trajectory for
+    provenance. Contrast with ``run_one`` (one isolated rule/session).
 
     Durability: the agent is prompted to append each certificate to ``certs_path`` the moment
     it finds it (the {{certs_file}} slot), so bugs survive an early stop; certificates are
@@ -309,16 +291,7 @@ def run_repo_session(
     from minisweagent.agents.default import DefaultAgent
     from minisweagent.environments.local import LocalEnvironment
 
-    cfg_file = Path(config_path) if config_path else REPO_CONFIG_FILE
-    config = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-    if strategy is None:
-        strat_file = os.environ.get("AGENT_STRATEGY_FILE")
-        strategy = Path(strat_file).read_text(encoding="utf-8") if strat_file else ""
-    agent_cfg = config.get("agent", {})
-    agent_cfg["cost_limit"] = cost_limit
-    if step_limit is not None:
-        agent_cfg["step_limit"] = step_limit
-    model_cfg = config.get("model", {}) or {}  # observation/format templates live here
+    agent_cfg, model_cfg, strategy = _load_agent_config(config_path, REPO_CONFIG_FILE, strategy)
 
     safe_model = model_name.replace("/", "_").replace(":", "_")
     # Per-step trajectory persistence (mini-swe-agent saves config.output_path after every
@@ -336,7 +309,7 @@ def run_repo_session(
         certs_path.write_text("", encoding="utf-8")
 
     agent = DefaultAgent(
-        _build_model(model_name, api_base, max_tokens, price,
+        _build_model(model_name, api_base, max_tokens,
                      model_kwargs=model_kwargs, api_key=api_key,
                      observation_template=model_cfg.get("observation_template"),
                      format_error_template=model_cfg.get("format_error_template")),
@@ -346,7 +319,6 @@ def run_repo_session(
     agent.extra_template_vars = {
         "repo_dir": str(ctx.repo_path),
         "commit_hash": ctx.commit_hash[:7],
-        "cost_limit": cost_limit,
         "strategy": strategy,
         "certs_file": str(certs_path) if certs_path is not None else "/tmp/certs.txt",
     }
@@ -361,7 +333,7 @@ def run_repo_session(
     except Exception as e:  # noqa: BLE001 — any failure still salvages partial results
         run_error = f"{type(e).__name__}: {e}"
 
-    cost, tokens_k, usage = _session_cost(agent, price)
+    tokens_k, usage = _session_usage(agent)
     trajectory = _trajectory(agent)
     if trajectory_dir is not None:
         save_trajectory(agent.messages, Path(trajectory_dir) / f"{safe_model}_whole-repo.jsonl")
@@ -376,9 +348,9 @@ def run_repo_session(
     # The whole session is ONE trajectory shared by every bug — return it once for the
     # envelope (build_submission) instead of copying it onto each row. ``usage`` is the
     # session-level 4-bucket token total (per-rule rows carry their own; whole-repo rows
-    # don't), so the envelope can re-price it — see build_submission. ``error`` is set when
-    # the session died on a fatal error (the partial results are still valid).
-    return {"rows": rows, "cost": cost, "tokens_k": tokens_k, "trajectory": trajectory,
+    # don't). ``error`` is set when the session died on a fatal error (the partial results
+    # are still valid).
+    return {"rows": rows, "tokens_k": tokens_k, "trajectory": trajectory,
             "usage": usage, "error": run_error}
 
 
@@ -392,8 +364,7 @@ def _rows_from_certificates(certs: list[dict]) -> list[dict]:
         row = {
             "rule": cert.get("rule"),
             "result": "bug_found" if verdict.accepted else "rejected",
-            "cost": 0.0,        # session cost/tokens live on the submission envelope, not per row
-            "tokens_k": 0.0,
+            "tokens_k": 0.0,    # session tokens live on the submission envelope, not per row
             "certificate": cert,
         }
         if verdict.accepted:
@@ -408,8 +379,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="pred-based bug-finding benchmark")
     parser.add_argument("--model", default="anthropic/claude-sonnet-4-6", help="LiteLLM model name")
     parser.add_argument("--api-base", default=None, help="Custom API base URL")
-    parser.add_argument("--budget", type=float, default=20.0, help="Total USD budget")
-    parser.add_argument("--per-rule", type=float, default=0.5, help="Per-rule cost limit ($)")
     parser.add_argument("--rules", nargs="*", help="Specific rule names (default: all)")
     parser.add_argument("--output", default="results/results_mini.json")
     parser.add_argument("--trajectory-dir", default=None, help="Directory to save per-rule JSONL trajectories")
@@ -419,24 +388,18 @@ def main() -> None:
     ctx = setup_env(args.repo_dir)
     rules = args.rules if args.rules else list_rules(str(ctx.repo_path))
 
-    results, total_cost, total_tokens_k = [], 0.0, 0.0
+    results, total_tokens_k = [], 0.0
 
     for rule_name in rules:
-        remaining = args.budget - total_cost
-        if remaining <= 0:
-            print("Budget exhausted.")
-            break
-        limit = min(args.per_rule, remaining)
-        print(f"  {rule_name} (limit ${limit:.2f})...", end=" ", flush=True)
+        print(f"  {rule_name}...", end=" ", flush=True)
 
-        r = run_one(args.model, ctx, rule_name, limit, api_base=args.api_base,
+        r = run_one(args.model, ctx, rule_name, api_base=args.api_base,
                     trajectory_dir=Path(args.trajectory_dir) if args.trajectory_dir else None)
         results.append(r)
-        total_cost += r.get("cost", 0)
         total_tokens_k += r.get("tokens_k", 0)
 
         status = "BUG FOUND" if r["result"] == "bug_found" else r["result"]
-        print(f"{status} (${r.get('cost', 0):.4f}, {r.get('tokens_k', 0):.1f}K tok)")
+        print(f"{status} ({r.get('tokens_k', 0):.1f}K tok)")
 
     bugs_found = count_bugs(results)  # one rule = one bug
     efficiency_per_ktok = round(bugs_found / total_tokens_k, 4) if total_tokens_k else 0
@@ -444,10 +407,8 @@ def main() -> None:
         "model": args.model,
         "library_commit": ctx.commit_hash,
         "bugs_found": bugs_found,
-        "total_cost_usd": round(total_cost, 6),
         "total_tokens_k": round(total_tokens_k, 2),
         "efficiency_bugs_per_ktok": efficiency_per_ktok,
-        "efficiency_bugs_per_dollar": round(bugs_found / total_cost, 4) if total_cost else 0,
         "rules_tested": len(results),
         "results": results,
     }
@@ -455,7 +416,7 @@ def main() -> None:
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"\n{bugs_found} bugs | ${total_cost:.4f} | {efficiency_per_ktok:.4f} bugs/Ktok")
+    print(f"\n{bugs_found} bugs | {total_tokens_k:.1f}K tok | {efficiency_per_ktok:.4f} bugs/Ktok")
     print(f"Results → {args.output}")
 
 

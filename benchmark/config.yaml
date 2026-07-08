@@ -67,13 +67,12 @@ agent:
     Library repo: {{repo_dir}} (commit {{commit_hash}})
     Rule source: {{rule_file}}
 
-    Use pred commands to test the round-trip correctness. You have a limited budget — be efficient and don't over-explore.
+    Use pred commands to test the round-trip correctness. You have a limited number of steps — be efficient and don't over-explore.
     If you find a bug, emit the CERTIFICATE_START...CERTIFICATE_END block.
     If no bug found, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     </task>
 
   step_limit: 35
-  cost_limit: 0.5
 
 environment:
   timeout: 120

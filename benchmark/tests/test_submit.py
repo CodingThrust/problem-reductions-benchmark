@@ -9,10 +9,10 @@ from benchmark import submit as sub
 
 def _valid(tmp_path: Path, results=None) -> Path:
     doc = {
-        "schema_version": "1.0", "model": "anthropic/test", "library_commit": "deadbeef",
-        "budget_cap": 20, "total_cost_usd": 1.0, "total_tokens_k": 10.0,
+        "schema_version": "2.0", "model": "anthropic/test", "library_commit": "deadbeef",
+        "total_tokens_k": 10.0,
         "rules_tested": 1, "results": results if results is not None else [
-            {"rule": "r1", "result": "no_certificate", "cost": 0.1, "tokens_k": 1.0}],
+            {"rule": "r1", "result": "no_certificate", "tokens_k": 1.0}],
     }
     p = tmp_path / "submission.json"
     p.write_text(json.dumps(doc), encoding="utf-8")
@@ -20,7 +20,7 @@ def _valid(tmp_path: Path, results=None) -> Path:
 
 
 def _bug_row(with_cert=True, with_traj=True) -> dict:
-    row = {"rule": "r1", "result": "bug_found", "cost": 0.1, "tokens_k": 1.0}
+    row = {"rule": "r1", "result": "bug_found", "tokens_k": 1.0}
     if with_cert:
         row["certificate"] = {"rule": "r1", "source": {}}
     if with_traj:
@@ -36,8 +36,8 @@ class TestValidate:
         assert any("model" in p for p in sub.validate_submission({"results": []}))
 
     def test_bug_found_needs_certificate_and_trajectory(self):
-        doc = {**json.loads('{"schema_version":"1","model":"m","library_commit":"c",'
-                            '"budget_cap":20,"total_cost_usd":0,"total_tokens_k":0,"rules_tested":1}'),
+        doc = {**json.loads('{"schema_version":"2","model":"m","library_commit":"c",'
+                            '"total_tokens_k":0,"rules_tested":1}'),
                "results": [_bug_row(with_cert=False, with_traj=False)]}
         problems = sub.validate_submission(doc)
         assert any("no certificate" in p for p in problems)

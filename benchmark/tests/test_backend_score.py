@@ -22,12 +22,10 @@ def _traj(cert: dict) -> list[dict]:
 
 def _write_submission(subs_dir: Path, name: str, results, **over) -> Path:
     sub = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "model": over.pop("model", "anthropic/test"),
         "library_commit": "deadbeef",
-        "budget_cap": 20,
         "bugs_found": over.pop("bugs_found", 0),
-        "total_cost_usd": 2.0,
         "total_tokens_k": 50.0,
         "rules_tested": len(results),
         "results": results,
@@ -43,7 +41,7 @@ class TestProcessLocal:
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         _write_submission(subs, "a.json",
-                          [{"rule": "r1", "result": "no_certificate", "cost": 1.0, "tokens_k": 10.0}])
+                          [{"rule": "r1", "result": "no_certificate", "tokens_k": 10.0}])
         summary = bs.process_local(str(subs), str(results))
         assert summary[0]["status"] == "FINISHED"
         assert summary[0]["bugs_found"] == 0
@@ -54,7 +52,7 @@ class TestProcessLocal:
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         _write_submission(subs, "a.json",
-                          [{"rule": "r1", "result": "no_certificate", "cost": 1.0, "tokens_k": 10.0}])
+                          [{"rule": "r1", "result": "no_certificate", "tokens_k": 10.0}])
         bs.process_local(str(subs), str(results))
         status = json.loads((subs / "a.status.json").read_text())
         assert status["status"] == "FINISHED"
@@ -63,7 +61,7 @@ class TestProcessLocal:
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         _write_submission(subs, "a.json",
-                          [{"rule": "r1", "result": "no_certificate", "cost": 1.0, "tokens_k": 10.0}])
+                          [{"rule": "r1", "result": "no_certificate", "tokens_k": 10.0}])
         bs.process_local(str(subs), str(results))
         again = bs.process_local(str(subs), str(results))
         assert again == []  # nothing left pending
@@ -79,18 +77,17 @@ class TestProcessLocal:
         cert = lambda v: {"rule": "r1", "violation": v, "source": {}, "bundle": {}}
         win_cert, lose_cert = cert("solve_mismatch"), cert("unsound_extraction")
         _write_submission(subs, "win.json",
-                          [{"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
+                          [{"rule": "r1", "result": "bug_found", "tokens_k": 10.0,
                             "certificate": win_cert, "trajectory": _traj(win_cert)}],
                           model="anthropic/winner")
         _write_submission(subs, "lose.json",
-                          [{"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
+                          [{"rule": "r1", "result": "bug_found", "tokens_k": 10.0,
                             "certificate": lose_cert, "trajectory": _traj(lose_cert)}],
                           model="anthropic/loser")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())
         assert [e["model"] for e in board] == ["anthropic/winner", "anthropic/loser"]
         assert board[0]["bugs_found"] == 1 and board[1]["bugs_found"] == 0
-        assert all(e["budget_cap"] == 20 for e in board)
 
     def test_finds_nested_submissions(self, tmp_path):
         # Real layout: submissions/<handle>/<file>.json — must be found recursively.
@@ -98,7 +95,7 @@ class TestProcessLocal:
         nested = subs / "submissions" / "alice"
         nested.mkdir(parents=True)
         _write_submission(nested, "run.json",
-                          [{"rule": "r1", "result": "no_certificate", "cost": 1.0, "tokens_k": 10.0}])
+                          [{"rule": "r1", "result": "no_certificate", "tokens_k": 10.0}])
         summary = bs.process_local(str(subs), str(results))
         assert len(summary) == 1 and summary[0]["status"] == "FINISHED"
         assert (nested / "run.status.json").exists()
@@ -176,8 +173,7 @@ class TestPerSubmissionBoard:
         assert slug == bs.board_slug(scored, stem)                     # deterministic
         assert slug == "anthropic-claude-sonnet-4-6--20260706T060247--dc9b2aae"
         full = {**scored, "results": [], "bugs_found": 0, "rules_tested": 0,
-                "total_cost_usd": 0, "total_tokens_k": 0,
-                "efficiency_bugs_per_ktok": 0, "efficiency_bugs_per_dollar": 0}
+                "total_tokens_k": 0, "efficiency_bugs_per_ktok": 0}
         e = bs.board_entry(full, stem)
         assert e["timestamp"] == "20260706T060247" and e["submission_id"] == "dc9b2aae"
 
@@ -236,7 +232,7 @@ class TestRealFixture:
         cert = json.loads(path.read_text(encoding="utf-8"))
         _write_submission(subs, "real.json",
                           [{"rule": cert.get("rule", "r"), "result": "bug_found",
-                            "cost": 1.0, "tokens_k": 10.0, "certificate": cert,
+                            "tokens_k": 10.0, "certificate": cert,
                             "trajectory": _traj(cert)}],
                           model="anthropic/real")
         bs.process_local(str(subs), str(results))
@@ -251,7 +247,7 @@ class TestRealFixture:
         cert = json.loads((FIXTURES / "valid_bug.json").read_text(encoding="utf-8"))
         _write_submission(subs, "real.json",
                           [{"rule": cert.get("rule", "r"), "result": "bug_found",
-                            "cost": 1.0, "tokens_k": 10.0, "certificate": cert}],
+                            "tokens_k": 10.0, "certificate": cert}],
                           model="anthropic/real")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())

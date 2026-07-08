@@ -1,23 +1,23 @@
 """
 Preflight check for a real submission run.
 
-Uses the SAME config you'd give the full batch (model, key, api_base, model_kwargs, price,
+Uses the SAME config you'd give the full batch (model, key, api_base, model_kwargs,
 pred version) but does the minimum real work needed to prove the run won't error out:
 
   1. verify the `pred` binary + version,
   2. confirm the library's reduction rules are present,
-  3. make ONE tiny real model call (~$0.0001) to validate credentials / endpoint / pricing.
+  3. make ONE tiny real model call to validate credentials / endpoint.
 
-Exits 0 only if every check passes — so you can launch the $20 batch with confidence
+Exits 0 only if every check passes — so you can launch the full batch with confidence
 instead of discovering a typo'd key or wrong base URL 20 rules in. This is a user-facing
-preflight (it spends a fraction of a cent of real money); the no-API wiring of the runner
-itself is covered by the pytest suite (tests/test_run_submission.py), not here.
+preflight (it makes one tiny real API call); the no-API wiring of the runner itself is
+covered by the pytest suite (tests/test_run_submission.py), not here.
 """
 from __future__ import annotations
 
-from benchmark.cost import Price, usage_from_response
 from benchmark.env_setup import verify_pred_version
 from benchmark.run_mini import DEFAULT_MAX_TOKENS, _build_model, list_rules
+from benchmark.usage import usage_from_response
 
 PROBE_PROMPT = "Reply with exactly: OK"
 
@@ -32,7 +32,6 @@ def run_checks(
     api_key: str | None = None,
     model_kwargs: dict | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-    price: Price | None = None,
 ) -> list[Check]:
     """Run the three preflight checks and return their results (never raises)."""
     results: list[Check] = []
@@ -55,21 +54,19 @@ def run_checks(
         results.append(("library rules", False, str(e)))
 
     # 3. one real model call through the exact batch model config (validates key, endpoint,
-    #    model name, model_kwargs, and that pricing computes).
+    #    model name, model_kwargs).
     try:
-        model = _build_model(model_name, api_base, max_tokens, price,
+        model = _build_model(model_name, api_base, max_tokens,
                              model_kwargs=model_kwargs, api_key=api_key)
         msgs = [{"role": "user", "content": PROBE_PROMPT}]
         # Call the raw completion, NOT model.query(): query() also parses the reply into an
         # agent bash-action and raises FormatError on a trivial probe. We only need to prove
-        # the API round-trips and that pricing computes from the returned usage.
+        # the API round-trips and that usage reports back.
         prep = (model._prepare_messages_for_api(msgs)
                 if hasattr(model, "_prepare_messages_for_api") else msgs)
         response = model._query(prep)
         u = usage_from_response(getattr(response, "usage", None))
         detail = f"API reachable; {u.total_tokens} tokens this call"
-        if price is not None:
-            detail += f", ≈ ${price.cost(u):.6f}"
         results.append(("model call", True, detail))
     except Exception as e:
         results.append(("model call", False, f"{type(e).__name__}: {e}"))

@@ -4,7 +4,7 @@
   "title": "BenchmarkSubmission",
   "description": "A self-describing, rankable submission emitted by the dockerized runner and uploaded to the Space. Superset of results.schema.json: the results[] items stay byte-compatible with the scheduler's per-rule output, with an envelope added so the backend can rank and re-verify it.",
   "type": "object",
-  "required": ["schema_version", "model", "library_commit", "budget_cap", "bugs_found", "total_cost_usd", "total_tokens_k", "rules_tested", "results"],
+  "required": ["schema_version", "model", "library_commit", "bugs_found", "total_tokens_k", "rules_tested", "results"],
   "properties": {
     "schema_version": {
       "type": "string",
@@ -18,20 +18,10 @@
       "type": "string",
       "description": "Full git commit hash of the problem-reductions library the run targeted"
     },
-    "budget_cap": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Total USD budget the run was given. Must be 20 to be ranked."
-    },
     "bugs_found": {
       "type": "integer",
       "minimum": 0,
       "description": "Self-reported distinct rules with a confirmed bug. ADVISORY ONLY — the backend recomputes this from pred re-verification and never trusts this number."
-    },
-    "total_cost_usd": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Total spend in USD. DERIVED from token_usage × the declared prices (see usage_totals + prices); ADVISORY — the backend re-meters it from those and never trusts this figure. Falls back to the runner's cost tracking only when no prices are declared."
     },
     "total_tokens_k": {
       "type": "number",
@@ -40,44 +30,33 @@
     },
     "usage_totals": {
       "type": "object",
-      "description": "Aggregate token usage split into the four billed buckets — the reproducible primitive the backend re-prices. Cost = input×price.input + output×price.output + cache_read×price.cache_read + cache_write×price.cache_write (USD per 1M).",
+      "description": "Aggregate token usage split into the four provider-reported buckets — the reproducible primitive behind total_tokens_k.",
       "properties": {
         "input": {"type": "integer", "minimum": 0, "description": "Uncached prompt tokens"},
-        "output": {"type": "integer", "minimum": 0, "description": "Completion tokens (includes reasoning/thinking tokens, billed at the output rate)"},
+        "output": {"type": "integer", "minimum": 0, "description": "Completion tokens (includes reasoning/thinking tokens)"},
         "cache_read": {"type": "integer", "minimum": 0, "description": "Prompt tokens served from cache"},
         "cache_write": {"type": "integer", "minimum": 0, "description": "Prompt tokens written to cache"}
-      }
-    },
-    "prices": {
-      "type": ["object", "null"],
-      "description": "Declared per-token price snapshot (USD per 1,000,000 tokens), dated by created_at. The submitter pays the bill so supplies the rate; the backend re-meters cost as usage_totals × prices. null when no price was declared (e.g. a FAKE-mode run).",
-      "properties": {
-        "input": {"type": "number", "minimum": 0},
-        "output": {"type": "number", "minimum": 0},
-        "cache_read": {"type": "number", "minimum": 0},
-        "cache_write": {"type": "number", "minimum": 0}
       }
     },
     "rules_tested": {
       "type": "integer",
       "minimum": 0,
-      "description": "Number of rules the run attempted before the budget ran out"
+      "description": "Number of rules the run attempted"
     },
     "results": {
       "type": "array",
       "description": "Per-rule results, byte-compatible with results.schema.json items",
       "items": {
         "type": "object",
-        "required": ["rule", "result", "cost", "tokens_k"],
+        "required": ["rule", "result", "tokens_k"],
         "if": {"properties": {"result": {"const": "bug_found"}}},
-        "then": {"required": ["rule", "result", "cost", "tokens_k", "certificate"]},
+        "then": {"required": ["rule", "result", "tokens_k", "certificate"]},
         "properties": {
           "rule": {"type": "string"},
           "result": {
             "type": "string",
-            "description": "Outcome for this rule. Canonical: bug_found | no_certificate | rejected | no_bug | error | skipped_budget. error rows may carry a free-form 'error: <msg>' string."
+            "description": "Outcome for this rule. Canonical: bug_found | no_certificate | rejected | no_bug | error. error rows may carry a free-form 'error: <msg>' string."
           },
-          "cost": {"type": "number", "minimum": 0},
           "tokens_k": {"type": "number", "minimum": 0},
           "steps": {"type": "integer", "minimum": 0},
           "certificate": {
@@ -111,7 +90,6 @@
       }
     },
     "efficiency_bugs_per_ktok": {"type": "number", "minimum": 0},
-    "efficiency_bugs_per_dollar": {"type": "number", "minimum": 0},
     "submitted_by": {"type": ["string", "null"], "description": "Submitter identity (HF username / contact), filled at submit time"},
     "runner_version": {"type": "string", "description": "Version tag of the runner image/script that produced this"},
     "pred_version": {"type": "string", "description": "Version of the pred binary used (must match the pinned tag; verified server-side)"},

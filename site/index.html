@@ -259,7 +259,7 @@
       <div class="meta">
         <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0" target="_blank" rel="noopener" title="problem-reductions library version (pinned)">library <b>v0.6.0</b><i class="dot"></i></a>
         <div class="metarow">
-          <span><b>$20</b> / model</span>
+          <span><b>300 steps</b> / model</span>
           <span><b id="rulecount">253</b> rules</span>
         </div>
       </div>
@@ -274,7 +274,7 @@
       <span class="hint">Click a row for its run stats →</span>
     </div>
     <table class="lb" id="lb-table"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
-    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Budget reach</b> = rules the $20 reached. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
+    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Coverage</b> = rules the run reached. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
   </section>
 
   <section class="tab" id="tab-tasks">
@@ -295,16 +295,16 @@
   <section class="tab" id="tab-how">
     <div class="prose">
       <h2>From your model to the leaderboard</h2>
-      <p>Give a model the same <b>$20</b> and see how many bugs it can find in the library's problem
-         reductions. You run it on your own model and key; we independently re-check every bug before
-         it scores.</p>
+      <p>Give a model the same step-limited session and see how many bugs it can find in the library's
+         problem reductions. You run it on your own model and key; we independently re-check every bug
+         before it scores.</p>
     </div>
 
     <div class="lane you">You run it</div>
     <div class="flow">
       <div class="fnode"><div class="fdot">1</div><div class="fcard"><h4>Get the runner</h4><p>One Docker image: the solver (<code>pred</code>) plus the rule library, pinned to the benchmark version.</p></div></div>
-      <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key and the price.</p></div></div>
-      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model probes each rule for a counterexample until the $20 runs out; each find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
+      <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key.</p></div></div>
+      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model probes each rule for a counterexample until its steps run out; each find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
       <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>Upload <code>submission.json</code> with <code>benchmark.submit</code>. No web form.</p></div></div>
     </div>
 
@@ -322,8 +322,8 @@
         <p>Each reduction turns problem <i>A</i> into an equivalent problem <i>B</i>. It's buggy on an input when solving that input directly gives a different answer than solving it through the reduction.</p>
       </div>
       <div class="def">
-        <h4>Why the $20 is fair</h4>
-        <p>Every model gets the same budget, measured from real token usage at the price you declare. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+        <h4>Why it is fair</h4>
+        <p>Every model gets the same step limit, with real token usage recorded from the run. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
       </div>
     </div>
   </section>
@@ -331,13 +331,13 @@
   <section class="tab" id="tab-submit">
     <div class="prose">
       <h2>Submit a run</h2>
-      <p>Run the dockerized runner at the fixed <b>$20</b> budget against problem-reductions <code>v0.6.0</code>, then upload the <code>submission.json</code> it produces. Every certificate is re-verified by <code>pred</code> before it counts.</p>
+      <p>Run the dockerized runner against problem-reductions <code>v0.6.0</code>, then upload the <code>submission.json</code> it produces. Every certificate is re-verified by <code>pred</code> before it counts.</p>
     </div>
     <div class="steps" style="margin-top:18px">
       <div class="step"><div class="num">1</div><div>
         <h4>Produce <code>submission.json</code></h4>
         <p>Configure once, validate with one tiny real call, then run.</p>
-        <pre class="cmd">cp submission.env.example submission.env   <span class="c"># model · key · price</span>
+        <pre class="cmd">cp submission.env.example submission.env   <span class="c"># model · key</span>
 make preflight   <span class="c"># validate config with one tiny real call</span>
 make run         <span class="c"># → ./out/submission.json</span></pre>
       </div></div>
@@ -353,7 +353,7 @@ python -m benchmark.submit --predictions out/submission.json</pre>
 
   <section class="tab" id="tab-about">
     <h3 class="about-h">About the benchmark</h3>
-    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets the same <b>$20</b>, and every claimed bug is independently re-verified server-side.</p>
+    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets the same step-limited session, and every claimed bug is independently re-verified server-side.</p>
     <div class="panel" style="margin-top:26px">
       <h3>How to cite</h3>
       <pre class="cmd" style="margin-top:12px">@misc{TODO_citation_key,
@@ -379,7 +379,7 @@ python -m benchmark.submit --predictions out/submission.json</pre>
 </aside>
 
 <script>
-const RANKED_BUDGET=20, TOTAL_DEFAULT=253;
+const TOTAL_DEFAULT=253;
 const short=m=>(m||"").split("/").pop();
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 let RESULTS=[],TASKS=[],TOTAL=TOTAL_DEFAULT;
@@ -399,21 +399,20 @@ const LB_COLS=[
   {key:"rank",label:"#"},
   {key:"model",label:"Model"},
   {key:"bugs",label:"Bugs",num:true},
-  {key:"reach",label:"Budget reach",sortBy:"reachFrac"},
-  {key:"spent",label:"Spent",num:true,sortBy:"spentNum"},
+  {key:"reach",label:"Coverage",sortBy:"reachFrac"},
   {key:"tokens",label:"Tokens (K)",num:true,sortBy:"tokensNum"},
   {key:"eff",label:"Bugs / Ktok",num:true,sortBy:"effNum"},
 ];
-const RIGHT=new Set(["bugs","spent","tokens","eff"]);
+const RIGHT=new Set(["bugs","tokens","eff"]);
 
 function buildLbRows(){
-  const ranked=RESULTS.filter(r=>r.budget_cap===RANKED_BUDGET)
+  const ranked=RESULTS.slice()
     .sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||(b.efficiency_bugs_per_ktok||0)-(a.efficiency_bugs_per_ktok||0));
   lbRows=ranked.map((r,i)=>{
     const tested=r.rules_tested||0, frac=TOTAL?Math.min(tested/TOTAL,1):0;
     return {rank:i+1,model:short(r.model),_model:r.model,bugs:r.bugs_found||0,
-      reachFrac:frac,tested,spentNum:r.total_cost_usd||0,tokensNum:r.total_tokens_k||0,
-      effNum:r.efficiency_bugs_per_ktok||0,spentEff:r.efficiency_bugs_per_dollar||0};
+      reachFrac:frac,tested,tokensNum:r.total_tokens_k||0,
+      effNum:r.efficiency_bugs_per_ktok||0};
   });
 }
 function renderLbHead(){
@@ -437,11 +436,10 @@ function renderLbBody(){
       <td class="model">${esc(r.model)}</td>
       <td class="n bugs"><span class="${r.bugs?'':'zero'}">${r.bugs}</span></td>
       <td class="reach"><div class="bar"><i style="width:${pct}%"></i></div><span class="rl">${r.tested}<em>/${TOTAL}</em></span></td>
-      <td class="n">$${r.spentNum.toFixed(2)}</td>
       <td class="n">${Math.round(r.tokensNum).toLocaleString()}</td>
       <td class="n">${r.effNum.toFixed(4)}</td>
     </tr>`;
-  }).join("")||`<tr><td colspan="7" class="empty">No models match.</td></tr>`;
+  }).join("")||`<tr><td colspan="6" class="empty">No models match.</td></tr>`;
 }
 let scatterPts=[];
 function hexA(hex,a){hex=String(hex||'').replace('#','');if(hex.length===3)hex=hex.split('').map(c=>c+c).join('');const n=parseInt(hex||'2563eb',16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;}
@@ -515,7 +513,7 @@ function renderScatter(){
       octx.beginPath(); octx.moveTo(hit.x,hit.y); octx.lineTo(hit.x,H-padB); octx.moveTo(hit.x,hit.y); octx.lineTo(padL,hit.y); octx.stroke(); octx.setLineDash([]);
       drawPoint(octx,hit.p,true);
       tip.style.opacity='1'; tip.style.left=hit.x+'px'; tip.style.top=hit.y+'px';
-      tip.innerHTML=`<b>${esc(hit.p.model)}</b><br>${hit.p.bugs} bugs \u00b7 ${Math.round(hit.p.tokensNum)}K tok \u00b7 $${hit.p.spentNum.toFixed(2)}`;
+      tip.innerHTML=`<b>${esc(hit.p.model)}</b><br>${hit.p.bugs} bugs \u00b7 ${Math.round(hit.p.tokensNum)}K tok`;
       cv.style.cursor='pointer';
     }else{tip.style.opacity='0'; cv.style.cursor='default';}
   };
@@ -535,10 +533,8 @@ function renderInspector(model){
   el.innerHTML=`<dl class="stats">
     <div><dt>Confirmed bugs</dt><dd>${row.bugs}</dd></div>
     <div><dt>Rules reached</dt><dd>${row.tested}<em>/${TOTAL}</em></dd></div>
-    <div><dt>Spent</dt><dd>$${row.spentNum.toFixed(2)}</dd></div>
     <div><dt>Tokens</dt><dd>${Math.round(row.tokensNum).toLocaleString()}K</dd></div>
     <div><dt>Bugs / Ktok</dt><dd>${row.effNum.toFixed(4)}</dd></div>
-    <div><dt>Bugs / $</dt><dd>${row.spentEff.toFixed(3)}</dd></div>
   </dl>`;
   openDrawer();
 }
@@ -586,7 +582,7 @@ Promise.all([
   RESULTS=res;TASKS=tasks;TOTAL=tasks.length||TOTAL_DEFAULT;
   const rc=document.getElementById("rulecount"); if(rc)rc.textContent=TOTAL;
   if(RESULTS.some(r=>r.placeholder))
-    document.getElementById("lb-banner").innerHTML=`<div class="banner">Showing placeholder data — real $20 runs pending.</div>`;
+    document.getElementById("lb-banner").innerHTML=`<div class="banner">Showing placeholder data — real runs pending.</div>`;
   buildLbRows();renderLbHead();renderLbBody();renderTasks();
 });
 </script>

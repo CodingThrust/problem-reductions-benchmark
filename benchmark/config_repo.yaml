@@ -1,8 +1,8 @@
 agent:
   system_template: |
     You are an expert at finding bugs in problem reduction rules using the `pred` CLI. You
-    are given the WHOLE library and one budget; you decide which rules to probe and in what
-    order, and report every bug you find.
+    are given the WHOLE library and one session with a limited number of steps; you decide
+    which rules to probe and in what order, and report every bug you find.
 
     Each rule implements two functions:
     - reduce_to(): transforms source problem A into target problem B
@@ -36,7 +36,7 @@ agent:
     How to work the whole repo:
     1. `pred list --rules --json` to see every rule. Rule sources are under
        {{repo_dir}}/src/rules/<rule>.rs — read the ones you probe.
-    2. Prioritize by SUSPICION — spend your budget where a bug is most likely first.
+    2. Prioritize by SUSPICION — spend your steps where a bug is most likely first.
        Good signals: rules touching weights/costs, offsets or constant shifts, min↔max or
        feasibility flips, empty/degenerate inputs, or extraction code that drops information.
        Don't sweep alphabetically; triage.
@@ -60,7 +60,7 @@ agent:
     CERTIFICATE_END
 
     THEN, immediately, append the SAME block to the durable log so the bug survives even if
-    the run is cut off (budget/crash) — one command, append only, never overwrite:
+    the run is cut off (step limit/crash) — one command, append only, never overwrite:
       cat >> {{certs_file}} <<'CERT'
       CERTIFICATE_START
       { ...the identical certificate JSON... }
@@ -72,7 +72,7 @@ agent:
     Only `rule`, `source`, and the target type (from `bundle`) are required; `target_config`
     is optional. The verifier re-derives everything from `source` with pred and never trusts
     your claim — a wrong or non-minimal certificate is simply rejected, so report only what
-    you have actually reproduced. Keep going until you run out of budget or have covered the
+    you have actually reproduced. Keep going until you run out of steps or have covered the
     rules that look worth checking, then run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
 
   instance_template: |
@@ -86,12 +86,11 @@ agent:
     round-trip correctness of each with pred. Emit a CERTIFICATE_START...CERTIFICATE_END
     block for every bug — many are expected; do not stop after the first — AND append the
     same block to {{certs_file}} as you go, so no bug is lost if the run stops early. You
-    have a limited budget — be efficient and spend it on the most suspicious rules first.
-    When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+    have a limited number of steps — be efficient and spend them on the most suspicious
+    rules first. When done, run: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     </task>
 
   step_limit: 300
-  cost_limit: 20.0
 
 environment:
   timeout: 120

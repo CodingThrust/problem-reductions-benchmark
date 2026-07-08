@@ -1,18 +1,13 @@
 """
-Tests for benchmark/cost.py — authoritative token-based cost accounting.
+Tests for benchmark/usage.py — token-usage accounting.
 
-The point of this module is that we never trust the gateway's dollar figure, so these
-tests pin the token→USD math, the OpenAI vs Anthropic usage mapping, and price resolution.
+Pins the OpenAI vs Anthropic usage mapping, the 4-bucket sums, and (de)serialization.
 """
 from types import SimpleNamespace
 
-from benchmark.cost import (
-    Price,
+from benchmark.usage import (
     Usage,
     extract_usage,
-    price_as_dict,
-    price_from_dict,
-    resolve_price,
     usage_as_dict,
     usage_from_dict,
     usage_from_response,
@@ -27,35 +22,6 @@ class TestSerialization:
     def test_usage_from_dict_tolerates_missing_and_none(self):
         assert usage_from_dict(None) == Usage()
         assert usage_from_dict({"input": 7}) == Usage(input_tokens=7)
-
-    def test_price_roundtrips_through_dict(self):
-        p = Price(input=3.0, output=15.0, cache_read=0.3, cache_write=3.75)
-        assert price_from_dict(price_as_dict(p)) == p
-
-    def test_price_from_dict_none_is_none(self):
-        assert price_from_dict(None) is None
-        assert price_from_dict({}) is None
-
-    def test_reprice_from_serialized_matches_direct(self):
-        # A submission stores usage_as_dict + price_as_dict; the backend re-prices from them.
-        u = Usage(input_tokens=1_000_000, output_tokens=500_000, cache_read_tokens=200_000)
-        p = Price(input=3.0, output=15.0, cache_read=0.3)
-        assert price_from_dict(price_as_dict(p)).cost(usage_from_dict(usage_as_dict(u))) == p.cost(u)
-
-
-class TestPriceCost:
-    def test_basic_input_output(self):
-        # 1M input @ $3, 0.5M output @ $15 = 3 + 7.5
-        p = Price(3.0, 15.0)
-        assert p.cost(Usage(input_tokens=1_000_000, output_tokens=500_000)) == 10.5
-
-    def test_cache_buckets_priced_separately(self):
-        p = Price(3.0, 15.0, cache_read=0.3, cache_write=3.75)
-        u = Usage(0, 0, cache_read_tokens=1_000_000, cache_write_tokens=1_000_000)
-        assert abs(p.cost(u) - (0.3 + 3.75)) < 1e-9
-
-    def test_zero_usage_zero_cost(self):
-        assert Price(3.0, 15.0).cost(Usage()) == 0.0
 
 
 class TestUsage:
@@ -99,17 +65,6 @@ class TestUsageFromResponse:
     def test_missing_fields_default_zero(self):
         u = usage_from_response(SimpleNamespace(prompt_tokens=42))
         assert u.input_tokens == 42 and u.output_tokens == 0
-
-
-class TestResolvePrice:
-    def test_override_wins(self):
-        ov = Price(1.0, 2.0)
-        assert resolve_price("anthropic/claude-sonnet-4-6", ov) is ov
-
-    def test_no_override_is_none(self):
-        # No built-in table by design — price must always be supplied for a real run.
-        assert resolve_price("anthropic/claude-sonnet-4-6") is None
-        assert resolve_price("some/unknown-model") is None
 
 
 class TestExtractUsage:

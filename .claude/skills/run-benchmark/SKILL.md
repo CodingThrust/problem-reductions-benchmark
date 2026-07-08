@@ -3,7 +3,7 @@ name: run-benchmark
 description: >-
   Run this repo's problem-reductions bug-finding benchmark end-to-end and produce
   out/submission.json: detect a container engine, build the runner image, configure
-  submission.env, preflight, and run the budgeted agent. Works on macOS and Linux
+  submission.env, preflight, and run the step-limited agent. Works on macOS and Linux
   (Docker or rootless Podman). Use when asked to run, test, reproduce, or smoke-test the benchmark,
   or to generate a submission for a model. NOT for `make test-unit` / pytest.
 ---
@@ -30,9 +30,7 @@ Step 6 — don't ask for intake secrets unless they're submitting.
 
 Confirm the user has:
 
-- A **model API key** and its **price per 1M tokens** (input + output) — needed for *either*
-  goal, since running the agent calls the model. Both *required*; a real run hard-fails
-  without `PRICE_IN`/`PRICE_OUT` (there is no built-in price table).
+- A **model API key** — needed for *either* goal, since running the agent calls the model.
 - **Only if submitting**: `PRB_SUBMIT_URL` + `PRB_API_KEY`, from the maintainer.
 - **git** and a **container engine** (checked next).
 
@@ -78,16 +76,13 @@ If `submission.env` is absent: `cp submission.env.example submission.env`. It's 
 ```ini
 MODEL_NAME=openai/gpt-5.4    # any LiteLLM-routable name (anthropic/… openai/… openrouter/… gemini/…)
 API_KEY=sk-...               # generic; or a provider var (OPENAI_API_KEY / ANTHROPIC_API_KEY / …)
-PRICE_IN=3.0                 # USD / 1M input tokens  — REQUIRED
-PRICE_OUT=15.0               # USD / 1M output tokens — REQUIRED
 ```
 
-For a cheap smoke run (don't spend the full $20) add `MAX_RULES=1`. A **ranked** submission
-must keep `BUDGET_USD=20` and omit `MAX_RULES`.
+For a cheap smoke run add `MAX_RULES=1`. A **ranked** submission must omit `MAX_RULES`.
 
 **Agent mode** (`AGENT_MODE`, default `per-rule`): `per-rule` runs one isolated agent session
-per rule with the budget split evenly; `whole-repo` runs ONE session over the whole library
-and lets the agent enumerate and triage the rules itself under a single budget. Both produce
+per rule (35 steps each); `whole-repo` runs ONE session over the whole library (300 steps)
+and lets the agent enumerate and triage the rules itself. Both produce
 the same `out/submission.json` and are scored identically — set `AGENT_MODE=whole-repo` to try
 it. (`MAX_RULES` only applies to `per-rule`.) In `whole-repo`, the agent also writes each
 certificate to `TRAJECTORY_DIR/certs.txt` (default `/out`) as it finds it, and the trajectory
@@ -99,13 +94,12 @@ overwrite each other.
 
 **Confirm the experiment parameters with the user — don't silently default them.** These
 shape the result and the spend, so state the resolved set and get an explicit OK before
-running: **mode** (`AGENT_MODE`), **budget** (a full ranked run at `BUDGET_USD=20`, or a
-cheap smoke run via `MAX_RULES=1` / a smaller budget), and — only if they care —
-`PER_RULE_BUDGET` and `MAX_TOKENS`. Ranked runs require `BUDGET_USD=20` and no `MAX_RULES`.
+running: **mode** (`AGENT_MODE`), full ranked run vs cheap smoke run (`MAX_RULES=1`), and —
+only if they care — `MAX_TOKENS`. Ranked runs must omit `MAX_RULES`.
 
 ## Step 4 — Preflight (one tiny real API call, ~a fraction of a cent)
 
-Always run this before the full run; it validates key/endpoint/price + pred/rules through the
+Always run this before the full run; it validates key/endpoint + pred/rules through the
 exact batch code path and fails fast.
 
 - **docker**: `make preflight`
@@ -113,12 +107,12 @@ exact batch code path and fails fast.
 
 It prints three checks (`pred binary`, `library rules`, `model call`). If any **FAIL**, read
 the detail and fix it — the `model call` line carries the real error (auth / endpoint / model
-name / pricing). Decode table in `references/env-and-troubleshoot.md`. Do not proceed on a FAIL.
+name). Decode table in `references/env-and-troubleshoot.md`. Do not proceed on a FAIL.
 
 ## Step 5 — Full run → out/submission.json
 
 **Gate**: a full run spends real money and takes a while. Restate the resolved parameters
-(model, mode, budget, any smoke caps) and get an explicit OK before you launch it.
+(model, mode, any smoke caps) and get an explicit OK before you launch it.
 
 - **docker**: `make run`
 - **podman/raw**: use the `RUN_FLAGS` from Step 1, e.g.
@@ -131,11 +125,11 @@ name / pricing). Decode table in `references/env-and-troubleshoot.md`. Do not pr
   user may need `sudo`/`chown` to move it.)
 
 The run needs network only to reach the model API. When it finishes, confirm
-`out/submission.json` exists and report the result (bugs found, spend). 
+`out/submission.json` exists and report the result (bugs found, tokens used). 
 
 ## Step 6 — Hand back, or submit
 
-`out/submission.json` now exists; report the result (bugs found, spend). Then branch on the
+`out/submission.json` now exists; report the result (bugs found, tokens used). Then branch on the
 goal from Step 0:
 
 - **Run/test locally** → done. `out/submission.json` is the deliverable; no secrets, no upload.

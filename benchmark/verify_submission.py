@@ -8,9 +8,9 @@ self-reported ``bugs_found`` is ignored entirely.
 
 Produces two views of the result:
   * ``scored``          — results.schema.json-compatible (the backend's per-submission output)
-  * ``leaderboard_entry`` — the public ranked-row shape (aggregate only: counts, cost,
-                            efficiency, budget_cap — never the certificates or buggy-rule
-                            identities, which would be a free answer key)
+  * ``leaderboard_entry`` — the public ranked-row shape (aggregate only: counts, tokens,
+                            efficiency — never the certificates or buggy-rule identities,
+                            which would be a free answer key)
 
 CLI:
     python -m benchmark.verify_submission <submission.json> [--repo-dir <path>]
@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-from benchmark.cost import price_from_dict, usage_from_dict
+from benchmark.usage import usage_from_dict
 from benchmark.verify import count_bugs, verify
 
 CERT_BLOCK = re.compile(r"CERTIFICATE_START\s*\n(.*?)CERTIFICATE_END", re.DOTALL)
@@ -112,21 +112,11 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         })
 
     bugs = count_bugs(rescored)
-    # Cost re-metering, zero-trust like the bug re-verification: when the submission carries
-    # the declared per-token ``prices`` + the 4-bucket ``usage_totals``, recompute spend as
-    # tokens × price and IGNORE the self-reported total_cost_usd/total_tokens_k. Tokens are
-    # the reproducible primitive; the price is a dated snapshot (created_at). Legacy
-    # submissions without these fields fall back to their self-reported figures.
-    price = price_from_dict(submission.get("prices"))
-    usage = submission.get("usage_totals")
-    if price is not None and usage is not None:
-        u = usage_from_dict(usage)
-        cost = price.cost(u)
-        tokens_k = u.total_tokens / 1000
-    else:
-        tokens_k = submission.get("total_tokens_k", 0.0) or 0.0
-        cost = submission.get("total_cost_usd", 0.0) or 0.0
-    attempted = [r for r in rescored if r.get("result") != "skipped_budget"]
+    # Token totals: recompute from the 4-bucket ``usage_totals`` when present (the
+    # reproducible primitive); legacy submissions without it fall back to their
+    # self-reported total_tokens_k.
+    total_tokens = usage_from_dict(submission.get("usage_totals")).total_tokens
+    tokens_k = total_tokens / 1000 if total_tokens else (submission.get("total_tokens_k", 0.0) or 0.0)
     scored = {
         "model": submission.get("model", "unknown"),
         "library_commit": submission.get("library_commit", "unknown"),
@@ -135,15 +125,11 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         # board. Carried through here so the flag survives in the private scored file.
         "test": bool(submission.get("test")),
         "bugs_found": bugs,
-        "total_cost_usd": round(cost, 6),
         "total_tokens_k": round(tokens_k, 2),
-        # The reproducible primitive + the price snapshot the cost was metered from —
-        # carried through so the public entry stays recomputable under other prices.
+        # The reproducible primitive behind total_tokens_k — carried through.
         "usage_totals": submission.get("usage_totals"),
-        "prices": submission.get("prices"),
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
-        "efficiency_bugs_per_dollar": round(bugs / cost, 4) if cost else 0,
-        "rules_tested": submission.get("rules_tested", len(attempted)),
+        "rules_tested": submission.get("rules_tested", len(rescored)),
         "results": rescored,
     }
     return scored, report
@@ -152,27 +138,22 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
 def leaderboard_entry(submission: dict, scored: dict) -> dict:
     """Build the public ranked-row entry from a scored result.
 
-    Aggregate-only, by design: it carries counts, cost/token totals, efficiency and
-    ``budget_cap`` (rows with budget_cap == 20 are ranked) but NEVER the certificates or
-    the identities of the buggy rules. Publishing those would be a free answer key — on a
-    public library commit a `pred`-confirmed certificate counts regardless of provenance,
-    so anyone could copy it. The full certificates stay in the private scored result the
-    maintainer holds; the leaderboard shows only how many each model found.
+    Aggregate-only, by design: it carries counts, token totals and efficiency but NEVER
+    the certificates or the identities of the buggy rules. Publishing those would be a
+    free answer key — on a public library commit a `pred`-confirmed certificate counts
+    regardless of provenance, so anyone could copy it. The full certificates stay in the
+    private scored result the maintainer holds; the leaderboard shows only how many each
+    model found.
     """
     return {
         "model": scored["model"],
         "library_commit": scored.get("library_commit", "unknown"),
-        "budget_cap": submission.get("budget_cap"),
         "bugs_found": scored["bugs_found"],
         "rules_tested": scored["rules_tested"],
-        "total_cost_usd": scored["total_cost_usd"],
         "total_tokens_k": scored["total_tokens_k"],
-        # Aggregate token totals + the price snapshot — safe to publish (no rule identities)
-        # and the whole point: cost stays recomputable under any future/alternative price.
+        # Aggregate token totals — safe to publish (no rule identities).
         "usage_totals": scored.get("usage_totals"),
-        "prices": scored.get("prices"),
         "efficiency_bugs_per_ktok": scored["efficiency_bugs_per_ktok"],
-        "efficiency_bugs_per_dollar": scored["efficiency_bugs_per_dollar"],
         "submitted_by": submission.get("submitted_by"),
         "placeholder": False,
     }
@@ -188,7 +169,7 @@ def main() -> None:
     submission = json.loads(Path(args.submission).read_text(encoding="utf-8"))
     scored, report = score_submission(submission, args.repo_dir)
 
-    print(f"Scoring {scored['model']} (budget ${submission.get('budget_cap')})")
+    print(f"Scoring {scored['model']}")
     print("-" * 60)
     for item in report:
         flag = "✓ ACCEPTED" if item["accepted"] else "✗ rejected"

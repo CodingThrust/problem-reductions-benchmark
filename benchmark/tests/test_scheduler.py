@@ -2,28 +2,23 @@
 Tests for benchmark/scheduler.py and benchmark/runner.py
 
 Design principle: all tests use FakeRunner — no API calls, no pred calls.
-Three verification scenarios from issue #4:
+Verification scenarios:
   1. Swappable: pipeline runs end-to-end with FakeRunner (no mini-swe imports)
   2. Resumable: kill partway, resume → only remaining sessions run, no duplicates
-  3. Budget-fair: total spend ≤ cap, excess sessions marked "skipped_budget"
 
 Test categories:
   A. FakeRunner — basic interface contract
   B. Scheduler — swappable (end-to-end with FakeRunner)
   C. Scheduler — resumable (checkpoint load + skip finished)
-  D. Scheduler — budget-fair (total + per-model caps enforced)
-  E. Scheduler — results files written correctly
-  F. _per_model_cap helper
+  D. Scheduler — results files written correctly
 """
 
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from benchmark.runner import FakeRunner, AgentRunner
-from benchmark.scheduler import Scheduler, _per_model_cap
-
+from benchmark.runner import AgentRunner, FakeRunner
+from benchmark.scheduler import Scheduler
 
 # ── shared fixtures ───────────────────────────────────────────────────────────
 
@@ -43,26 +38,20 @@ def _make_scheduler(
     runner: FakeRunner | None = None,
     models: list[str] = MODELS,
     rules: list[str] = RULES,
-    total_budget: float = 10.0,
-    per_rule_budget: float = 1.0,
     resume: bool = False,
     parallelism: int = 1,
-    safety_margin: float = 0.0,
 ) -> Scheduler:
     if runner is None:
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
     return Scheduler(
         runner=runner,
         models=models,
         rules=rules,
-        total_budget=total_budget,
-        per_rule_budget=per_rule_budget,
         results_dir=tmp_path / "results",
         checkpoint_path=tmp_path / "checkpoint.json",
         ctx=_fake_ctx(),
         resume=resume,
         parallelism=parallelism,
-        safety_margin=safety_margin,
     )
 
 
@@ -70,35 +59,30 @@ def _make_scheduler(
 
 class TestFakeRunner:
     def test_returns_required_fields(self):
-        r = FakeRunner().run(None, "fake/model", "rule1", 1.0)
+        r = FakeRunner().run(None, "fake/model", "rule1")
         assert "rule" in r
         assert "result" in r
-        assert "cost" in r
         assert "tokens_k" in r
 
     def test_logs_calls(self):
         runner = FakeRunner()
-        runner.run(None, "model-a", "rule1", 1.0)
-        runner.run(None, "model-b", "rule2", 1.0)
+        runner.run(None, "model-a", "rule1")
+        runner.run(None, "model-b", "rule2")
         assert runner.call_log == [("model-a", "rule1"), ("model-b", "rule2")]
 
     def test_is_agent_runner_subclass(self):
         assert isinstance(FakeRunner(), AgentRunner)
 
     def test_custom_result(self):
-        r = FakeRunner(result="bug_found").run(None, "m", "r", 1.0)
+        r = FakeRunner(result="bug_found").run(None, "m", "r")
         assert r["result"] == "bug_found"
-
-    def test_custom_cost(self):
-        r = FakeRunner(cost_per_rule=0.05).run(None, "m", "r", 1.0)
-        assert r["cost"] == pytest.approx(0.05)
 
 
 # ── B. Swappable ──────────────────────────────────────────────────────────────
 
 class TestSchedulerSwappable:
     def test_runs_end_to_end_with_fake_runner(self, tmp_path):
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner)
         results = s.run_all()
         # All models × rules should have a result
@@ -106,7 +90,7 @@ class TestSchedulerSwappable:
             assert len(results[model]) == len(RULES)
 
     def test_fake_runner_called_for_every_rule(self, tmp_path):
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner)
         s.run_all()
         calls = {(m, r) for m, r in runner.call_log}
@@ -135,7 +119,7 @@ class TestSchedulerResumable:
     def _seed_checkpoint(self, checkpoint_path: Path, model: str, done_rules: list[str]):
         completed = {m: [] for m in MODELS}
         for rule in done_rules:
-            completed[model].append({"rule": rule, "result": "no_certificate", "cost": 0.01, "tokens_k": 0.5})
+            completed[model].append({"rule": rule, "result": "no_certificate", "tokens_k": 0.5})
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_path.write_text(json.dumps({"completed": completed}), encoding="utf-8")
 
@@ -144,7 +128,7 @@ class TestSchedulerResumable:
         # Pre-seed: model-a already did rule1
         self._seed_checkpoint(checkpoint, MODELS[0], ["rule1"])
 
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner, resume=True)
         s.run_all()
 
@@ -156,7 +140,7 @@ class TestSchedulerResumable:
         checkpoint = tmp_path / "checkpoint.json"
         self._seed_checkpoint(checkpoint, MODELS[0], ["rule1", "rule2"])
 
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner, resume=True)
         results = s.run_all()
 
@@ -168,7 +152,7 @@ class TestSchedulerResumable:
         checkpoint = tmp_path / "checkpoint.json"
         self._seed_checkpoint(checkpoint, MODELS[0], ["rule1"])
 
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner, resume=True)
         results = s.run_all()
 
@@ -179,7 +163,7 @@ class TestSchedulerResumable:
         checkpoint = tmp_path / "checkpoint.json"
         self._seed_checkpoint(checkpoint, MODELS[0], ["rule1"])
 
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner, resume=False)
         s.run_all()
 
@@ -188,7 +172,7 @@ class TestSchedulerResumable:
         assert "rule1" in model_a_calls
 
     def test_checkpoint_written_after_each_session(self, tmp_path):
-        runner = FakeRunner(cost_per_rule=0.01)
+        runner = FakeRunner()
         s = _make_scheduler(tmp_path, runner=runner, parallelism=1)
         s.run_all()
         assert (tmp_path / "checkpoint.json").exists()
@@ -196,57 +180,7 @@ class TestSchedulerResumable:
         assert "completed" in data
 
 
-# ── D. Budget-fair ────────────────────────────────────────────────────────────
-
-class TestSchedulerBudgetFair:
-    def test_total_spend_never_exceeds_budget(self, tmp_path):
-        total_budget = 0.05  # 5 cents — very tight
-        runner = FakeRunner(cost_per_rule=0.02)
-        s = _make_scheduler(tmp_path, runner=runner, total_budget=total_budget, per_rule_budget=0.02)
-        s.run_all()
-        assert s._total_spent <= total_budget + 1e-9
-
-    def test_safety_margin_held_back(self, tmp_path):
-        # With a $0.02 margin on a $0.10 budget, effective cap is $0.08 — spend stays under it.
-        runner = FakeRunner(cost_per_rule=0.01)
-        s = _make_scheduler(tmp_path, runner=runner, total_budget=0.10,
-                            per_rule_budget=0.01, safety_margin=0.02)
-        s.run_all()
-        assert s._total_spent <= 0.08 + 1e-9
-
-    def test_excess_sessions_marked_skipped_budget(self, tmp_path):
-        # Budget of 0.04 with 0.02/rule and 2 models × 3 rules = 6 sessions = $0.12 needed
-        # → roughly half should be skipped
-        total_budget = 0.04
-        runner = FakeRunner(cost_per_rule=0.02)
-        s = _make_scheduler(tmp_path, runner=runner, total_budget=total_budget, per_rule_budget=0.02)
-        results = s.run_all()
-        all_results = [r for rows in results.values() for r in rows]
-        skipped = [r for r in all_results if r["result"] == "skipped_budget"]
-        assert len(skipped) > 0
-
-    def test_models_get_equal_budget_share(self, tmp_path):
-        """Each model's spend should not exceed its equal share of the total budget."""
-        total_budget = 0.06  # $0.03 per model
-        runner = FakeRunner(cost_per_rule=0.01)
-        s = _make_scheduler(tmp_path, runner=runner, total_budget=total_budget, per_rule_budget=0.01)
-        s.run_all()
-        cap_per_model = _per_model_cap(total_budget, len(MODELS))
-        for model in MODELS:
-            assert s._spent[model] <= cap_per_model + 1e-9
-
-    def test_skipped_sessions_cost_zero(self, tmp_path):
-        total_budget = 0.01  # almost nothing
-        runner = FakeRunner(cost_per_rule=0.02)
-        s = _make_scheduler(tmp_path, runner=runner, total_budget=total_budget, per_rule_budget=0.02)
-        results = s.run_all()
-        for rows in results.values():
-            for r in rows:
-                if r["result"] == "skipped_budget":
-                    assert r["cost"] == 0.0
-
-
-# ── E. Results files ──────────────────────────────────────────────────────────
+# ── D. Results files ──────────────────────────────────────────────────────────
 
 class TestSchedulerResultsFiles:
     def test_results_file_written_per_model(self, tmp_path):
@@ -260,9 +194,9 @@ class TestSchedulerResultsFiles:
         s = _make_scheduler(tmp_path)
         s.run_all()
         required = {
-            "model", "library_commit", "bugs_found", "total_cost_usd",
+            "model", "library_commit", "bugs_found",
             "total_tokens_k", "efficiency_bugs_per_ktok",
-            "efficiency_bugs_per_dollar", "rules_tested", "results",
+            "rules_tested", "results",
         }
         for model in MODELS:
             safe = model.replace("/", "_").replace(":", "_")
@@ -278,24 +212,10 @@ class TestSchedulerResultsFiles:
             assert data["rules_tested"] == len(results[model])
 
     def test_bug_found_count_in_file(self, tmp_path):
-        runner = FakeRunner(cost_per_rule=0.01, result="bug_found")
+        runner = FakeRunner(result="bug_found")
         s = _make_scheduler(tmp_path, runner=runner)
         s.run_all()
         for model in MODELS:
             safe = model.replace("/", "_").replace(":", "_")
             data = json.loads((tmp_path / "results" / f"{safe}.json").read_text())
             assert data["bugs_found"] == len(RULES)
-
-
-# ── F. _per_model_cap ─────────────────────────────────────────────────────────
-
-class TestPerModelCap:
-    def test_equal_split(self):
-        assert _per_model_cap(1.0, 4) == pytest.approx(0.25)
-
-    def test_single_model(self):
-        assert _per_model_cap(10.0, 1) == pytest.approx(10.0)
-
-    def test_zero_models_no_division_error(self):
-        # guard against zero-division
-        assert _per_model_cap(10.0, 0) == pytest.approx(10.0)
