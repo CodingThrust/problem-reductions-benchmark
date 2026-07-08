@@ -8,7 +8,7 @@
 #   preflight            Validate submission.env with one tiny real call before a full run
 #   run                  Run the benchmark via Docker → out/submission.json (does NOT upload)
 #
-# Model + key + price for the real run live in submission.env (any provider — see
+# Model + key for the real run live in submission.env (any provider — see
 # submission.env.example); preflight/submission read it via --env-file. REPO_DIR is only
 # for the local-clone targets (audit).
 
@@ -47,14 +47,14 @@ runner-build:
 	  --build-arg PR_REF=$(PR_REF) -t $(IMAGE) .
 
 ## Preflight: validate submission.env with one tiny real API call + pred/rules checks,
-## BEFORE committing to a full $20 run. Spends a fraction of a cent. (The no-API wiring of
+## BEFORE committing to a full run. Makes one tiny real API call. (The no-API wiring of
 ## the runner itself is covered by the pytest suite, not a make target.)
 preflight:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in first"; exit 1; fi
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
-## Run the budgeted bug-finding agent via Docker → writes ./out/submission.json.
+## Run the bug-finding agent via Docker → writes ./out/submission.json.
 ## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
 ## (open a GitHub PR adding the file, see CONTRIBUTING.md). Config lives in submission.env
 ## (copy submission.env.example); run `make preflight` first to validate it.
@@ -118,4 +118,4 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  REPO_DIR=$(REPO_DIR)"
-	@echo "  ENV_FILE=$(ENV_FILE)  (model/key/price for preflight + submission)"
+	@echo "  ENV_FILE=$(ENV_FILE)  (model/key for preflight + submission)"

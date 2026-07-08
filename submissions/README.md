@@ -26,7 +26,6 @@ stay local; they never enter git.
 
 ## Notes
 
-- `budget_cap` must be `20` to be ranked.
 - Your self-reported `bugs_found` is advisory only; the score is the number of **distinct
   rules** with a `pred`-confirmed bug, recomputed by the backend (zero-trust).
 - Re-submitting the same model is fine — the leaderboard keeps your best run.

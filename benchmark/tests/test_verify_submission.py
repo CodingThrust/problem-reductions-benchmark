@@ -22,7 +22,7 @@ def _traj(cert: dict) -> list[dict]:
 
 
 def _bug_row(cert: dict, **over) -> dict:
-    row = {"rule": cert.get("rule", "r"), "result": "bug_found", "cost": 1.0,
+    row = {"rule": cert.get("rule", "r"), "result": "bug_found",
            "tokens_k": 10.0, "certificate": cert, "trajectory": _traj(cert)}
     row.update(over)
     return row
@@ -30,12 +30,10 @@ def _bug_row(cert: dict, **over) -> dict:
 
 def _submission(results, **over) -> dict:
     base = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "model": "anthropic/test",
         "library_commit": "deadbeef",
-        "budget_cap": 20,
         "bugs_found": 999,  # deliberately wrong — the scorer must ignore it
-        "total_cost_usd": 2.0,
         "total_tokens_k": 50.0,
         "rules_tested": len(results),
         "results": results,
@@ -71,7 +69,7 @@ class TestScoreSubmission:
         # not scored (provenance gate): a pasted answer key must not count.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
-            {"rule": "r1", "result": "bug_found", "cost": 1.0, "tokens_k": 10.0,
+            {"rule": "r1", "result": "bug_found", "tokens_k": 10.0,
              "certificate": {"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}},
         ])
         scored, report = vs.score_submission(sub)
@@ -109,8 +107,8 @@ class TestScoreSubmission:
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         c1 = {"rule": "r1", "violation": "solve_mismatch", "source": {"n": 1}, "bundle": {}}
         c2 = {"rule": "r2", "violation": "solve_mismatch", "source": {"n": 2}, "bundle": {}}
-        rows = [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c1},
-                {"rule": "r2", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c2}]
+        rows = [{"rule": "r1", "result": "bug_found", "tokens_k": 0.0, "certificate": c1},
+                {"rule": "r2", "result": "bug_found", "tokens_k": 0.0, "certificate": c2}]
         sub = _submission(rows, trajectory=_traj(c1) + _traj(c2))
         scored, _ = vs.score_submission(sub)
         assert scored["bugs_found"] == 2
@@ -119,7 +117,7 @@ class TestScoreSubmission:
         # A cert with neither a row trajectory nor an envelope trajectory fails provenance.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         c1 = {"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}
-        rows = [{"rule": "r1", "result": "bug_found", "cost": 0.0, "tokens_k": 0.0, "certificate": c1}]
+        rows = [{"rule": "r1", "result": "bug_found", "tokens_k": 0.0, "certificate": c1}]
         scored, _ = vs.score_submission(_submission(rows))
         assert scored["bugs_found"] == 0
 
@@ -137,41 +135,36 @@ class TestScoreSubmission:
     def test_rows_without_certificate_passthrough(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
-            {"rule": "r1", "result": "no_certificate", "cost": 0.5, "tokens_k": 5.0},
+            {"rule": "r1", "result": "no_certificate", "tokens_k": 5.0},
         ])
         scored, report = vs.score_submission(sub)
         assert scored["bugs_found"] == 0
         assert report == []
 
-    def test_remeters_cost_from_prices_and_usage(self, monkeypatch):
-        # Zero-trust cost: the submission self-reports a bogus total_cost_usd, but carries
-        # prices + usage_totals — the scorer recomputes cost = usage × price and ignores the
-        # bogus figure (mirrors ignoring self-reported bugs_found).
+    def test_recomputes_tokens_from_usage_totals(self, monkeypatch):
+        # Zero-trust tokens: the submission self-reports a bogus total_tokens_k, but carries
+        # usage_totals — the scorer recomputes tokens from the 4-bucket primitive and ignores
+        # the bogus figure (mirrors ignoring self-reported bugs_found).
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission(
             [_bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}})],
-            total_cost_usd=0.0001,  # bogus — must be ignored
-            total_tokens_k=0.001,
-            prices={"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75},
+            total_tokens_k=0.001,  # bogus — must be ignored
             usage_totals={"input": 1_000_000, "output": 1_000_000,
                           "cache_read": 0, "cache_write": 0},
         )
         scored, _ = vs.score_submission(sub)
-        assert scored["total_cost_usd"] == 18.0                 # 3 + 15, not 0.0001
         assert scored["total_tokens_k"] == 2000.0
-        assert scored["efficiency_bugs_per_dollar"] == round(1 / 18.0, 4)
-        # the primitive + snapshot survive into the scored result (→ leaderboard entry)
+        assert scored["efficiency_bugs_per_ktok"] == round(1 / 2000.0, 4)
+        # the primitive survives into the scored result (→ leaderboard entry)
         assert scored["usage_totals"]["input"] == 1_000_000
-        assert scored["prices"]["output"] == 15.0
 
-    def test_legacy_submission_without_prices_uses_self_reported(self, monkeypatch):
-        # No prices/usage_totals (legacy) → fall back to the self-reported figures.
+    def test_legacy_submission_without_usage_uses_self_reported(self, monkeypatch):
+        # No usage_totals (legacy) → fall back to the self-reported figure.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission(
             [_bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}})],
-            total_cost_usd=2.0, total_tokens_k=50.0)
+            total_tokens_k=50.0)
         scored, _ = vs.score_submission(sub)
-        assert scored["total_cost_usd"] == 2.0
         assert scored["total_tokens_k"] == 50.0
 
     def test_scored_is_results_schema_shaped(self, monkeypatch):
@@ -180,9 +173,9 @@ class TestScoreSubmission:
             _bug_row({"rule": "r1", "violation": "solve_mismatch", "source": {}, "bundle": {}}),
         ])
         scored, _ = vs.score_submission(sub)
-        for field in ("model", "library_commit", "bugs_found", "total_cost_usd",
+        for field in ("model", "library_commit", "bugs_found",
                       "total_tokens_k", "efficiency_bugs_per_ktok",
-                      "efficiency_bugs_per_dollar", "rules_tested", "results"):
+                      "rules_tested", "results"):
             assert field in scored
 
 
@@ -190,16 +183,15 @@ class TestScoreSubmission:
 
 class TestLeaderboardEntry:
     def test_aggregate_only_no_certificates(self, monkeypatch):
-        # The public entry must carry counts/cost but NEVER the certificates or the
+        # The public entry must carry counts/tokens but NEVER the certificates or the
         # identities of the buggy rules — publishing those is a free answer key.
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         sub = _submission([
             _bug_row({"rule": "r1", "violation": "solve_mismatch",
                       "source": {"type": "A"}, "bundle": {"target": {"type": "B"}}, "note": "x"}),
-        ], budget_cap=20)
+        ])
         scored, _ = vs.score_submission(sub)
         entry = vs.leaderboard_entry(sub, scored)
-        assert entry["budget_cap"] == 20
         assert entry["placeholder"] is False
         assert entry["bugs_found"] == 1
         # no per-bug drilldown, no rule identities, no certificate fields leak out

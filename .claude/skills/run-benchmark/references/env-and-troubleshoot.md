@@ -13,20 +13,15 @@ these as env vars (CLI flags would override, but the skill uses the env-file).
 |---|---|---|
 | `MODEL_NAME` | LiteLLM-routable model name (`anthropic/…`, `openai/…`, `openrouter/…`, `gemini/…`, or `openai/<m>` + `API_BASE`) | run hard-errors: "`--model (or env MODEL_NAME) is required`" |
 | API key | `API_KEY` (generic) **or** a provider var (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`/`GEMINI_API_KEY`) — provider vars pass straight through to LiteLLM | not checked in Python; surfaces at the `model call` preflight as an auth error |
-| `PRICE_IN`, `PRICE_OUT` | USD / 1M input & output tokens; spend = tokens × price (the $20 cap basis) | **must be given together**; a real run hard-errors if absent — there is deliberately no built-in price table |
 
 ### Optional (defaults shown; uncomment only to change)
 | Var | Default | Use |
 |---|---|---|
-| `PRICE_CACHE_READ` / `PRICE_CACHE_WRITE` | 0 | prompt-caching models |
 | `API_BASE` | — | OpenAI-compatible endpoint (OpenRouter/gateway/vLLM/Azure) |
 | `MODEL_KWARGS` | — | JSON object of extra litellm kwargs (`custom_llm_provider`, `api_version`, `extra_headers`…). Invalid JSON / non-object errors at startup |
-| `BUDGET_USD` | 20 | must be **20 to be ranked** (not enforced by the runner; unrankable otherwise) |
-| `PER_RULE_BUDGET` | 0.5 | per-rule cost cap |
-| `SAFETY_MARGIN` | 1.0 | USD held back so the budget-crossing call stays under cap |
 | `MAX_TOKENS` | 8192 | per-call output ceiling |
 | `MAX_RULES` | all | cap rules attempted — **smoke runs only**; omit for a ranked run (per-rule only) |
-| `AGENT_MODE` | `per-rule` | `per-rule` (isolated session/rule, budget split evenly) or `whole-repo` (ONE session, the agent triages the rules itself) |
+| `AGENT_MODE` | `per-rule` | `per-rule` (isolated session per rule, 35 steps each) or `whole-repo` (ONE session, 300 steps, the agent triages the rules itself) |
 | `TRAJECTORY_DIR` | `OUTPUT`'s dir (`/out`) | where **whole-repo** persists the trajectory + the durable incremental cert log (`certs.txt`); the agent writes each certificate here the moment it finds it, so an early-stop/crash still leaves the found bugs on disk |
 | `AGENT_CONFIG` / `AGENT_STRATEGY_FILE` | bundled | bring-your-own prompt; the files must be **mounted** into the container (`-v "$PWD/cfg:/cfg"`) and the path given as a container path |
 | `SUBMITTED_BY` | — | your handle, recorded in the envelope |
@@ -40,8 +35,6 @@ MODEL_NAME=openai/my-model
 API_BASE=https://my-gateway.example/v1
 API_KEY=...
 MODEL_KWARGS={"custom_llm_provider":"openai"}
-PRICE_IN=1.5
-PRICE_OUT=6.0
 ```
 
 ## Preflight failure decoding
@@ -53,7 +46,7 @@ checks and exits non-zero if any fail. It never raises — it prints `PASS`/`FAI
 |---|---|---|
 | **pred binary** | pred missing or version ≠ pinned | should always pass inside the image; a FAIL = broken/overridden image or a wrong `EXPECTED_PRED_VERSION`. Rebuild at the right `PR_REF` |
 | **library rules** | no `.rs` rules under `REPO_DIR/src/rules` | source tree not copied / `REPO_DIR` overridden. Rebuild the image; don't set `REPO_DIR` |
-| **model call** | the real error (spends ~$0.0001) — its detail names the exception type | **auth error** → bad/missing key; **connection error** → wrong `API_BASE`/endpoint; **routing/model-not-found** → wrong `MODEL_NAME`; **pricing** → `PRICE_IN`/`PRICE_OUT`. Fix that line in `submission.env` and rerun preflight |
+| **model call** | the real error (spends ~$0.0001) — its detail names the exception type | **auth error** → bad/missing key; **connection error** → wrong `API_BASE`/endpoint; **routing/model-not-found** → wrong `MODEL_NAME`. Fix that line in `submission.env` and rerun preflight |
 
 Only proceed to the full run when preflight prints `Preflight PASSED`.
 

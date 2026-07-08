@@ -8,7 +8,6 @@ the all-pass/any-fail reporting are correct.
 from types import SimpleNamespace
 
 from benchmark import preflight as pf
-from benchmark.cost import Price
 
 
 class _FakeModel:
@@ -63,13 +62,12 @@ class TestRunChecks:
 
     def test_model_call_failure_fails(self, monkeypatch):
         _patch(monkeypatch, model=_FakeModel(raise_exc=RuntimeError("401 unauthorized")))
-        results = pf.run_checks("anthropic/x", repo_dir="/repo", price=None)
+        results = pf.run_checks("anthropic/x", repo_dir="/repo")
         call = dict((n, (ok, d)) for n, ok, d in results)["model call"]
         assert call[0] is False and "401" in call[1]
 
-    def test_model_call_cost_shown(self, monkeypatch):
-        # 1M input @ $1 + 1M output @ $2 = $3 total for this "call".
+    def test_model_call_tokens_shown(self, monkeypatch):
         _patch(monkeypatch, model=_FakeModel(prompt=1_000_000, completion=1_000_000))
-        results = pf.run_checks("anthropic/x", repo_dir="/repo", price=Price(1.0, 2.0))
+        results = pf.run_checks("anthropic/x", repo_dir="/repo")
         detail = dict((n, d) for n, _, d in results)["model call"]
-        assert "$3.0" in detail and "2000000 tokens" in detail
+        assert "2000000 tokens" in detail

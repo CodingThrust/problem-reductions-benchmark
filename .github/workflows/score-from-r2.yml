@@ -135,7 +135,7 @@ jobs:
               echo "updated PR #$EXISTING ($slug)"
             else
               gh pr create --base "${{ github.ref_name }}" --head "$BR" --title "$TITLE" \
-                --body "One submission's public entry (\`$dest\`) — aggregate only (counts / cost / tokens / efficiency), no certificates or rule identities (guarded by \`check_aggregate.py\`). The full certificate stays private in R2. Merging rebuilds \`site/results.json\` from all entries and deploys via publish-on-merge. This PR is scoped to a single submission; merge/close/revert it independently."
+                --body "One submission's public entry (\`$dest\`) — aggregate only (counts / tokens / efficiency), no certificates or rule identities (guarded by \`check_aggregate.py\`). The full certificate stays private in R2. Merging rebuilds \`site/results.json\` from all entries and deploys via publish-on-merge. This PR is scoped to a single submission; merge/close/revert it independently."
             fi
             opened=$((opened+1))
           done

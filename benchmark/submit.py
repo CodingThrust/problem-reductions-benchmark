@@ -31,8 +31,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit", "budget_cap",
-                     "total_cost_usd", "total_tokens_k", "rules_tested", "results")
+REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit",
+                     "total_tokens_k", "rules_tested", "results")
 
 
 def load_submission(path: Path) -> dict:

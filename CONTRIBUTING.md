@@ -1,7 +1,7 @@
 # Submitting a model run
 
-The benchmark gives every model the **same $20 API budget** and asks: how many distinct
-reduction-rule bugs can it find?
+The benchmark gives every model the **same step-limited agent session** and asks: how many
+distinct reduction-rule bugs can it find?
 
 ```
   make run ─▶ submission.json ─▶ python -m benchmark.submit  ──▶  private store (R2)
@@ -18,8 +18,8 @@ recomputed by `pred`.
 ## 1. Produce a `submission.json` (dockerized runner)
 
 The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + LiteLLM),
-and the problem-reductions source pinned at `v0.6.0`. LiteLLM enforces the budget across
-whatever provider key you supply.
+and the problem-reductions source pinned at `v0.6.0`. Any LiteLLM-routable provider key
+works.
 
 The **target library version is not hardcoded** — it tracks the benchmark. The single knob
 is the `PR_REF` build arg (a tag or commit of problem-reductions); the image bakes the
@@ -39,23 +39,21 @@ All run config goes in **one env-file** so you don't juggle a dozen `-e` flags. 
 template, fill the two required lines, and run:
 
 ```bash
-cp submission.env.example submission.env   # then edit the REQUIRED lines (model, key, price)
+cp submission.env.example submission.env   # then edit the REQUIRED lines (model, key)
 mkdir -p out
 docker run --rm --env-file submission.env -v "$PWD/out:/out" \
   problem-reductions-runner:v0.6.0
 # → ./out/submission.json      (or just: make run)
 ```
 
-The **required lines are model + API key + price** (`MODEL_NAME`, a key, `PRICE_IN`/`PRICE_OUT`).
-Everything else in the template has a sane default — uncomment only what you need. The knobs,
-by tier:
+The **required lines are model + API key** (`MODEL_NAME`, a key). Everything else in the
+template has a sane default — uncomment only what you need. The knobs, by tier:
 
 | Tier | Vars | When |
 |---|---|---|
-| **Required** | `MODEL_NAME`, one API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / generic `API_KEY`), `PRICE_IN`, `PRICE_OUT` | always — see the price note below |
-| **Pricing (caching)** | `PRICE_CACHE_READ`, `PRICE_CACHE_WRITE` | prompt-caching models |
+| **Required** | `MODEL_NAME`, one API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / generic `API_KEY`) | always |
 | **Non-standard provider** | `API_BASE`, `API_KEY`, `MODEL_KWARGS` (JSON of extra litellm kwargs: `api_version`, `custom_llm_provider`, `extra_headers`, …) | OpenRouter / gateway / local vLLM / Azure |
-| **Budget (defaults = ranked config)** | `BUDGET_USD=20`, `PER_RULE_BUDGET=0.5`, `SAFETY_MARGIN=1`, `MAX_TOKENS=8192`, `MAX_RULES` | quick test runs / tuning only |
+| **Limits (defaults = ranked config)** | `MAX_TOKENS=8192`, `MAX_RULES` | quick test runs / tuning only |
 | **Custom prompt** | `AGENT_CONFIG`, `AGENT_STRATEGY_FILE` (mount the files too) | bring your own bug-hunting prompt |
 | **Version pins** | `EXPECTED_PRED_VERSION` (empty disables), `EXPECTED_PRED_COMMIT` | debugging only — baked from the image build |
 
@@ -64,14 +62,10 @@ by tier:
 provider. (`REPO_DIR` / `OUTPUT` are container-internal and already defaulted; you don't set
 them.)
 
-> Why you pass the price (and why it's required): you pay your own bill at your own rate, so
-> you set it. The runner computes spend from raw token counts × your price rather than
-> trusting the gateway's dollar figure (which can be stale or wrong — LiteLLM $0-pricing
-> incidents, Anthropic prompt-cache mis-pricing ~10×), so `$20` is a real cap. There is
-> deliberately **no built-in price table**: a wrong default would silently mis-meter the
-> budget, so a real run fails fast without `PRICE_IN`/`PRICE_OUT`. The backend re-verifies
-> bugs regardless and ranks on **bugs/Ktok** (token counts are auditable); self-reported
-> dollars are advisory only.
+> Runs are bounded by the agent step limit (35 steps per rule; 300 steps for a whole-repo
+> session), not by a dollar budget — you pay your own bill. Raw token counts are recorded
+> and travel in the submission (`usage_totals`); ranking is by **confirmed bugs**, with
+> **bugs/Ktok** as the efficiency tie-break.
 
 For example, a non-standard endpoint in `submission.env`:
 
@@ -80,8 +74,6 @@ MODEL_NAME=openai/my-model
 API_BASE=https://my-gateway.example/v1
 API_KEY=...
 MODEL_KWARGS={"custom_llm_provider":"openai"}
-PRICE_IN=1.5
-PRICE_OUT=6.0
 ```
 
 Equivalently with raw `-e` flags (the env-file just bundles these):
@@ -92,7 +84,6 @@ docker run --rm \
   -e API_BASE=https://my-gateway.example/v1 \
   -e API_KEY=$MY_KEY \
   -e MODEL_KWARGS='{"custom_llm_provider":"openai","extra_headers":{"X-Org":"acme"}}' \
-  -e PRICE_IN=1.5 -e PRICE_OUT=6.0 -e BUDGET_USD=20 \
   -v "$PWD/out:/out" \
   problem-reductions-runner:v0.6.0
 ```
@@ -108,8 +99,8 @@ docker run --rm --env-file submission.env \
 # For a full prompt rewrite instead, mount a config.yaml and set AGENT_CONFIG=/cfg/config.yaml.
 ```
 
-**Before the full run, validate your config** with one tiny real call (a fraction of a cent)
-so a bad key / wrong endpoint / missing price surfaces now, not 20 rules in:
+**Before the full run, validate your config** with one tiny real call so a bad key / wrong
+endpoint surfaces now, not 20 rules in:
 
 ```bash
 make preflight        # docker run --env-file submission.env <image> --preflight
@@ -207,14 +198,13 @@ would hide. The round-trip judging itself is explained in the [README](README.md
 - Counterexamples are **deterministically re-checkable** — we don't even need a hidden
   answer key; a bug either violates the rule under `pred` or it doesn't.
 - Distinct-rule de-duplication caps the count at one per rule.
-- The $20 budget is enforced inside the runner by recomputing spend from raw token usage ×
-  your declared price (not the gateway's self-reported dollars), held back by a safety
-  margin and bounded per call by `MAX_TOKENS`; the backend cross-checks reported spend.
+- Sessions are bounded by the agent step limit and per call by `MAX_TOKENS`; token totals
+  travel as raw 4-bucket counts (`usage_totals`) the backend recomputes `total_tokens_k` from.
 
 ## Status: validated against a live model
 
 The runner pipeline is unit-tested end-to-end with `FakeRunner` + the certificate fixtures
 **and** has been exercised against a live model API (a DeepSeek OpenAI-compatible endpoint
-via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real budgeted run
-drives the agent across a rule and emits a schema-valid `submission.json`. PR scoring and
-GitHub Pages publishing are live; full `$20` runs are the remaining step.
+via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real run drives the
+agent across a rule and emits a schema-valid `submission.json`. PR scoring and GitHub Pages
+publishing are live; full official runs are the remaining step.
