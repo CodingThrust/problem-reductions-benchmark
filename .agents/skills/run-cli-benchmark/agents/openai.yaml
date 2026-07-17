@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run CLI Benchmark"
+  short_description: "Run the benchmark with a supported coding agent CLI"
+  default_prompt: "Use $run-cli-benchmark to select and run a coding agent harness."

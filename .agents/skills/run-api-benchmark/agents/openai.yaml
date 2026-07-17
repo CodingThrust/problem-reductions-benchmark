@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run API Benchmark"
+  short_description: "Configure and run the benchmark through a model API"
+  default_prompt: "Use $run-api-benchmark to configure and run an API-backed benchmark."
