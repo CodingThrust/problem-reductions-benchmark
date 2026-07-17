@@ -12,11 +12,12 @@ from benchmark import preflight as pf
 
 class _FakeModel:
     """Mimics mini-swe-agent's LitellmModel low-level path used by preflight: _query returns
-    a litellm-shaped response with a .usage block."""
-    def __init__(self, prompt=6, completion=4, raise_exc=None):
+    a litellm-shaped response with a .usage block; _calculate_cost is the per-call pricing."""
+    def __init__(self, prompt=6, completion=4, raise_exc=None, cost_exc=None):
         self._usage = SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion,
                                       prompt_tokens_details=None)
         self._raise = raise_exc
+        self._cost_exc = cost_exc
 
     def _prepare_messages_for_api(self, messages):
         return messages
@@ -26,6 +27,11 @@ class _FakeModel:
             raise self._raise
         return SimpleNamespace(usage=self._usage,
                                choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))])
+
+    def _calculate_cost(self, response):
+        if self._cost_exc is not None:
+            raise self._cost_exc
+        return {"cost": 0.001}
 
 
 def _patch(monkeypatch, *, ver="0.6.0", rules=("a", "b"), model=None, build_exc=None):
@@ -43,7 +49,7 @@ class TestRunChecks:
     def test_all_pass(self, monkeypatch):
         _patch(monkeypatch)
         results = pf.run_checks("anthropic/x", repo_dir="/repo")
-        assert [ok for _, ok, _ in results] == [True, True, True]
+        assert [ok for _, ok, _ in results] == [True, True, True, True]
         assert pf.format_report(results) is True
 
     def test_pred_failure_reported(self, monkeypatch):
@@ -71,3 +77,17 @@ class TestRunChecks:
         results = pf.run_checks("anthropic/x", repo_dir="/repo")
         detail = dict((n, d) for n, _, d in results)["model call"]
         assert "2000000 tokens" in detail
+
+    def test_cost_tracking_failure_fails(self, monkeypatch):
+        """A model missing from litellm's price map passes _query but kills the real run —
+        preflight must catch that (the openai/kimi-for-coding failure mode)."""
+        _patch(monkeypatch, model=_FakeModel(cost_exc=RuntimeError("model isn't mapped yet")))
+        results = pf.run_checks("anthropic/x", repo_dir="/repo")
+        call = dict((n, (ok, d)) for n, ok, d in results)["cost tracking"]
+        assert call[0] is False and "ignore_errors" in call[1]
+        assert pf.format_report(results) is False
+
+    def test_no_cost_check_when_model_call_fails(self, monkeypatch):
+        _patch(monkeypatch, model=_FakeModel(raise_exc=RuntimeError("401")))
+        results = pf.run_checks("anthropic/x", repo_dir="/repo")
+        assert [n for n, _, _ in results] == ["pred binary", "library rules", "model call"]

@@ -6,7 +6,8 @@ pred version) but does the minimum real work needed to prove the run won't error
 
   1. verify the `pred` binary + version,
   2. confirm the library's reduction rules are present,
-  3. make ONE tiny real model call to validate credentials / endpoint.
+  3. make ONE tiny real model call to validate credentials / endpoint,
+  4. exercise the per-call cost accounting the agent runs on every step.
 
 Exits 0 only if every check passes — so you can launch the full batch with confidence
 instead of discovering a typo'd key or wrong base URL 20 rules in. This is a user-facing
@@ -55,6 +56,7 @@ def run_checks(
 
     # 3. one real model call through the exact batch model config (validates key, endpoint,
     #    model name, model_kwargs).
+    model = response = None
     try:
         model = _build_model(model_name, api_base, max_tokens,
                              model_kwargs=model_kwargs, api_key=api_key)
@@ -70,6 +72,18 @@ def run_checks(
         results.append(("model call", True, detail))
     except Exception as e:
         results.append(("model call", False, f"{type(e).__name__}: {e}"))
+
+    # 4. the run prices EVERY call — exercise that same accounting path. A raw _query passes
+    #    even for models missing from litellm's price map, but the agent then aborts the
+    #    whole session on the cost-calculation RuntimeError (unless ignore_errors is set).
+    if response is not None:
+        try:
+            model._calculate_cost(response)
+            results.append(("cost tracking", True, "per-call pricing works (or ignore_errors set)"))
+        except Exception as e:
+            results.append(("cost tracking", False,
+                            f"{type(e).__name__}: {e} — set MSWEA_COST_TRACKING=ignore_errors "
+                            "or use a priced model before launching"))
 
     return results
 

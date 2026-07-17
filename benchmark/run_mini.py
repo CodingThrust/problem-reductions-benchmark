@@ -45,6 +45,32 @@ def save_trajectory(messages: list, path: Path) -> None:
                                      "content": _message_text(msg)}) + "\n")
 
 
+class TrajectoryWriter:
+    """Append-only incremental trajectory writer — live progress during a session.
+
+    Without this, the trajectory only exists after the session ends, so a healthy slow
+    run and a dead hang look identical from outside (and a previous crash's leftover
+    file masquerades as the current run's progress). flush() appends any new messages
+    after each agent step; save_trajectory() still makes the authoritative final write
+    at session end, in the identical format.
+    """
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._written = 0
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.unlink(missing_ok=True)  # fresh session — never append onto a stale file
+
+    def flush(self, messages: list) -> None:
+        if len(messages) <= self._written:
+            return
+        with self._path.open("a", encoding="utf-8") as handle:
+            for msg in messages[self._written:]:
+                handle.write(json.dumps({"role": msg.get("role", ""),
+                                         "content": _message_text(msg)}) + "\n")
+        self._written = len(messages)
+
+
 def _session_usage(agent):
     usage = extract_usage(agent.messages)
     total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
@@ -57,7 +83,9 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int,
                  format_error_template: str | None = None):
     from minisweagent.models.litellm_model import LitellmModel
 
-    kwargs = dict(model_kwargs or {})
+    # A hung API call must fail fast and retry — never freeze a whole-repo session
+    # indefinitely. User-supplied MODEL_KWARGS still wins on any key.
+    kwargs = {"timeout": 300, "num_retries": 2, **dict(model_kwargs or {})}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
     if api_base:
@@ -108,11 +136,25 @@ def run_repo_session(
     agent_config, model_config, strategy = _load_agent_config(
         config_path, CONFIG_FILE, strategy)
     safe_model = safe_model_label(model_name)
+    writer = None
     if trajectory_dir is not None:
         trajectory_dir = Path(trajectory_dir).resolve()
         trajectory_dir.mkdir(parents=True, exist_ok=True)
+        writer = TrajectoryWriter(trajectory_dir / f"{safe_model}_whole-repo.jsonl")
 
-    agent = DefaultAgent(
+    class _StepFlushingAgent(DefaultAgent):
+        """DefaultAgent that flushes the trajectory after every step (best-effort)."""
+
+        def step(self):
+            result = super().step()
+            if writer is not None:
+                try:
+                    writer.flush(self.messages)
+                except OSError:
+                    pass  # observability must never kill the session
+            return result
+
+    agent = _StepFlushingAgent(
         _build_model(
             model_name, api_base, max_tokens, model_kwargs=model_kwargs, api_key=api_key,
             observation_template=model_config.get("observation_template"),

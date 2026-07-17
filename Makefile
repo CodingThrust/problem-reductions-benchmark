@@ -6,7 +6,7 @@
 #   test-unit            Run only unit tests (no real repo/pred needed)
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   preflight            Validate submission.env with one tiny real call before a full run
-#   run                  Run the benchmark via Docker → out/submission.json (does NOT upload)
+#   run                  Run the benchmark via Docker → out/<stamp>/submission.json (does NOT upload)
 #   run-local            Clone/verify a repo and run a local headless CLI agent
 #
 # Model/auth configuration lives in submission.env (see submission.env.example). Local
@@ -21,6 +21,7 @@ JOBS     ?= 1
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
+STAMP    ?= $(shell date +%Y%m%d-%H%M%S)
 LOCAL_BACKEND ?= codex
 LOCAL_REPO_DIR ?=
 LOCAL_OUTPUT ?=
@@ -69,7 +70,9 @@ preflight:
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in first"; exit 1; fi
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
-## Run the bug-finding agent via Docker → writes ./out/submission.json.
+## Run the bug-finding agent via Docker → writes ./out/<stamp>/submission.json (the
+## whole-repo trajectory lands alongside it). Each run gets its own timestamped dir so
+## successive runs never overwrite each other (override with STAMP=... to reproduce).
 ## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
 ## (open a GitHub PR adding the file, see CONTRIBUTING.md). Config lives in submission.env
 ## (copy submission.env.example); run `make preflight` first to validate it.
@@ -77,8 +80,8 @@ run:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
-	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Wrote ./out/submission.json — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
+	docker run --rm --env-file "$(ENV_FILE)" -e OUTPUT=/out/$(STAMP)/submission.json -v "$(PWD)/out:/out" $(IMAGE)
+	@echo "Wrote out/$(STAMP)/submission.json (+ trajectory) — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
 
 ## Lightweight host run through an installed headless agent CLI. The checkout is cloned at
 ## PR_REF when LOCAL_REPO_DIR is absent; an existing checkout must already match exactly.
