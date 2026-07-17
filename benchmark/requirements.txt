@@ -2,3 +2,9 @@ mini-swe-agent==2.4.5
 pyyaml>=6.0.3
 pytest>=9.1.1
 pytest-timeout>=2.4.0
+# litellm 1.92.0 (pulled by mini-swe-agent) unconditionally imports proxy-only
+# deps from completion() (litellm.responses.mcp → litellm.proxy.*). Declare them
+# until a litellm release makes that import lazy; litellm[proxy] is NOT an
+# option (its granian pin is unresolvable).
+fastapi>=0.115
+orjson>=3.10
