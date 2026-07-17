@@ -55,8 +55,10 @@ runner-build:
 
 ## Pull the prebuilt runner image from GHCR (built by .github/workflows/runner-image.yml)
 ## and tag it locally as $(IMAGE). Fast alternative to runner-build's local Rust compile.
+## The published image is linux/amd64 only; on Apple Silicon it runs under emulation,
+## so pin the platform explicitly (docker run picks it up from the local tag).
 runner-pull:
-	docker pull $(GHCR_IMAGE):$(PR_REF)
+	docker pull --platform linux/amd64 $(GHCR_IMAGE):$(PR_REF)
 	docker tag $(GHCR_IMAGE):$(PR_REF) $(IMAGE)
 
 ## Preflight: validate submission.env with one tiny real API call + pred/rules checks,
