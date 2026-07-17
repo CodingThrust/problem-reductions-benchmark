@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Agent Harness"
+  short_description: "Integrate and verify a new benchmark agent CLI"
+  default_prompt: "Use $add-agent-harness to add and validate a new agent CLI backend."
