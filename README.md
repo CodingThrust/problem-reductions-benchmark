@@ -25,7 +25,22 @@ A mismatch is a bug. The AI finds these by constructing **counterexample certifi
 
 Provenance is intentionally *not* scored: on a fixed commit, a `pred`-confirmed certificate is a bug regardless of who or what produced it.
 
-## How to add a model
+## Choose a backend
+
+The benchmark has two independent execution backends:
+
+| Backend | Runtime | Repository skill |
+|---|---|---|
+| Model API | mini-swe/LiteLLM in Docker | `$run-api-benchmark` |
+| Coding-agent CLI | installed agent on the host | `$run-cli-benchmark` |
+
+Start with `$run-benchmark` when the backend is not yet chosen. A CLI agent missing from
+the supported list must first be integrated with `$add-agent-harness`.
+
+## How to add a coding-agent backend
+
+LiteLLM API models need no adapter. For a new CLI agent, use `$add-agent-harness` or follow
+the same contract manually:
 
 Implement one repository-session function, following `run_repo_codex` or
 `run_repo_claude`:
@@ -37,6 +52,8 @@ def run_repo_my_agent(model, ctx, *, trajectory_dir=None, submit_session=None, *
 ```
 
 Add its direct dispatch case to `_run_backend()` in `benchmark/run_submission.py`.
+The backend is supported only after its adapter tests pass and
+`harness-evaluation.json` reports `verdict: reliable`; command success alone is not enough.
 
 A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -55,12 +72,12 @@ in runner memory. Every session must successfully run the free `submit --status`
 the output is marked with `run_error` rather than reported as a clean zero. Certificates
 printed only in the agent's final response do not count.
 
-## How to run locally
+## How to run
 
-Requirements:
+Both backends require:
+
 - `pred` binary in PATH (pinned commit `aa2d1a1` of problem-reductions)
 - Python 3.12 with dependencies: `pip install -r benchmark/requirements.txt`
-- Either a provider API key, or a logged-in Claude/Codex CLI for headless mode
 
 ```bash
 # Run all unit tests (no API key needed) — this exercises the backend wiring
@@ -68,20 +85,30 @@ make test-unit
 
 # Test the verifier against the fixtures (no API key)
 make verify-calibration
+```
 
-# Configure your run. Add an API key for mini-swe; a logged-in headless CLI needs only
-# MODEL_NAME in this file.
+### Model API backend
+
+Configure a provider key in `submission.env`, then run the containerized mini-swe/LiteLLM
+backend:
+
+```bash
 cp submission.env.example submission.env
-
-# Reproducible Docker batch (mini-swe by default): validate, then run
 make preflight
 make run
+```
 
-# Or run directly on the host through a lightweight frontend agent:
+### Coding-agent CLI backend
+
+Install and authenticate a supported CLI, set `MODEL_NAME` in `submission.env`, and run it
+directly on the host:
+
+```bash
+cp submission.env.example submission.env
 make run-local \
   LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
   LOCAL_OUTPUT=../runs/results/submission.json \
-  LOCAL_LOG_DIR=../runs/logs                                  # codex exec
+  LOCAL_LOG_DIR=../runs/logs
 
 # Claude alternative: add LOCAL_BACKEND=claude-code
 ```
@@ -89,9 +116,9 @@ make run-local \
 `run-local` clones `PR_REF` into `LOCAL_REPO_DIR` when the path is absent. If the path
 already exists, its `HEAD` must match that ref; the runner never resets or checks out an
 existing working tree. `LOCAL_OUTPUT` and `LOCAL_LOG_DIR` are deliberately separate and
-required. Local mode runs one self-terminating whole-repository session with the same
-run-wide `submit` budget as Docker. There is no agent step or turn limit; the six-hour CLI
-timeout and per-command timeout only guard against hung processes.
+required. The CLI backend runs one self-terminating whole-repository session with the same
+run-wide `submit` budget as the API backend. There is no agent step or turn limit; the
+six-hour CLI timeout and per-command timeout only guard against hung processes.
 
 Key `make` targets:
 
@@ -100,9 +127,9 @@ Key `make` targets:
 | `make test-unit` | All unit tests, no API key needed |
 | `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
 | `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
-| `make preflight` | Validate `submission.env` with one tiny real call before a full run |
-| `make run` | Run the benchmark via Docker → `out/submission.json` (does not upload) |
-| `make run-local` | Run locally via `codex exec` or `claude -p` → the same output schema |
+| `make preflight` | Validate the API backend with one tiny real call before a full run |
+| `make run` | Run the API backend in Docker → `out/submission.json` (does not upload) |
+| `make run-local` | Run a coding-agent CLI on the host → the same output schema |
 | `make score-local` | Score submissions with the zero-trust backend |
 
 ## How to read the metrics

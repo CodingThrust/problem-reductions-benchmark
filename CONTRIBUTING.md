@@ -4,11 +4,13 @@ The benchmark gives every model one repository-wide, self-terminating agent sess
 asks: how many distinct reduction-rule bugs can it find?
 
 ```
-  make run ─▶ submission.json ─▶ python -m benchmark.submit  ──▶  private store (R2)
-                                          │
-                    maintainer's scorer re-verifies every certificate with pred
-                                          │
-              only the aggregate is published ─▶ PR ─▶ GitHub Pages
+  make run / make run-local ─▶ submission.json ─▶ python -m benchmark.submit
+                                                              │
+                                                     private store (R2)
+                                                              │
+                              maintainer re-verifies every certificate with pred
+                                                              │
+                                  aggregate only ─▶ PR ─▶ GitHub Pages
 ```
 
 Your submission carries counterexample certificates plus the bounded submit ledger, so it
@@ -17,14 +19,16 @@ trusted — the score is recomputed by `pred`.
 
 ## 1. Produce a `submission.json`
 
-There are two frontends over the same benchmark runner and `submit` budget:
+Both backends use the same runner and `submit` budget:
 
-- Docker is the reproducible batch path: it pins the library, `pred`, Python stack, and
-  agent runtime.
-- Local headless mode is the lightweight path: it invokes an installed `codex exec` or
-  `claude -p` directly and is convenient for rapid runs on the host.
+| Backend | Execution | Repository skill |
+|---|---|---|
+| Model API | mini-swe/LiteLLM in Docker | `$run-api-benchmark` |
+| Coding-agent CLI | installed agent on the host | `$run-cli-benchmark` |
 
-### Docker mode
+Use `$run-benchmark` to choose interactively.
+
+### Model API backend (Docker)
 
 The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + LiteLLM),
 and the problem-reductions source pinned at `v0.6.0`. Any LiteLLM-routable provider key
@@ -55,9 +59,8 @@ docker run --rm --env-file submission.env -v "$PWD/out:/out" \
 # → ./out/submission.json      (or just: make run)
 ```
 
-`MODEL_NAME` is always required. The mini-swe backend additionally requires an API key;
-logged-in headless CLIs can reuse their saved authentication. Everything else in the
-template has a sane default — uncomment only what you need. The knobs, by tier:
+`MODEL_NAME` and a provider API key are required for the mini-swe path. Everything else in
+the template has a sane default — uncomment only what you need. The knobs, by tier:
 
 | Tier | Vars | When |
 |---|---|---|
@@ -120,7 +123,7 @@ make preflight        # docker run --env-file submission.env <image> --preflight
 It checks the `pred` binary + version, that the library rules are present, and makes one
 minimal model call through the exact batch code path. It exits non-zero on any failure.
 
-### Lightweight local headless mode
+### Coding-agent CLI backend (host)
 
 Install the Python dependencies and the pinned `pred`, then authenticate one supported CLI:
 
@@ -138,11 +141,12 @@ make run-local \
 # Claude alternative: add LOCAL_BACKEND=claude-code
 ```
 
-The default local run uses Codex. Codex uses the
+The default CLI backend is Codex. Codex uses the
 non-interactive `codex exec --json --ephemeral` interface with a `workspace-write`
 sandbox; Claude uses `claude -p`. Both receive the same benchmark prompts and agent-only
-`submit` command, and both produce the same schema as Docker. All backends run exactly one
-whole-repository session and stop themselves; no turn count is passed to either CLI.
+`submit` command, and both produce the same schema as the API backend. All backends run
+exactly one whole-repository session and stop themselves; no turn count is passed to either
+CLI.
 
 The runner gives every backend a writable scratch workspace. The `submit` CLI exchanges
 atomic request/response files there while the attempt budget and verified ledger remain in
@@ -156,9 +160,17 @@ An existing checkout is only accepted when `HEAD` matches the requested ref; it 
 mutated automatically. Submission JSON and live/final logs go to the separate, required
 `LOCAL_OUTPUT` and `LOCAL_LOG_DIR` paths.
 
-Local mode is intentionally less hermetic: it uses the host CLI binary, authentication,
+The CLI backend is intentionally less hermetic: it uses the host binary, authentication,
 Python environment, and `pred`. The runner still verifies the pinned `pred` version and
-records the target commit, but use Docker for an official reproducible batch.
+records the target commit; use the API backend for an official reproducible batch.
+
+#### Add another coding-agent CLI
+
+Codex (`codex`) and Claude Code (`claude-code`) are built in. For another CLI, use
+`$add-agent-harness`; do not substitute a different agent. The adapter must pass the
+[contract tests](.agents/skills/add-agent-harness/references/adapter-contract.md) and a real
+[smoke evaluation](.agents/skills/add-agent-harness/references/reliability-evaluation.md)
+must produce `verdict: reliable`.
 
 ## 2. Submit it (CLI upload)
 
