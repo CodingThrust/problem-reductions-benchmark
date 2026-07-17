@@ -31,6 +31,11 @@ jobs:
         id: pins
         run: echo "pr_ref=$(grep -E '^PR_REF[[:space:]]*\?=' Makefile | sed -E 's/.*=[[:space:]]*//')" >> "$GITHUB_OUTPUT"
 
+      # Docker repository names must be lowercase — the org login (CodingThrust) is not.
+      - name: Lowercase GHCR image namespace
+        id: ghcr
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/problem-reductions-runner" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
@@ -51,8 +56,8 @@ jobs:
             CARGO_JOBS=4
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/problem-reductions-runner:${{ steps.pins.outputs.pr_ref }}
-            ghcr.io/${{ github.repository_owner }}/problem-reductions-runner:latest
+            ${{ steps.ghcr.outputs.image }}:${{ steps.pins.outputs.pr_ref }}
+            ${{ steps.ghcr.outputs.image }}:latest
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
