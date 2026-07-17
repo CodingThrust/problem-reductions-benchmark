@@ -35,9 +35,9 @@ Do not use the removed `AGENT_MODE`, `MAX_RULES`, or max-turn variables. Every b
 one whole-repository session and the agent stops itself.
 
 For Docker, `OUTPUT=/out/submission.json` and `TRAJECTORY_DIR=/out` are the defaults. The
-stable output is accompanied by a versioned archive. Raw stream, stderr, and normalized
-trajectory files are persisted in the trajectory directory; the submission itself uses the
-bounded submit ledger for certificate provenance.
+configured output is authoritative. Headless backends persist the raw stream and stderr;
+mini-swe persists one normalized log. The submission itself uses the bounded submit ledger
+for certificate provenance.
 
 ## Local Make variables
 

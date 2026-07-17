@@ -27,25 +27,16 @@ Provenance is intentionally *not* scored: on a fixed commit, a `pred`-confirmed 
 
 ## How to add a model
 
-Implement the `AgentRunner` interface in `benchmark/runner.py`:
+Implement one repository-session function, following `run_repo_codex` or
+`run_repo_claude`:
 
 ```python
-from benchmark.runner import AgentRunner
-
-class MyRunner(AgentRunner):
-    def run_repo(self, ctx, model: str, *, trajectory_dir=None) -> dict:
-        # Run one repository-wide session. Accepted certificates come from submit_session.
-        return {
-            "rows": [...],
-            "tokens_k": 12.3,
-            "usage": usage,
-            "trajectory": [...],
-            "error": None,
-        }
+def run_repo_my_agent(model, ctx, *, trajectory_dir=None, submit_session=None, **kwargs):
+    # Run one repository-wide session. Scored rows come from submit_session, not this return.
+    return {"tokens_k": 12.3, "usage": usage, "error": None}
 ```
 
-Wire it into `_select_runner()` in `benchmark/run_submission.py`. See `MiniSweRunner` for
-a complete implementation.
+Add its direct dispatch case to `_run_backend()` in `benchmark/run_submission.py`.
 
 A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -72,7 +63,7 @@ Requirements:
 - Either a provider API key, or a logged-in Claude/Codex CLI for headless mode
 
 ```bash
-# Run all unit tests (no API key needed) — this is what exercises the runner wiring
+# Run all unit tests (no API key needed) — this exercises the backend wiring
 make test-unit
 
 # Test the verifier against the fixtures (no API key)

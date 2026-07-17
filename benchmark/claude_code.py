@@ -3,13 +3,10 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from contextlib import nullcontext
 from pathlib import Path
 
-from benchmark.headless import child_env, load_rendered_prompts, run_process
-from benchmark.naming import safe_model_label
-from benchmark.run_mini import CONFIG_FILE, save_trajectory
+from benchmark.headless import child_env, load_rendered_prompts, run_headless_session
+from benchmark.run_mini import CONFIG_FILE
 from benchmark.usage import Usage, usage_from_response
 
 DEFAULT_ALLOWED_TOOLS = "Bash,Read,Grep,Glob"
@@ -36,7 +33,7 @@ def _block_text(block: dict) -> str:
     return ""
 
 
-def parse_stream(lines) -> dict:
+def parse_stream(lines, *, collect_trajectory: bool = True) -> dict:
     trajectory: list[dict] = []
     usage = Usage()
     seen_message_ids: set = set()
@@ -51,11 +48,12 @@ def parse_stream(lines) -> dict:
         event_type = event.get("type")
         if event_type in ("assistant", "user"):
             message = event.get("message") or {}
-            content = message.get("content")
-            text = (content if isinstance(content, str) else
-                    "\n".join(filter(None, (_block_text(block) for block in (content or [])
-                                             if isinstance(block, dict)))))
-            trajectory.append({"role": event_type, "content": text})
+            if collect_trajectory:
+                content = message.get("content")
+                text = (content if isinstance(content, str) else
+                        "\n".join(filter(None, (_block_text(block) for block in (content or [])
+                                                 if isinstance(block, dict)))))
+                trajectory.append({"role": event_type, "content": text})
             message_id = message.get("id")
             if (event_type == "assistant" and message.get("usage")
                     and message_id not in seen_message_ids):
@@ -112,11 +110,6 @@ def run_repo_claude(
     allowed_tools = allowed_tools or os.environ.get("CLAUDE_CODE_TOOLS", DEFAULT_ALLOWED_TOOLS)
     session_timeout = session_timeout or int(
         os.environ.get("CLAUDE_CODE_SESSION_TIMEOUT", DEFAULT_SESSION_TIMEOUT))
-    safe_model = safe_model_label(model_name)
-    if trajectory_dir is not None:
-        trajectory_dir = Path(trajectory_dir).resolve()
-        trajectory_dir.mkdir(parents=True, exist_ok=True)
-
     variables = {
         "repo_dir": str(ctx.repo_path),
         "commit_hash": ctx.commit_hash[:7],
@@ -126,25 +119,8 @@ def run_repo_claude(
         config_path, CONFIG_FILE, strategy, variables)
     command = _build_command(
         claude_bin, system_prompt, task_prompt, model_name, allowed_tools)
-    stream_log = (trajectory_dir / f"{safe_model}_whole-repo.stream.jsonl"
-                  if trajectory_dir is not None else None)
-
-    shared_workdir = getattr(submit_session, "workdir", None)
-    workspace = (nullcontext(str(shared_workdir)) if shared_workdir is not None
-                 else tempfile.TemporaryDirectory(prefix="claude_whole_repo_"))
-    with workspace as workdir:
-        lines, _returncode, run_error = run_process(
-            command, cwd=workdir, env=_child_env(ctx, api_key),
-            timeout=session_timeout, stream_log=stream_log, label="claude")
-
-    if stream_log is not None:
-        with stream_log.open(encoding="utf-8") as stream:
-            parsed = parse_stream(stream)
-    else:
-        parsed = parse_stream(lines)
-    trajectory, usage = parsed["trajectory"], parsed["usage"]
-    if trajectory_dir is not None:
-        save_trajectory(trajectory, trajectory_dir / f"{safe_model}_whole-repo.jsonl")
-    rows = submit_session.result_rows() if submit_session is not None else []
-    return {"rows": rows, "tokens_k": round(usage.total_tokens / 1000, 2),
-            "trajectory": trajectory, "usage": usage, "error": run_error}
+    return run_headless_session(
+        command=command, model_name=model_name,
+        env=_child_env(ctx, api_key), timeout=session_timeout,
+        parser=parse_stream, label="claude", trajectory_dir=trajectory_dir,
+        submit_session=submit_session)

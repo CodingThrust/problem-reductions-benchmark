@@ -3,13 +3,10 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from contextlib import nullcontext
 from pathlib import Path
 
-from benchmark.headless import child_env, load_rendered_prompts, run_process
-from benchmark.naming import safe_model_label
-from benchmark.run_mini import CONFIG_FILE, save_trajectory
+from benchmark.headless import child_env, load_rendered_prompts, run_headless_session
+from benchmark.run_mini import CONFIG_FILE
 from benchmark.usage import Usage
 
 DEFAULT_SANDBOX = "workspace-write"
@@ -36,7 +33,7 @@ def _child_env(ctx, api_key: str | None) -> dict:
     return child_env(ctx, api_key, api_key_var="OPENAI_API_KEY")
 
 
-def parse_stream(lines) -> dict:
+def parse_stream(lines, *, collect_trajectory: bool = True) -> dict:
     trajectory: list[dict] = []
     usage = Usage()
     steps = 0
@@ -55,14 +52,16 @@ def parse_stream(lines) -> dict:
         elif event_type == "item.completed":
             item = event.get("item") or {}
             if item.get("type") == "agent_message" and isinstance(item.get("text"), str):
-                trajectory.append({"role": "assistant", "content": item["text"]})
+                if collect_trajectory:
+                    trajectory.append({"role": "assistant", "content": item["text"]})
             elif item.get("type") == "command_execution":
                 steps += 1
-                content = f"[command]\n{item.get('command') or ''}"
-                output = item.get("aggregated_output") or item.get("output") or ""
-                if output:
-                    content += f"\n[output]\n{output}"
-                trajectory.append({"role": "tool", "content": content})
+                if collect_trajectory:
+                    content = f"[command]\n{item.get('command') or ''}"
+                    output = item.get("aggregated_output") or item.get("output") or ""
+                    if output:
+                        content += f"\n[output]\n{output}"
+                    trajectory.append({"role": "tool", "content": content})
         elif event_type == "turn.completed":
             result_event = event
             raw_usage = event.get("usage") or {}
@@ -112,30 +111,8 @@ def run_repo_codex(
     command = _build_command(codex_bin, f"{system.rstrip()}\n\n{task.lstrip()}",
                              model_name, sandbox)
 
-    safe_model = safe_model_label(model_name)
-    stream_log = None
-    if trajectory_dir is not None:
-        trajectory_dir = Path(trajectory_dir).resolve()
-        trajectory_dir.mkdir(parents=True, exist_ok=True)
-        stream_log = trajectory_dir / f"{safe_model}_whole-repo.stream.jsonl"
-
-    shared_workdir = getattr(submit_session, "workdir", None)
-    workspace = (nullcontext(str(shared_workdir)) if shared_workdir is not None
-                 else tempfile.TemporaryDirectory(prefix="codex_whole_repo_"))
-    with workspace as workdir:
-        lines, _returncode, run_error = run_process(
-            command, cwd=workdir, env=_child_env(ctx, api_key),
-            timeout=session_timeout, stream_log=stream_log, label="codex")
-
-    if stream_log is not None:
-        with stream_log.open(encoding="utf-8") as stream:
-            parsed = parse_stream(stream)
-    else:
-        parsed = parse_stream(lines)
-    trajectory, usage = parsed["trajectory"], parsed["usage"]
-    run_error = run_error or _event_error(parsed["result_event"])
-    if trajectory_dir is not None:
-        save_trajectory(trajectory, trajectory_dir / f"{safe_model}_whole-repo.jsonl")
-    rows = submit_session.result_rows() if submit_session is not None else []
-    return {"rows": rows, "tokens_k": round(usage.total_tokens / 1000, 2),
-            "trajectory": trajectory, "usage": usage, "error": run_error}
+    return run_headless_session(
+        command=command, model_name=model_name,
+        env=_child_env(ctx, api_key), timeout=session_timeout,
+        parser=parse_stream, label="codex", trajectory_dir=trajectory_dir,
+        submit_session=submit_session, event_error=_event_error)

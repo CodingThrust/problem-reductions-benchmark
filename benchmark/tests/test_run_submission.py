@@ -1,8 +1,8 @@
 """
 Tests for benchmark/run_submission.py — the dockerized runner entry point.
 
-All tests run in FAKE mode (FakeRunner): no model API, no pred binary. They prove the
-runner assembles a schema-valid, rankable submission.json.
+All tests run in fake mode: no model API, no pred binary. They prove the runner assembles
+a schema-valid, rankable submission.json.
 """
 import json
 from pathlib import Path
@@ -85,7 +85,7 @@ class TestBuildSubmission:
         assert sub["rules_tested"] == 2
 
 
-# ── run() end-to-end with FakeRunner ──────────────────────────────────────────
+# ── run() end-to-end in fake mode ─────────────────────────────────────────────
 
 class TestRunFake:
     def test_produces_rankable_submission(self, tmp_path):
@@ -103,6 +103,7 @@ class TestRunFake:
         assert out.exists()
         on_disk = json.loads(out.read_text())
         assert on_disk["model"] == sub["model"]
+        assert list(out.parent.glob("submission*.json")) == [out]
 
 
 # ── schema validity ───────────────────────────────────────────────────────────

@@ -51,7 +51,7 @@ def test_malformed_json_consumes_attempt_and_status_is_free(tmp_path):
         assert status.returncode == 0 and "0/2 used" in status.stdout
         assert result.returncode == 1 and "invalid certificate JSON" in result.stderr
         assert session.used == 1
-        assert session.status_checks == 1
+        assert session.reachable
         assert session.reachable
 
 
@@ -127,7 +127,7 @@ def test_runner_response_does_not_follow_agent_symlink(tmp_path):
         assert not response.is_symlink()
         assert json.loads(response.read_text())["status"] == "ok"
         assert victim.read_text() == "unchanged"
-        assert session.status_checks == 1
+        assert session.reachable
 
 
 def test_artifact_salvage_skips_symlinks(tmp_path):

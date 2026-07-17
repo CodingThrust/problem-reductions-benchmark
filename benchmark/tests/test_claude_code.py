@@ -8,8 +8,7 @@ import pytest
 
 from benchmark import run_submission
 from benchmark.claude_code import _build_command, parse_stream, run_repo_claude
-from benchmark.run_submission import _select_runner, run
-from benchmark.runner import ClaudeCodeRunner, MiniSweRunner
+from benchmark.run_submission import run
 from benchmark.submit_session import SubmissionSession
 
 CERT_TEXT = (
@@ -146,17 +145,6 @@ def _clean_env(monkeypatch):
 # ── backend selection ─────────────────────────────────────────────────────────
 
 class TestBackendSelection:
-    def test_select_claude_code(self):
-        runner = _select_runner("claude-code", config_path="cfg.yaml",
-                                strategy="hints", api_key="k")
-        assert isinstance(runner, ClaudeCodeRunner)
-        assert runner.config_path == "cfg.yaml"
-        assert runner.strategy == "hints"
-        assert runner.api_key == "k"
-
-    def test_select_mini_swe_default(self):
-        assert isinstance(_select_runner("mini-swe"), MiniSweRunner)
-
     def test_unknown_backend_rejected(self, tmp_path):
         (tmp_path / "src" / "rules").mkdir(parents=True)
         with pytest.raises(ValueError, match="unknown backend"):
@@ -165,12 +153,11 @@ class TestBackendSelection:
 
     def test_whole_repo_dispatches_to_claude_backend(self, monkeypatch):
         # The selected backend must call run_repo_claude, not mini-swe.
-        traj = [{"role": "assistant", "content": "run log"}]
-
         def fake_repo_claude(model, ctx, **kw):
-            return {"rows": [{"rule": "r1", "result": "bug_found", "tokens_k": 0.0,
-                              "certificate": {"rule": "r1", "source": {}}}],
-                    "tokens_k": 12.0, "trajectory": traj}
+            kw["submit_session"].result_rows = lambda: [
+                {"rule": "r1", "result": "bug_found", "tokens_k": 0.0,
+                 "certificate": {"rule": "r1", "source": {}}}]
+            return {"tokens_k": 12.0, "usage": None, "error": None}
 
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
@@ -208,40 +195,37 @@ class TestRunRepoClaude:
             assert (submit_session.workdir / "workspace.txt").read_text().strip() == str(
                 submit_session.workdir.resolve())
             assert "0/100 used" in (submit_session.workdir / "status.txt").read_text()
-            assert submit_session.status_checks == 1
+            assert submit_session.reachable
             assert session["error"] is None
 
-    def test_session_dict_and_cert_harvest(self, tmp_path, monkeypatch):
+    def test_session_usage_and_single_raw_stream(self, tmp_path):
         stub = _stub_claude(tmp_path, [
             _assistant("m1", CERT_TEXT, USAGE_1),
             _result(num_turns=5),
         ])
-        rows = [{"rule": "foo", "result": "bug_found", "tokens_k": 0.0,
-                 "certificate": {"rule": "foo", "source": {}}}]
-        submit_session = SimpleNamespace(limit=100, result_rows=lambda: rows)
+        submit_session = SimpleNamespace(limit=100)
         traj_dir = tmp_path / "out"
         session = run_repo_claude("anthropic/claude-haiku-4-5", _ctx(tmp_path),
                                   claude_bin=stub, strategy="",
                                   trajectory_dir=traj_dir,
                                   submit_session=submit_session)
         assert session["error"] is None
-        assert [r["result"] for r in session["rows"]] == ["bug_found"]
-        assert session["rows"][0]["rule"] == "foo"
         assert session["usage"].input_tokens == 100
-        # Stream + trajectory persisted for observability/provenance.
         assert (traj_dir / "anthropic_claude-haiku-4-5_whole-repo.stream.jsonl").exists()
-        assert (traj_dir / "anthropic_claude-haiku-4-5_whole-repo.jsonl").exists()
+        assert not (traj_dir / "anthropic_claude-haiku-4-5_whole-repo.jsonl").exists()
 
     def test_cli_failure_reports_error_and_salvages(self, tmp_path):
         stub = _stub_claude(tmp_path, [_assistant("m1", "partial work", USAGE_1)], exit_code=7)
+        log_dir = tmp_path / "logs"
         session = run_repo_claude("claude-haiku-4-5", _ctx(tmp_path),
-                                  claude_bin=stub, strategy="")
+                                  claude_bin=stub, strategy="", trajectory_dir=log_dir)
         assert "claude exited 7" in session["error"]
-        assert session["trajectory"]  # partial trajectory still salvaged
+        assert "partial work" in (
+            log_dir / "claude-haiku-4-5_whole-repo.stream.jsonl").read_text()
         assert session["usage"].input_tokens == 100
 
     def test_missing_cli(self, tmp_path):
         session = run_repo_claude("claude-haiku-4-5", _ctx(tmp_path),
                                   claude_bin=str(tmp_path / "nope"), strategy="")
         assert "not found" in session["error"]
-        assert session["rows"] == []
+        assert "rows" not in session

@@ -8,8 +8,7 @@ import pytest
 
 from benchmark import run_submission
 from benchmark.codex_cli import _build_command, _child_env, parse_stream, run_repo_codex
-from benchmark.run_submission import _load_env_file, _select_runner
-from benchmark.runner import CodexRunner
+from benchmark.run_submission import _load_env_file
 from benchmark.submit_session import SubmissionSession
 
 
@@ -96,7 +95,7 @@ class TestCodexRuns:
             assert Path(submit_session.workdir / "workspace.txt").read_text().strip() == str(
                 submit_session.workdir.resolve())
             assert "0/100 used" in (submit_session.workdir / "status.txt").read_text()
-            assert submit_session.status_checks == 1
+            assert submit_session.reachable
             assert session["error"] is None
 
     def test_missing_cli(self, tmp_path):
@@ -111,7 +110,7 @@ class TestCodexRuns:
         ], exit_code=7)
         session = run_repo_codex("gpt-5.4", _ctx(tmp_path), codex_bin=stub, strategy="")
         assert session["error"].startswith("codex exited 7")
-        assert session["trajectory"]
+        assert "trajectory" not in session
 
     def test_turn_failed_event_is_an_error_even_on_zero_exit(self, tmp_path):
         stub = _stub_codex(tmp_path, [
@@ -120,32 +119,22 @@ class TestCodexRuns:
         session = run_repo_codex("gpt-5.4", _ctx(tmp_path), codex_bin=stub, strategy="")
         assert session["error"].startswith("codex turn.failed")
 
-    def test_whole_repo_persists_stream_and_trajectory(self, tmp_path):
+    def test_whole_repo_persists_single_raw_stream(self, tmp_path):
         stub = _stub_codex(tmp_path, [
             {"type": "item.completed", "item": {"type": "agent_message", "text": "done"}},
             {"type": "turn.completed", "usage": {
                 "input_tokens": 30, "cached_input_tokens": 10, "output_tokens": 5}},
         ])
-        rows = [{"rule": "foo", "result": "bug_found", "tokens_k": 0,
-                 "certificate": {"rule": "foo", "source": {}}}]
-        submit_session = SimpleNamespace(limit=100, result_rows=lambda: rows)
+        submit_session = SimpleNamespace(limit=100)
         session = run_repo_codex("openai/gpt-5.4", _ctx(tmp_path), codex_bin=stub,
                                  strategy="", trajectory_dir=tmp_path / "out",
                                  submit_session=submit_session)
-        assert session["rows"] == rows
         assert session["usage"].total_tokens == 35
         assert (tmp_path / "out" / "openai_gpt-5.4_whole-repo.stream.jsonl").exists()
-        assert (tmp_path / "out" / "openai_gpt-5.4_whole-repo.jsonl").exists()
+        assert not (tmp_path / "out" / "openai_gpt-5.4_whole-repo.jsonl").exists()
 
 
 class TestWiring:
-    def test_selects_codex_runner(self):
-        runner = _select_runner("codex", config_path="cfg.yaml", strategy="hint", api_key="k")
-        assert isinstance(runner, CodexRunner)
-        assert runner.config_path == "cfg.yaml"
-        assert runner.strategy == "hint"
-        assert runner.api_key == "k"
-
     def test_env_file_preserves_ambient_values(self, tmp_path, monkeypatch):
         env_file = tmp_path / "submission.env"
         env_file.write_text("# comment\nMODEL_NAME='from-file'\nAGENT_BACKEND=codex\n",
@@ -190,8 +179,7 @@ class TestWiring:
 
         def fake_repo(model, ctx, **kwargs):
             called["model"] = model
-            return {"rows": [], "tokens_k": 1.0, "trajectory": [], "usage": None,
-                    "error": None}
+            return {"tokens_k": 1.0, "usage": None, "error": None}
 
         class FakeSubmissionSession:
             def __init__(self, limit):
@@ -202,6 +190,9 @@ class TestWiring:
 
             def __exit__(self, *args):
                 return None
+
+            def result_rows(self):
+                return []
 
         monkeypatch.setattr(run_submission, "SubmissionSession", FakeSubmissionSession)
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")

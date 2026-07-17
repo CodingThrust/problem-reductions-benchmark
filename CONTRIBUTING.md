@@ -257,7 +257,7 @@ would hide. The round-trip judging itself is explained in the [README](README.md
 
 ## Status: validated against a live model
 
-The runner pipeline is unit-tested end-to-end with `FakeRunner` + the certificate fixtures
+The runner pipeline is unit-tested end-to-end in fake mode + the certificate fixtures
 **and** has been exercised against a live model API (a DeepSeek OpenAI-compatible endpoint
 via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real run drives the
 agent through a whole-repository session and emits a schema-valid `submission.json`. PR scoring and GitHub Pages

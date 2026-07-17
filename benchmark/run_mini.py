@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from benchmark.env_context import EnvContext
-from benchmark.naming import safe_model_label
+from benchmark.headless import safe_model_label
 from benchmark.usage import extract_usage
 
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
@@ -49,11 +49,6 @@ def _session_usage(agent):
     usage = extract_usage(agent.messages)
     total_tokens = usage.total_tokens or extract_total_tokens(agent.messages)
     return round(total_tokens / 1000, 2), usage
-
-
-def _trajectory(agent) -> list[dict]:
-    return [{"role": msg.get("role", ""), "content": _message_text(msg)}
-            for msg in agent.messages]
 
 
 def _build_model(model_name: str, api_base: str | None, max_tokens: int,
@@ -116,8 +111,6 @@ def run_repo_session(
     if trajectory_dir is not None:
         trajectory_dir = Path(trajectory_dir).resolve()
         trajectory_dir.mkdir(parents=True, exist_ok=True)
-        agent_config["output_path"] = str(
-            trajectory_dir / f"{safe_model}_whole-repo.step.json")
 
     agent = DefaultAgent(
         _build_model(
@@ -142,10 +135,7 @@ def run_repo_session(
         run_error = f"{type(error).__name__}: {error}"
 
     tokens_k, usage = _session_usage(agent)
-    trajectory = _trajectory(agent)
     if trajectory_dir is not None:
         save_trajectory(agent.messages,
                         trajectory_dir / f"{safe_model}_whole-repo.jsonl")
-    rows = submit_session.result_rows() if submit_session is not None else []
-    return {"rows": rows, "tokens_k": tokens_k, "trajectory": trajectory,
-            "usage": usage, "error": run_error}
+    return {"tokens_k": tokens_k, "usage": usage, "error": run_error}

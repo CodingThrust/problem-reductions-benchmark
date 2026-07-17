@@ -2,8 +2,8 @@
 
 The agent-facing ``submit`` process is deliberately only a thin client. Requests use an
 atomic file spool inside the agent scratch workspace so sandboxed Codex, Claude, mini-swe,
-and container backends share one transport. The budget, verification, response cache, and
-accepted-certificate ledger remain authoritative in runner memory; editing spool files
+and container backends share one transport. The budget, verification, and accepted-certificate
+ledger remain authoritative in runner memory; editing spool files
 cannot reset the budget or forge a scored result.
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ from typing import Callable
 from benchmark.verify import Verdict, verify
 
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
-MAX_CACHED_RESPONSES = 1024
 
 
 class SubmissionSession:
@@ -39,21 +38,15 @@ class SubmissionSession:
         self._thread: threading.Thread | None = None
         self._tmpdir: Path | None = None
         self._workdir: Path | None = None
-        self._channel_dir: Path | None = None
-        self._inbox_dir: Path | None = None
-        self._processing_dir: Path | None = None
-        self._outbox_dir: Path | None = None
         self._workdir_fd: int | None = None
         self._inbox_fd: int | None = None
         self._processing_fd: int | None = None
         self._outbox_fd: int | None = None
         self._artifact_fd: int | None = None
-        self._artifact_dir: Path | None = None
         self._old_channel_env: str | None = None
         self._old_artifact_env: str | None = None
         self._old_path: str | None = None
         self._stopping = threading.Event()
-        self._responses: dict[str, dict] = {}
         self._status_checks = 0
 
     @property
@@ -78,11 +71,6 @@ class SubmissionSession:
         return self._workdir
 
     @property
-    def status_checks(self) -> int:
-        with self._lock:
-            return self._status_checks
-
-    @property
     def reachable(self) -> bool:
         """Whether any status or submit request reached the authoritative service."""
         with self._lock:
@@ -92,20 +80,19 @@ class SubmissionSession:
         self._tmpdir = Path(tempfile.mkdtemp(prefix="prb-agent-", dir="/tmp"))
         self._workdir = self._tmpdir / "work"
         bin_dir = self._workdir / ".prb-bin"
-        self._channel_dir = self._workdir / ".prb-submit"
-        self._inbox_dir = self._channel_dir / "inbox"
-        self._processing_dir = self._channel_dir / "processing"
-        self._outbox_dir = self._channel_dir / "outbox"
-        self._artifact_dir = self._workdir / "artifacts"
-        for directory in (bin_dir, self._inbox_dir, self._processing_dir,
-                          self._outbox_dir, self._artifact_dir):
+        channel_dir = self._workdir / ".prb-submit"
+        inbox_dir = channel_dir / "inbox"
+        processing_dir = channel_dir / "processing"
+        outbox_dir = channel_dir / "outbox"
+        artifact_dir = self._workdir / "artifacts"
+        for directory in (bin_dir, inbox_dir, processing_dir, outbox_dir, artifact_dir):
             directory.mkdir(parents=True, exist_ok=True)
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
         self._workdir_fd = os.open(self._workdir, directory_flags)
-        self._inbox_fd = os.open(self._inbox_dir, directory_flags)
-        self._processing_fd = os.open(self._processing_dir, directory_flags)
-        self._outbox_fd = os.open(self._outbox_dir, directory_flags)
-        self._artifact_fd = os.open(self._artifact_dir, directory_flags)
+        self._inbox_fd = os.open(inbox_dir, directory_flags)
+        self._processing_fd = os.open(processing_dir, directory_flags)
+        self._outbox_fd = os.open(outbox_dir, directory_flags)
+        self._artifact_fd = os.open(artifact_dir, directory_flags)
 
         shim = bin_dir / "submit"
         client = Path(__file__).with_name("agent_submit.py")
@@ -121,8 +108,8 @@ class SubmissionSession:
         self._old_channel_env = os.environ.get("PRB_SUBMIT_DIR")
         self._old_artifact_env = os.environ.get("PRB_ARTIFACT_DIR")
         self._old_path = os.environ.get("PATH")
-        os.environ["PRB_SUBMIT_DIR"] = str(self._channel_dir)
-        os.environ["PRB_ARTIFACT_DIR"] = str(self._artifact_dir)
+        os.environ["PRB_SUBMIT_DIR"] = str(channel_dir)
+        os.environ["PRB_ARTIFACT_DIR"] = str(artifact_dir)
         os.environ["PATH"] = f"{bin_dir}{os.pathsep}{self._old_path or ''}"
         return self
 
@@ -149,10 +136,6 @@ class SubmissionSession:
                 os.close(fd)
         if self._tmpdir is not None:
             shutil.rmtree(self._tmpdir, ignore_errors=True)
-
-    def attempts_since(self, index: int) -> list[dict]:
-        with self._lock:
-            return copy.deepcopy(self._attempts[index:])
 
     def preserve_artifacts(self, destination: str | Path) -> list[Path]:
         """Copy small certificate artifacts out of the disposable agent workspace."""
@@ -194,22 +177,24 @@ class SubmissionSession:
         An accepted attempt wins over rejected attempts for the same rule.  Parse failures
         remain in ``submit_log`` for auditing but cannot form schema-valid result rows.
         """
-        by_rule: dict[str, dict] = {}
-        for attempt in self.attempts:
-            rule = attempt.get("rule")
-            cert = attempt.get("certificate")
-            if (not isinstance(rule, str) or not isinstance(cert, dict)
-                    or not isinstance(cert.get("rule"), str)
-                    or not isinstance(cert.get("source"), dict)):
-                continue
-            old = by_rule.get(rule)
-            if old is None or (attempt.get("accepted") and not old.get("accepted")):
-                by_rule[rule] = attempt
-        return [_attempt_to_row(a) for a in by_rule.values()]
+        with self._lock:
+            by_rule: dict[str, dict] = {}
+            for attempt in self._attempts:
+                rule = attempt.get("rule")
+                cert = attempt.get("certificate")
+                if (not isinstance(rule, str) or not isinstance(cert, dict)
+                        or not isinstance(cert.get("rule"), str)
+                        or not isinstance(cert.get("source"), dict)):
+                    continue
+                old = by_rule.get(rule)
+                if old is None or (attempt.get("accepted") and not old.get("accepted")):
+                    by_rule[rule] = attempt
+            return [_attempt_to_row(attempt) for attempt in by_rule.values()]
 
     def _serve(self) -> None:
         assert self._inbox_fd is not None
         assert self._processing_fd is not None
+        idle_wait = 0.02
         while not self._stopping.is_set():
             handled = False
             for name in os.listdir(self._inbox_fd):
@@ -223,39 +208,37 @@ class SubmissionSession:
                 except FileNotFoundError:
                     continue
                 request_id = name[:-5]
-                response = self._responses.get(request_id)
-                if response is None:
+                try:
+                    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                    request_fd = os.open(name, flags, dir_fd=self._processing_fd)
                     try:
-                        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                        request_fd = os.open(name, flags, dir_fd=self._processing_fd)
-                        try:
-                            info = os.fstat(request_fd)
-                            if not stat.S_ISREG(info.st_mode):
-                                raise ValueError("request is not a regular file")
-                            if info.st_size > MAX_REQUEST_BYTES:
-                                raise ValueError(f"request exceeds {MAX_REQUEST_BYTES} bytes")
-                            with os.fdopen(request_fd, "rb", closefd=False) as request_file:
-                                raw = request_file.read(MAX_REQUEST_BYTES + 1)
-                        finally:
-                            os.close(request_fd)
-                        if len(raw) > MAX_REQUEST_BYTES:
+                        info = os.fstat(request_fd)
+                        if not stat.S_ISREG(info.st_mode):
+                            raise ValueError("request is not a regular file")
+                        if info.st_size > MAX_REQUEST_BYTES:
                             raise ValueError(f"request exceeds {MAX_REQUEST_BYTES} bytes")
-                        request = json.loads(raw.decode("utf-8"))
-                        if request.get("request_id") != request_id:
-                            raise ValueError("request id does not match filename")
-                        response = self._handle(request)
-                    except Exception as e:  # malformed requests do not kill the service
-                        response = self._record_rejection(f"invalid request: {e}")
-                    self._responses[request_id] = response
-                    if len(self._responses) > MAX_CACHED_RESPONSES:
-                        self._responses.pop(next(iter(self._responses)))
+                        with os.fdopen(request_fd, "rb", closefd=False) as request_file:
+                            raw = request_file.read(MAX_REQUEST_BYTES + 1)
+                    finally:
+                        os.close(request_fd)
+                    if len(raw) > MAX_REQUEST_BYTES:
+                        raise ValueError(f"request exceeds {MAX_REQUEST_BYTES} bytes")
+                    request = json.loads(raw.decode("utf-8"))
+                    if request.get("request_id") != request_id:
+                        raise ValueError("request id does not match filename")
+                    response = self._handle(request)
+                except Exception as e:  # malformed requests do not kill the service
+                    response = self._record_rejection(f"invalid request: {e}")
                 self._write_response(request_id, response)
                 try:
                     os.unlink(name, dir_fd=self._processing_fd)
                 except FileNotFoundError:
                     pass
-            if not handled:
-                self._stopping.wait(0.02)
+            if handled:
+                idle_wait = 0.02
+            else:
+                self._stopping.wait(idle_wait)
+                idle_wait = min(idle_wait * 2, 0.5)
 
     def _write_response(self, request_id: str, response: dict) -> None:
         assert self._outbox_fd is not None

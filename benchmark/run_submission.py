@@ -38,8 +38,6 @@ from benchmark.env_setup import (
     pinned_commit,
     verify_pred_version,
 )
-from benchmark.naming import safe_model_label
-from benchmark.runner import ClaudeCodeRunner, CodexRunner, FakeRunner, MiniSweRunner
 from benchmark.submit_session import SubmissionSession
 from benchmark.usage import Usage, usage_as_dict, usage_from_dict
 from benchmark.verify import count_bugs
@@ -58,10 +56,8 @@ def build_submission(
     created_at: str | None = None,
     submitted_by: str | None = None,
     total_tokens_k: float | None = None,
-    trajectory: list[dict] | None = None,
     pred_version: str = "",
     usage_totals=None,
-    agent_mode: str | None = None,
     run_error: str | None = None,
     submit_limit: int = 100,
     submit_attempts: list[dict] | None = None,
@@ -108,7 +104,7 @@ def build_submission(
         # runner/pred/library pins together pin down exactly what produced this file.
         "runner_version": runner_version,
         "pred_version": pred_version,
-        "agent_mode": agent_mode,
+        "agent_mode": "whole-repo",
         "created_at": created_at,
         "submitted_by": submitted_by,
         # Evaluation-owned command ledger.  Results are derived from this ledger; agent
@@ -121,29 +117,30 @@ def build_submission(
     # as a finished run.
     if run_error is not None:
         envelope["run_error"] = run_error
-    # whole-repo: the one shared session log, stored once here (not copied onto each row).
-    if trajectory is not None:
-        envelope["trajectory"] = trajectory
     return envelope
 
 
-def _select_runner(backend: str, *, api_base=None, max_tokens=None, config_path=None,
-                   strategy=None, model_kwargs=None, api_key=None, submit_session=None):
-    """Build the whole-repository AgentRunner for the selected backend.
-
-    claude-code has no litellm plumbing: api_base/max_tokens/model_kwargs don't apply
-    (the CLI owns the API call), so only the prompt config + strategy + key flow through.
-    """
+def _run_backend(backend: str, ctx, model: str, *, trajectory_dir=None,
+                 api_base=None, max_tokens=None, config_path=None, strategy=None,
+                 model_kwargs=None, api_key=None, submit_session=None) -> dict:
+    """Dispatch one whole-repository session without a one-use wrapper hierarchy."""
     if backend == "claude-code":
-        return ClaudeCodeRunner(config_path=config_path, strategy=strategy, api_key=api_key,
-                                submit_session=submit_session)
+        from benchmark.claude_code import run_repo_claude
+        return run_repo_claude(
+            model, ctx, trajectory_dir=trajectory_dir, config_path=config_path,
+            strategy=strategy, api_key=api_key, submit_session=submit_session)
     if backend == "codex":
-        return CodexRunner(config_path=config_path, strategy=strategy, api_key=api_key,
-                           submit_session=submit_session)
-    return MiniSweRunner(api_base=api_base, max_tokens=max_tokens,
-                         config_path=config_path, strategy=strategy,
-                         model_kwargs=model_kwargs, api_key=api_key,
-                         submit_session=submit_session)
+        from benchmark.codex_cli import run_repo_codex
+        return run_repo_codex(
+            model, ctx, trajectory_dir=trajectory_dir, config_path=config_path,
+            strategy=strategy, api_key=api_key, submit_session=submit_session)
+
+    from benchmark.run_mini import DEFAULT_MAX_TOKENS, run_repo_session
+    return run_repo_session(
+        model, ctx, api_base=api_base,
+        max_tokens=max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS,
+        trajectory_dir=trajectory_dir, config_path=config_path, strategy=strategy,
+        model_kwargs=model_kwargs, api_key=api_key, submit_session=submit_session)
 
 
 def run(
@@ -167,10 +164,9 @@ def run(
 ) -> dict:
     """Run the full session for one model and return the submission dict.
 
-    ``trajectory_dir`` is where the whole-repo agent's live/final trajectory is persisted
-    (default: the output file's directory). Beside the stable
-    ``output`` a versioned archive (``submission-<model>-<timestamp>.json``) is also written
-    so successive runs don't all overwrite one submission.json.
+    ``trajectory_dir`` is where the whole-repo agent's raw/final log is persisted
+    (default: the output file's directory). ``output`` is the authoritative submission
+    path; callers that want run history should give each run a distinct path.
 
     The runner always launches ONE session over the whole library. The agent enumerates,
     triages, and decides when to stop. ``backend`` selects the implementation: ``mini-swe``
@@ -189,7 +185,7 @@ def run(
 
     if fake:
         # EnvContext validates a real pred binary; fake mode only needs the fields consumed
-        # by AgentRunner, so a lightweight stand-in avoids API/pred setup.
+        # by a backend, so a lightweight stand-in avoids API/pred setup.
         from types import SimpleNamespace
         ctx = SimpleNamespace(repo_path=repo, pred_binary=Path("pred"),
                               commit_hash=commit, pred_version="")
@@ -208,13 +204,15 @@ def run(
 
     # One service spans the complete repository session.
     with SubmissionSession(limit=submit_limit) as submit_session:
-        runner = (FakeRunner() if fake else
-                  _select_runner(backend, api_base=api_base, max_tokens=max_tokens,
-                                 config_path=config_path, strategy=strategy,
-                                 model_kwargs=model_kwargs, api_key=api_key,
-                                 submit_session=submit_session))
-        session = runner.run_repo(ctx, model, trajectory_dir=traj_dir)
-        rows, total_tokens = session["rows"], session["tokens_k"]
+        session = ({"tokens_k": 0.0, "usage": None, "error": None} if fake else
+                   _run_backend(
+                       backend, ctx, model, trajectory_dir=traj_dir,
+                       api_base=api_base, max_tokens=max_tokens,
+                       config_path=config_path, strategy=strategy,
+                       model_kwargs=model_kwargs, api_key=api_key,
+                       submit_session=submit_session))
+        rows = submit_session.result_rows()
+        total_tokens = session["tokens_k"]
         session_usage = session.get("usage")
         run_error = session.get("error")
         if not fake and not run_error and not submit_session.reachable:
@@ -233,33 +231,16 @@ def run(
         total_tokens_k=total_tokens,
         pred_version=getattr(ctx, "pred_version", ""),
         usage_totals=session_usage,
-        agent_mode="whole-repo", run_error=run_error,
+        run_error=run_error,
         submit_limit=submit_limit, submit_attempts=submit_attempts,
     )
 
     if output is not None:
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        blob = json.dumps(sub, indent=2)
-        output.write_text(blob, encoding="utf-8")
-        # ALSO write a versioned archive copy so runs don't clobber each other: the stable
-        # `output` is the "latest" pointer (what `prb submit` reads); the archive keeps history.
-        archive = output.with_name(_versioned_name(output, model, created_at))
-        if archive.name != output.name:
-            archive.write_text(blob, encoding="utf-8")
+        output.write_text(json.dumps(sub, indent=2), encoding="utf-8")
 
     return sub
-
-
-def _versioned_name(output: Path, model: str, created_at: str | None) -> str:
-    """Archive filename that encodes the run: ``<stem>-<model>-<timestamp><suffix>``.
-
-    ``model`` is made filesystem-safe; ``timestamp`` is the compact UTC created_at
-    (digits + 'T'). Keeps each run's output as a distinct, self-identifying file next to
-    the stable ``output`` pointer."""
-    label = safe_model_label(model)
-    stamp = re.sub(r"[^0-9T]", "", created_at)[:15] if created_at else "unknown"
-    return f"{output.stem}-{label}-{stamp}{output.suffix}"
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -308,10 +289,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--repo-url", default=_env("REPO_URL", DEFAULT_REPO_URL),
                         help="Repository URL used when --repo-dir does not exist (env REPO_URL)")
     parser.add_argument("--output", default=_env("OUTPUT"),
-                        help="Stable 'latest' submission path (env OUTPUT). A versioned archive "
-                             "copy (submission-<label>-<timestamp>.json) is also written beside it.")
+                        help="Authoritative submission path (env OUTPUT)")
     parser.add_argument("--trajectory-dir", default=_env("TRAJECTORY_DIR"),
-                        help="Where to persist the whole-repo live/final trajectory "
+                        help="Where to persist the whole-repo raw/final log "
                              "(env TRAJECTORY_DIR; default: the output file's directory).")
     parser.add_argument("--api-base", default=_env("API_BASE"), help="Custom API base (env API_BASE)")
     parser.add_argument("--api-key", default=_env("API_KEY"),
@@ -343,7 +323,7 @@ def main(argv: list[str] | None = None) -> None:
                         help="Validate the config with one tiny real API call + pred/rules "
                              "checks, then exit (run this before the full batch).")
     parser.add_argument("--fake", action="store_true", default=bool(_env("FAKE")),
-                        help="No API/pred — FakeRunner wiring run (mostly covered by tests)")
+                        help="No API/pred — backend wiring smoke run (mostly covered by tests)")
     parser.add_argument("--backend", choices=BACKENDS,
                         default=_env("AGENT_BACKEND", "mini-swe"),
                         help="Agent implementation (env AGENT_BACKEND). mini-swe: litellm, any "
@@ -431,8 +411,7 @@ def main(argv: list[str] | None = None) -> None:
           f"{sub['rules_tested']} rules submitted")
     used, limit = len(sub["submit_log"]), sub["submit_limit"]
     print(f"Submit attempts: {used}/{limit} ({limit - used} remaining)")
-    archive = _versioned_name(Path(args.output), args.model, created_at)
-    print(f"Submission → {args.output}  (archive: {archive})")
+    print(f"Submission → {args.output}")
     print("Self-reported counts are advisory; the backend re-verifies every certificate "
           "with pred before it counts.")
 

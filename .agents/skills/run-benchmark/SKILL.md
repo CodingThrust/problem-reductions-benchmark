@@ -54,7 +54,8 @@ compiled `pred`, Python dependencies, and mini-swe runtime.
 4. After user confirmation, run `make run` (or the equivalent Podman command using the
    detector's `RUN_FLAGS`).
 5. Confirm `out/submission.json` exists. Report `bugs_found`, `total_tokens_k`, submit attempts,
-   and any `run_error`. Logs and versioned submission archives are also under `out/`.
+   and any `run_error`. Logs are also under `out/`; the configured submission path is the
+   single authoritative JSON output.
 
 An exit code 137 during build means the engine needs more memory. Never proceed after a
 failed preflight.
@@ -73,8 +74,8 @@ Confirm these host prerequisites:
 Require all three paths explicitly and keep them separate:
 
 - `LOCAL_REPO_DIR`: clone destination;
-- `LOCAL_OUTPUT`: stable submission JSON path;
-- `LOCAL_LOG_DIR`: raw and normalized agent logs.
+- `LOCAL_OUTPUT`: authoritative submission JSON path;
+- `LOCAL_LOG_DIR`: agent logs (raw CLI stream for headless backends, normalized mini-swe log).
 
 Run, for example:
 

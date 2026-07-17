@@ -4,9 +4,19 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import tempfile
 import threading
 from collections import deque
+from contextlib import nullcontext
 from pathlib import Path
+from typing import Callable
+
+from benchmark.usage import Usage
+
+
+def safe_model_label(model: str) -> str:
+    """Return a model name that is safe to use in a log filename."""
+    return model.replace("/", "_").replace(":", "_")
 
 
 def render_prompt(template: str, variables: dict) -> str:
@@ -66,7 +76,6 @@ def run_process(cmd: list[str], *, cwd: str, env: dict, timeout: int,
                 error_tail.append(line[-500:])
                 if stderr_handle is not None:
                     stderr_handle.write(line)
-                    stderr_handle.flush()
 
         stderr_thread = threading.Thread(target=_drain_stderr, name=f"{label}-stderr",
                                          daemon=True)
@@ -89,7 +98,6 @@ def run_process(cmd: list[str], *, cwd: str, env: dict, timeout: int,
                 error_tail.append(line[-500:])
                 if log_handle is not None:
                     log_handle.write(line)
-                    log_handle.flush()
             proc.wait()
             stderr_thread.join()
         finally:
@@ -110,3 +118,46 @@ def run_process(cmd: list[str], *, cwd: str, env: dict, timeout: int,
         detail = "".join(error_tail).strip()[-500:]
         return lines, proc.returncode, f"{label} exited {proc.returncode}: {detail}"
     return lines, proc.returncode, None
+
+
+def run_headless_session(
+    *,
+    command: list[str],
+    model_name: str,
+    env: dict,
+    timeout: int,
+    parser: Callable[..., dict],
+    label: str,
+    trajectory_dir: Path | None,
+    submit_session=None,
+    event_error: Callable[[dict | None], str | None] | None = None,
+) -> dict:
+    """Run a headless CLI once and retain its raw stream as the single session log."""
+    stream_log = None
+    if trajectory_dir is not None:
+        trajectory_dir = Path(trajectory_dir).resolve()
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        stream_log = trajectory_dir / (
+            f"{safe_model_label(model_name)}_whole-repo.stream.jsonl")
+
+    shared_workdir = getattr(submit_session, "workdir", None)
+    workspace = (nullcontext(str(shared_workdir)) if shared_workdir is not None
+                 else tempfile.TemporaryDirectory(prefix=f"{label}_whole_repo_"))
+    with workspace as workdir:
+        lines, _returncode, run_error = run_process(
+            command, cwd=workdir, env=env, timeout=timeout,
+            stream_log=stream_log, label=label)
+
+    if stream_log is None:
+        parsed = parser(lines, collect_trajectory=False)
+    else:
+        with stream_log.open(encoding="utf-8") as stream:
+            parsed = parser(stream, collect_trajectory=False)
+    usage = parsed.get("usage") or Usage()
+    if event_error is not None:
+        run_error = run_error or event_error(parsed.get("result_event"))
+    return {
+        "tokens_k": round(usage.total_tokens / 1000, 2),
+        "usage": usage,
+        "error": run_error,
+    }

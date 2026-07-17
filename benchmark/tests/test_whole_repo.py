@@ -20,8 +20,8 @@ class TestCrashSalvage:
         # A fatal session error must still produce a submission (partial salvage) tagged with
         # run_error — not crash and leave a stale submission.json.
         def dying_session(model, ctx, **kw):
-            return {"rows": [], "tokens_k": 5.0, "trajectory": [],
-                    "usage": None, "error": "APIError: quota exhausted"}
+            return {"tokens_k": 5.0, "usage": None,
+                    "error": "APIError: quota exhausted"}
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
         monkeypatch.setattr(run_submission, "EnvContext",
@@ -37,8 +37,7 @@ class TestCrashSalvage:
 
     def test_unprobed_submit_channel_is_not_a_clean_zero(self, monkeypatch, tmp_path):
         def clean_but_unprobed(model, ctx, **kw):
-            return {"rows": [], "tokens_k": 1.0, "trajectory": [],
-                    "usage": None, "error": None}
+            return {"tokens_k": 1.0, "usage": None, "error": None}
 
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
@@ -53,8 +52,7 @@ class TestCrashSalvage:
         def clean_and_probed(model, ctx, **kw):
             status = subprocess.run(["submit", "--status"], capture_output=True, text=True)
             assert status.returncode == 0
-            return {"rows": [], "tokens_k": 1.0, "trajectory": [],
-                    "usage": None, "error": None}
+            return {"tokens_k": 1.0, "usage": None, "error": None}
 
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
@@ -68,12 +66,11 @@ class TestCrashSalvage:
 class TestRunWholeRepoWiring:
     def test_run_dispatches_to_repo_session(self, monkeypatch):
         # run() must call the single repository session and build its envelope.
-        traj = [{"role": "assistant", "content": "run log"}]
-
         def fake_repo_session(model, ctx, **kw):
-            return {"rows": [{"rule": "r1", "result": "bug_found", "tokens_k": 0.0,
-                              "certificate": {"rule": "r1", "source": {}}}],
-                    "tokens_k": 30.0, "trajectory": traj}
+            kw["submit_session"].result_rows = lambda: [
+                {"rule": "r1", "result": "bug_found", "tokens_k": 0.0,
+                 "certificate": {"rule": "r1", "source": {}}}]
+            return {"tokens_k": 30.0, "usage": None, "error": None}
 
         monkeypatch.setattr(run_submission, "find_pred_binary", lambda: "pred")
         monkeypatch.setattr(run_submission, "verify_pred_version", lambda p: "1.2.3")
