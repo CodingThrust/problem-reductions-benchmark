@@ -14,6 +14,7 @@ from benchmark.env_context import EnvContext
 # Precedence for each: env override > baked file (image) > module default.
 _DEFAULT_PINNED_COMMIT = "aa2d1a10cffa434871d12a4d6f411147fb7e08a8"
 _DEFAULT_PINNED_VERSION = "0.6.0"
+DEFAULT_REPO_URL = "https://github.com/CodingThrust/problem-reductions.git"
 _PIN_DIR = Path(__file__).parent
 
 
@@ -103,6 +104,86 @@ def verify_commit(repo_path: Path, expected_commit: str) -> str:
             f"Run: cd {repo_path} && git checkout {expected_commit}"
         )
     return actual
+
+
+def clone_or_verify_repo(repo_path: str | Path, repo_ref: str,
+                         repo_url: str = DEFAULT_REPO_URL) -> str:
+    """Clone ``repo_ref`` into an absent path, or verify an existing checkout.
+
+    Existing checkouts are deliberately never fetched, reset, or checked out: a local run
+    must not mutate a user's working tree.  It either already points at the requested ref or
+    fails with an actionable error.  The returned full commit hash is recorded in the
+    submission envelope.
+    """
+    repo_path = Path(repo_path).expanduser().resolve()
+    if not repo_path.exists():
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        clone = subprocess.run(
+            ["git", "clone", "--depth", "1", "--single-branch", "--branch", repo_ref,
+             repo_url, str(repo_path)],
+            capture_output=True,
+            text=True,
+        )
+        if clone.returncode != 0:
+            # `git clone --branch` accepts tags and branches, but not raw commit hashes.
+            # For a commit pin, clone the default ref and fetch that exact object.
+            if (not re.fullmatch(r"[0-9a-fA-F]{7,40}", repo_ref)
+                    or repo_path.exists()):
+                detail = clone.stderr.strip().splitlines()[-1] if clone.stderr.strip() else ""
+                raise ValueError(
+                    f"could not clone ref {repo_ref!r} from {repo_url!r} into {repo_path}"
+                    + (f": {detail}" if detail else "")
+                )
+            try:
+                subprocess.run(
+                    ["git", "clone", "--depth", "1", "--no-checkout", repo_url,
+                     str(repo_path)],
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo_path), "fetch", "--depth", "1", "origin",
+                     repo_ref],
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "-C", str(repo_path), "checkout", "--detach", "FETCH_HEAD"],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise ValueError(
+                    f"could not clone commit {repo_ref!r} from {repo_url!r} into {repo_path}"
+                ) from exc
+    elif not (repo_path / ".git").exists():
+        raise ValueError(f"repo directory exists but is not a git checkout: {repo_path}")
+
+    actual = _git_rev_parse(repo_path, "HEAD")
+    try:
+        expected = _git_rev_parse(repo_path, f"{repo_ref}^{{commit}}")
+    except subprocess.CalledProcessError as exc:
+        # A shallow checkout may know HEAD but not retain a symbolic name for a commit ref.
+        if re.fullmatch(r"[0-9a-fA-F]{7,40}", repo_ref) and actual.startswith(repo_ref.lower()):
+            expected = actual
+        else:
+            raise ValueError(
+                f"ref {repo_ref!r} is not available in existing checkout {repo_path}; "
+                "use an absent --repo-dir to clone it"
+            ) from exc
+    if actual != expected:
+        raise ValueError(
+            f"existing checkout {repo_path} is at {actual[:12]}, but {repo_ref!r} resolves "
+            f"to {expected[:12]}; choose another --repo-dir or update it yourself"
+        )
+    return actual
+
+
+def _git_rev_parse(repo_path: Path, revision: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", revision],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip().lower()
 
 
 def setup_env(repo_path: str | Path) -> EnvContext:

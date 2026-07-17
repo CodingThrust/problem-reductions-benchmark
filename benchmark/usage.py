@@ -2,8 +2,8 @@
 Token-usage accounting.
 
 Tokens are the reproducible primitive a run reports: raw per-bucket counts summed from the
-agent trajectory. There is no dollar metering and no budget — runs are bounded by the agent
-step limit, and the leaderboard's efficiency metric is bugs per 1K tokens.
+agent trajectory. There is no dollar, step, or turn budget; the leaderboard's efficiency
+metric is bugs per 1K tokens.
 """
 from dataclasses import dataclass
 
@@ -47,6 +47,15 @@ def usage_from_response(usage) -> Usage:
     at the top level — we read both, preferring the details block. `cached_tokens` (cache
     read) is a subset of `prompt_tokens`, so it is subtracted out of the uncached input;
     cache-write is counted as its own bucket."""
+    # Raw Anthropic events use input_tokens/output_tokens instead of the OpenAI names.
+    if _get(usage, "prompt_tokens", None) is None and _get(usage, "input_tokens", None) is not None:
+        return Usage(
+            input_tokens=int(_get(usage, "input_tokens")),
+            output_tokens=int(_get(usage, "output_tokens")),
+            cache_read_tokens=int(_get(usage, "cache_read_input_tokens")),
+            cache_write_tokens=int(_get(usage, "cache_creation_input_tokens")),
+        )
+
     prompt = int(_get(usage, "prompt_tokens"))
     completion = int(_get(usage, "completion_tokens"))
     details = _get(usage, "prompt_tokens_details", None)

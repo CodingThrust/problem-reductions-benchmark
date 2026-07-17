@@ -23,6 +23,9 @@ import re
 import sys
 from pathlib import Path
 
+from benchmark.submit_ledger import (accepted_certificate_index, certificate_key,
+                                     has_submit_ledger, schema_requires_ledger,
+                                     submit_ledger_error)
 from benchmark.usage import usage_from_dict
 from benchmark.verify import count_bugs, verify
 
@@ -52,18 +55,19 @@ def _provenance_ok(row: dict, cert: dict, session_certs: list[dict] = ()) -> tup
 
     Guards against copied answer keys: a scored bug must appear as a CERTIFICATE block the
     agent emitted in its trajectory, matching both rule and source instance. The trajectory
-    is either the row's own (per-rule: one session per row) or the shared session log at the
-    envelope level (whole-repo: one session, many bugs) — ``session_certs`` is that envelope
+    is either the legacy row's own or the shared legacy session log at the envelope level —
+    ``session_certs`` is that envelope
     log pre-parsed once. Any emitted block that matches counts. This can't make copying
     impossible (the library is public), but it lifts the bar from "paste a rule name" to
     "produce a run artifact whose source still round-trip-fails".
     """
+    if row.get("rule") != cert.get("rule"):
+        return False, "result row rule does not match its certificate rule"
     emitted = _certs_from_trajectory(row.get("trajectory")) + list(session_certs)
     if not emitted:
         return False, "no trajectory attached (required for a scored bug)"
-    want_rules = (cert.get("rule"), row.get("rule"))
     for e in emitted:
-        if e.get("rule") in want_rules and e.get("source") == cert.get("source"):
+        if e.get("rule") == cert.get("rule") and e.get("source") == cert.get("source"):
             return True, "reproduced in the model's own trajectory"
     return False, "no trajectory certificate matches the submitted rule + source"
 
@@ -71,16 +75,21 @@ def _provenance_ok(row: dict, cert: dict, session_certs: list[dict] = ()) -> tup
 def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dict, list[dict]]:
     """Re-verify every certificate and recompute the score.
 
-    A bug counts only when BOTH hold: pred confirms the round-trip failure (zero-trust
-    re-derivation) AND the certificate is reproduced in the model's own trajectory
-    (provenance). Returns (scored, report); ``scored`` is results.schema.json-shaped and
-    ``report`` is a per-certificate list of {rule, violation, accepted, reason, provenance}.
+    A bug counts only when pred confirms the round-trip failure and provenance succeeds:
+    bounded submit ledger for schema 2.1+, trajectory certificate for legacy submissions.
+    Returns (scored, report); ``scored`` is results.schema.json-shaped and ``report`` is a
+    per-certificate list of {rule, violation, accepted, reason, provenance}.
     """
     rescored: list[dict] = []
     report: list[dict] = []
-    # Whole-repo runs store ONE session trajectory at the envelope level; parse it once here
-    # rather than re-parsing a copy on every bug row.
-    session_certs = _certs_from_trajectory(submission.get("trajectory"))
+    ledger_problem = submit_ledger_error(submission)
+    uses_ledger = (has_submit_ledger(submission)
+                   or schema_requires_ledger(submission.get("schema_version")))
+    accepted_keys = (accepted_certificate_index(submission)
+                     if uses_ledger and ledger_problem is None else set())
+    # Only legacy submissions use trajectory provenance. New runs use the ledger directly.
+    session_certs = ([] if uses_ledger else
+                     _certs_from_trajectory(submission.get("trajectory")))
 
     for row in submission.get("results", []):
         cert = row.get("certificate")
@@ -90,7 +99,19 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
 
         cert.setdefault("rule", row.get("rule"))
         verdict = verify(cert, repo_dir)
-        prov_ok, prov_reason = _provenance_ok(row, cert, session_certs) if verdict.accepted else (False, "")
+        if verdict.accepted and uses_ledger:
+            if ledger_problem is not None:
+                prov_ok, prov_reason = False, ledger_problem
+            elif row.get("rule") != cert.get("rule"):
+                prov_ok, prov_reason = False, "result row rule does not match its certificate rule"
+            else:
+                prov_ok = certificate_key(row["rule"], cert) in accepted_keys
+                prov_reason = ("accepted through the bounded submit command" if prov_ok else
+                               "certificate was not accepted through the bounded submit command")
+        elif verdict.accepted:
+            prov_ok, prov_reason = _provenance_ok(row, cert, session_certs)
+        else:
+            prov_ok, prov_reason = False, ""
         accepted = verdict.accepted and prov_ok
         new = dict(row)
         if accepted:
@@ -131,6 +152,8 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         "efficiency_bugs_per_ktok": round(bugs / tokens_k, 4) if tokens_k else 0,
         "rules_tested": submission.get("rules_tested", len(rescored)),
         "results": rescored,
+        "submit_limit": submission.get("submit_limit"),
+        "submit_log": submission.get("submit_log"),
     }
     return scored, report
 

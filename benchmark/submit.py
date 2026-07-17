@@ -3,7 +3,7 @@
 
 Uploads a run's ``submission.json`` (produced by ``make run``) to the benchmark's
 serverless intake endpoint, which deposits it into the PRIVATE submission store. The
-submission body carries the answer key (certificate + trajectory), so it never goes to a
+submission body carries the answer key (certificates + submit ledger), so it never goes to a
 public repo — it travels over HTTPS to the endpoint, which holds the write token.
 
     export PRB_SUBMIT_URL=https://<your-worker>/submit
@@ -12,8 +12,8 @@ public repo — it travels over HTTPS to the endpoint, which holds the write tok
     # → prints the submission id returned by the endpoint
 
 The client validates the file locally FIRST (valid JSON, required envelope fields, and —
-mirroring submission.schema.json — a certificate + trajectory on every self-reported
-bug_found row) so a malformed run fails fast, before it hits the endpoint or burns quota.
+mirroring submission.schema.json — a valid bounded ledger for current submissions) so a
+malformed run fails fast, before it hits the endpoint or burns quota.
 The endpoint re-checks and the backend re-verifies with pred regardless; this is just a
 courtesy gate. Use ``--dry-run`` to validate without sending.
 
@@ -31,6 +31,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from benchmark.submit_ledger import schema_requires_ledger, submit_ledger_error
+
 REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit",
                      "total_tokens_k", "rules_tested", "results")
 
@@ -43,10 +45,8 @@ def load_submission(path: Path) -> dict:
 def validate_submission(sub: dict) -> list[str]:
     """Client-side courtesy check. Returns a list of problems ([] == ok).
 
-    Mirrors submission.schema.json's requirement: a self-reported ``bug_found`` row must
-    carry a ``certificate``, plus a provenance ``trajectory`` — on the row (per-rule) or once
-    at the envelope level (whole-repo). Else the backend rejects it, so catch it here before
-    spending a submission.
+    New runs prove provenance through the bounded submit ledger. Legacy runs must carry a
+    certificate plus a trajectory on the row or envelope.
     """
     problems: list[str] = []
     if not isinstance(sub, dict):
@@ -67,9 +67,13 @@ def validate_submission(sub: dict) -> list[str]:
             rule = row.get("rule", "?")
             if not row.get("certificate"):
                 problems.append(f"results[{i}] ({rule}): bug_found row has no certificate")
-            if not row.get("trajectory") and not envelope_traj:
+            if (not schema_requires_ledger(sub.get("schema_version"))
+                    and not row.get("trajectory") and not envelope_traj):
                 problems.append(f"results[{i}] ({rule}): bug_found row has no trajectory "
                                 "(required as provenance — on the row or the envelope)")
+
+    if ledger_problem := submit_ledger_error(sub):
+        problems.append(ledger_problem)
     return problems
 
 

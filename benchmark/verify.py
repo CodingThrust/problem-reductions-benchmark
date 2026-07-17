@@ -328,6 +328,25 @@ def _witness_check(solver: PredSolver, source: dict, bundle: dict,
     return None
 
 
+def _clean_target_type(raw: str) -> str:
+    """Extract the target problem name from a possibly-messy string.
+
+    The target type is only routing info — which reduction to re-derive and test — and is
+    never trusted (we rebuild the bundle from source ourselves), so we read it leniently.
+    Agents sometimes give the bundle as prose ("target type SpinGlass") or an arrow
+    ("QUBO -> SpinGlass") instead of a clean name. pred problem names are single tokens
+    (slashes allowed for variants, but no whitespace), so take the trailing token. A name
+    that isn't a real target still fails at `pred reduce`, so this leniency cannot turn a
+    bogus certificate into an accepted one — it only stops a real bug from being rejected on
+    formatting alone.
+    """
+    s = raw.strip()
+    if s and "->" not in s and not any(ch.isspace() for ch in s):
+        return s  # already a clean single token (e.g. "SpinGlass/SimpleGraph/f64")
+    parts = [p for p in re.split(r"->|\s+", s) if p]
+    return parts[-1] if parts else s
+
+
 def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
     """Re-validate a certificate deterministically via pred. Never trusts the AI's claim.
 
@@ -337,11 +356,32 @@ def verify(cert: dict, repo_dir: str | None = None) -> Verdict:
     source = cert.get("source")
     if not source:
         return Verdict(False, "certificate missing 'source'")
+    if not isinstance(source, dict):
+        return Verdict(False, "certificate 'source' is not a JSON object")
 
-    target_type = ((cert.get("bundle") or {}).get("target") or {}).get("type") \
-        or cert.get("target_type")
+    # Zero-trust includes malformed shapes — never crash on them. The bundle is never
+    # trusted anyway (we re-derive it from source below), so all it must provide is the
+    # target type — read from any shape an agent emits. In order: a real `pred reduce`
+    # bundle (its `path` is the reduction chain; the last hop's `name` is the final target),
+    # a synthesized bundle.target.type, an explicit target_type, or — substance over form —
+    # a bare string naming the target. The bundle is never trusted (we re-derive it from
+    # source below); if the resolved name isn't a real target, our own `pred reduce` fails
+    # and the certificate is rejected, so lenient reading cannot accept a bogus certificate.
+    bundle = cert.get("bundle")
+    target_type = None
+    if isinstance(bundle, dict):
+        path = bundle.get("path")
+        if isinstance(path, list) and path and isinstance(path[-1], dict) \
+                and isinstance(path[-1].get("name"), str):
+            target_type = path[-1]["name"]
+        elif isinstance(bundle.get("target"), dict) and isinstance(bundle["target"].get("type"), str):
+            target_type = bundle["target"]["type"]
     if not target_type:
-        return Verdict(False, "certificate missing target type (bundle.target.type)")
+        target_type = cert.get("target_type") \
+            or (bundle if isinstance(bundle, str) and bundle else None)
+    if not target_type or not isinstance(target_type, str):
+        return Verdict(False, "certificate missing target type (bundle.target.type or bundle.path)")
+    target_type = _clean_target_type(target_type)
 
     if len(json.dumps(source)) > MAX_INPUT_BYTES:
         return Verdict(False, f"source instance too large (> {MAX_INPUT_BYTES} bytes) — "

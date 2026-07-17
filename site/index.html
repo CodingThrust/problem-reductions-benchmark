@@ -259,7 +259,7 @@
       <div class="meta">
         <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0" target="_blank" rel="noopener" title="problem-reductions library version (pinned)">library <b>v0.6.0</b><i class="dot"></i></a>
         <div class="metarow">
-          <span><b>300 steps</b> / model</span>
+          <span><b>100 attempts</b> / model</span>
           <span><b id="rulecount">253</b> rules</span>
         </div>
       </div>
@@ -274,7 +274,7 @@
       <span class="hint">Click a row for its run stats →</span>
     </div>
     <table class="lb" id="lb-table"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
-    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Coverage</b> = rules the run reached. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
+    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Submitted rules</b> = rules sent through the bounded submit command. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
   </section>
 
   <section class="tab" id="tab-tasks">
@@ -295,7 +295,7 @@
   <section class="tab" id="tab-how">
     <div class="prose">
       <h2>From your model to the leaderboard</h2>
-      <p>Give a model the same step-limited session and see how many bugs it can find in the library's
+      <p>Give a model one whole-repository session and see how many bugs it can find in the library's
          problem reductions. You run it on your own model and key; we independently re-check every bug
          before it scores.</p>
     </div>
@@ -304,7 +304,7 @@
     <div class="flow">
       <div class="fnode"><div class="fdot">1</div><div class="fcard"><h4>Get the runner</h4><p>One Docker image: the solver (<code>pred</code>) plus the rule library, pinned to the benchmark version.</p></div></div>
       <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key.</p></div></div>
-      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model probes each rule for a counterexample until its steps run out; each find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
+      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model chooses which rules to probe and when to stop; each submitted find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
       <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>Upload <code>submission.json</code> with <code>benchmark.submit</code>. No web form.</p></div></div>
     </div>
 
@@ -323,7 +323,7 @@
       </div>
       <div class="def">
         <h4>Why it is fair</h4>
-        <p>Every model gets the same step limit, with real token usage recorded from the run. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+        <p>Every model targets the same repository version and gets the same 100-attempt certificate channel. Agents stop themselves, and real token usage is recorded. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
       </div>
     </div>
   </section>
@@ -353,7 +353,7 @@ python -m benchmark.submit --predictions out/submission.json</pre>
 
   <section class="tab" id="tab-about">
     <h3 class="about-h">About the benchmark</h3>
-    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets the same step-limited session, and every claimed bug is independently re-verified server-side.</p>
+    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets one whole-repository session with the same bounded submission channel, and every claimed bug is independently re-verified server-side.</p>
     <div class="panel" style="margin-top:26px">
       <h3>How to cite</h3>
       <pre class="cmd" style="margin-top:12px">@misc{TODO_citation_key,
@@ -399,7 +399,7 @@ const LB_COLS=[
   {key:"rank",label:"#"},
   {key:"model",label:"Model"},
   {key:"bugs",label:"Bugs",num:true},
-  {key:"reach",label:"Coverage",sortBy:"reachFrac"},
+  {key:"reach",label:"Submitted rules",sortBy:"reachFrac"},
   {key:"tokens",label:"Tokens (K)",num:true,sortBy:"tokensNum"},
   {key:"eff",label:"Bugs / Ktok",num:true,sortBy:"effNum"},
 ];
@@ -526,7 +526,7 @@ function renderInspector(model){
   const row=lbRows.find(r=>r._model===model); if(!row)return;
   document.getElementById("drawer-title").textContent=row.model;
   const sub=document.getElementById("drawer-sub"), el=document.getElementById("inspect-body");
-  sub.textContent=`${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules reached · ${Math.round(row.tokensNum)}K tok`;
+  sub.textContent=`${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules submitted · ${Math.round(row.tokensNum)}K tok`;
   // Aggregate-only by design: the leaderboard never reveals WHICH rules a model found bugs
   // in. On a public library commit a pred-confirmed certificate counts regardless of who
   // produced it, so publishing the rules/certificates would be a free answer key.

@@ -1,7 +1,7 @@
 # Submitting a model run
 
-The benchmark gives every model the **same step-limited agent session** and asks: how many
-distinct reduction-rule bugs can it find?
+The benchmark gives every model one repository-wide, self-terminating agent session and
+asks: how many distinct reduction-rule bugs can it find?
 
 ```
   make run ─▶ submission.json ─▶ python -m benchmark.submit  ──▶  private store (R2)
@@ -11,11 +11,20 @@ distinct reduction-rule bugs can it find?
               only the aggregate is published ─▶ PR ─▶ GitHub Pages
 ```
 
-Your submission carries the certificate + trajectory, so it uploads to a private store;
-only the aggregate is published. Self-reported counts are never trusted — the score is
-recomputed by `pred`.
+Your submission carries counterexample certificates plus the bounded submit ledger, so it
+uploads to a private store; only the aggregate is published. Self-reported counts are never
+trusted — the score is recomputed by `pred`.
 
-## 1. Produce a `submission.json` (dockerized runner)
+## 1. Produce a `submission.json`
+
+There are two frontends over the same benchmark runner and `submit` budget:
+
+- Docker is the reproducible batch path: it pins the library, `pred`, Python stack, and
+  agent runtime.
+- Local headless mode is the lightweight path: it invokes an installed `codex exec` or
+  `claude -p` directly and is convenient for rapid runs on the host.
+
+### Docker mode
 
 The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + LiteLLM),
 and the problem-reductions source pinned at `v0.6.0`. Any LiteLLM-routable provider key
@@ -36,24 +45,25 @@ docker build -f docker/Dockerfile --target runner \
 ### Configure and run
 
 All run config goes in **one env-file** so you don't juggle a dozen `-e` flags. Copy the
-template, fill the two required lines, and run:
+template, fill the model and (for mini-swe) API key, and run:
 
 ```bash
-cp submission.env.example submission.env   # then edit the REQUIRED lines (model, key)
+cp submission.env.example submission.env   # set model + mini-swe provider key
 mkdir -p out
 docker run --rm --env-file submission.env -v "$PWD/out:/out" \
   problem-reductions-runner:v0.6.0
 # → ./out/submission.json      (or just: make run)
 ```
 
-The **required lines are model + API key** (`MODEL_NAME`, a key). Everything else in the
+`MODEL_NAME` is always required. The mini-swe backend additionally requires an API key;
+logged-in headless CLIs can reuse their saved authentication. Everything else in the
 template has a sane default — uncomment only what you need. The knobs, by tier:
 
 | Tier | Vars | When |
 |---|---|---|
-| **Required** | `MODEL_NAME`, one API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / generic `API_KEY`) | always |
+| **Required** | `MODEL_NAME`; mini-swe also needs one provider key or generic `API_KEY` | always |
 | **Non-standard provider** | `API_BASE`, `API_KEY`, `MODEL_KWARGS` (JSON of extra litellm kwargs: `api_version`, `custom_llm_provider`, `extra_headers`, …) | OpenRouter / gateway / local vLLM / Azure |
-| **Limits (defaults = ranked config)** | `MAX_TOKENS=8192`, `MAX_RULES` | quick test runs / tuning only |
+| **Limits** | `MAX_TOKENS=8192`, `SUBMIT_LIMIT=100` | per-call output ceiling; run-wide certificate attempts |
 | **Custom prompt** | `AGENT_CONFIG`, `AGENT_STRATEGY_FILE` (mount the files too) | bring your own bug-hunting prompt |
 | **Version pins** | `EXPECTED_PRED_VERSION` (empty disables), `EXPECTED_PRED_COMMIT` | debugging only — baked from the image build |
 
@@ -62,9 +72,10 @@ template has a sane default — uncomment only what you need. The knobs, by tier
 provider. (`REPO_DIR` / `OUTPUT` are container-internal and already defaulted; you don't set
 them.)
 
-> Runs are bounded by the agent step limit (35 steps per rule; 300 steps for a whole-repo
-> session), not by a dollar budget — you pay your own bill. Raw token counts are recorded
-> and travel in the submission (`usage_totals`); ranking is by **confirmed bugs**, with
+> Agents choose when to stop; there is no step, turn, or dollar limit. A run-wide `submit`
+> budget (100 attempts by default) bounds scored counterexample claims.
+> Every accepted, rejected, or malformed counterexample submission consumes one attempt;
+> raw token counts are recorded and travel in the submission (`usage_totals`); ranking is by **confirmed bugs**, with
 > **bugs/Ktok** as the efficiency tie-break.
 
 For example, a non-standard endpoint in `submission.env`:
@@ -109,6 +120,46 @@ make preflight        # docker run --env-file submission.env <image> --preflight
 It checks the `pred` binary + version, that the library rules are present, and makes one
 minimal model call through the exact batch code path. It exits non-zero on any failure.
 
+### Lightweight local headless mode
+
+Install the Python dependencies and the pinned `pred`, then authenticate one supported CLI:
+
+```bash
+codex login       # for the default codex backend
+# or authenticate the Claude CLI
+
+cp submission.env.example submission.env
+# Set MODEL_NAME; no key is needed in this file when the CLI login is already usable.
+
+make run-local \
+  LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
+  LOCAL_OUTPUT=../runs/results/submission.json \
+  LOCAL_LOG_DIR=../runs/logs
+# Claude alternative: add LOCAL_BACKEND=claude-code
+```
+
+The default local run uses Codex. Codex uses the
+non-interactive `codex exec --json --ephemeral` interface with a `workspace-write`
+sandbox; Claude uses `claude -p`. Both receive the same benchmark prompts and agent-only
+`submit` command, and both produce the same schema as Docker. All backends run exactly one
+whole-repository session and stop themselves; no turn count is passed to either CLI.
+
+The runner gives every backend a writable scratch workspace. The `submit` CLI exchanges
+atomic request/response files there while the attempt budget and verified ledger remain in
+runner memory, avoiding sandbox-blocked sockets or localhost networking. The prompt begins
+with the free `submit --status` health probe. If no status or submit request reaches the
+service, the run is saved as partial with `run_error` instead of a misleading clean zero;
+small certificate artifacts are salvaged under the configured log directory.
+
+`run-local` clones `PR_REF` into the explicitly configured `LOCAL_REPO_DIR` when absent.
+An existing checkout is only accepted when `HEAD` matches the requested ref; it is never
+mutated automatically. Submission JSON and live/final logs go to the separate, required
+`LOCAL_OUTPUT` and `LOCAL_LOG_DIR` paths.
+
+Local mode is intentionally less hermetic: it uses the host CLI binary, authentication,
+Python environment, and `pred`. The runner still verifies the pinned `pred` version and
+records the target commit, but use Docker for an official reproducible batch.
+
 ## 2. Submit it (CLI upload)
 
 Submission is a **CLI upload** — no web form, and the file never enters git. Get the
@@ -143,8 +194,8 @@ For each `PENDING` submission it:
 1. flips status `PENDING → RUNNING`,
 2. re-runs `benchmark/verify_submission.py` — which calls `verify()` on **every**
    certificate and re-derives the bundle from `pred`, so a fabricated or tampered
-   counterexample is rejected, and checks the certificate is reproduced in the model's own
-   trajectory (provenance),
+   counterexample is rejected, and checks new runs against the bounded submit ledger
+   (legacy submissions retain trajectory provenance),
 3. recomputes `bugs_found` as **distinct rules with a confirmed bug** (many certificates
    for one rule collapse to one — no count padding),
 4. writes the scored result + a ranked `leaderboard.json`, and sets status
@@ -198,13 +249,16 @@ would hide. The round-trip judging itself is explained in the [README](README.md
 - Counterexamples are **deterministically re-checkable** — we don't even need a hidden
   answer key; a bug either violates the rule under `pred` or it doesn't.
 - Distinct-rule de-duplication caps the count at one per rule.
-- Sessions are bounded by the agent step limit and per call by `MAX_TOKENS`; token totals
-  travel as raw 4-bucket counts (`usage_totals`) the backend recomputes `total_tokens_k` from.
+- Agents stop themselves. `MAX_TOKENS` only bounds one model response; token totals travel
+  as raw 4-bucket counts (`usage_totals`) the backend recomputes `total_tokens_k` from.
+- Counterexamples count only when the agent sends them through the evaluation-owned
+  `submit` command. Its in-memory ledger enforces the shared `SUBMIT_LIMIT` atomically;
+  certificates printed only in final prose or written to other files are ignored.
 
 ## Status: validated against a live model
 
 The runner pipeline is unit-tested end-to-end with `FakeRunner` + the certificate fixtures
 **and** has been exercised against a live model API (a DeepSeek OpenAI-compatible endpoint
 via `MODEL_NAME=openai/<model>` + `API_BASE`): preflight passes, and a real run drives the
-agent across a rule and emits a schema-valid `submission.json`. PR scoring and GitHub Pages
+agent through a whole-repository session and emits a schema-valid `submission.json`. PR scoring and GitHub Pages
 publishing are live; full official runs are the remaining step.

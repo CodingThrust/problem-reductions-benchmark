@@ -33,26 +33,43 @@ Implement the `AgentRunner` interface in `benchmark/runner.py`:
 from benchmark.runner import AgentRunner
 
 class MyRunner(AgentRunner):
-    def run(self, ctx, model: str, rule_name: str) -> dict:
-        # Run the model, return a certificate if a bug is found
+    def run_repo(self, ctx, model: str, *, trajectory_dir=None) -> dict:
+        # Run one repository-wide session. Accepted certificates come from submit_session.
         return {
-            "rule": rule_name,
-            "result": "bug_found",   # or "no_certificate" | "rejected" | "error:..."
-            "tokens_k": 12.3,        # tokens used (thousands)
-            "certificate": {...},    # required when result == "bug_found"
+            "rows": [...],
+            "tokens_k": 12.3,
+            "usage": usage,
+            "trajectory": [...],
+            "error": None,
         }
 ```
 
-Then pass it to `Scheduler` in `benchmark/scheduler.py`. See `MiniSweRunner` for a full example.
+Wire it into `_select_runner()` in `benchmark/run_submission.py`. See `MiniSweRunner` for
+a complete implementation.
 
 A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+During evaluation, counterexamples use a different, agent-only command:
+
+```bash
+submit certificate.json   # accepted or rejected: consumes one attempt
+submit --status           # inspect the remaining budget: free
+```
+
+The runner owns one shared counter for the complete run (default `SUBMIT_LIMIT=100`),
+verifies every call immediately, and derives scored result rows only from its accepted
+ledger. The CLI crosses Codex, Claude, mini-swe, and container sandboxes through an atomic
+file queue inside a disposable agent workspace; the authoritative budget and ledger stay
+in runner memory. Every session must successfully run the free `submit --status` probe, or
+the output is marked with `run_error` rather than reported as a clean zero. Certificates
+printed only in the agent's final response do not count.
 
 ## How to run locally
 
 Requirements:
 - `pred` binary in PATH (pinned commit `aa2d1a1` of problem-reductions)
 - Python 3.12 with dependencies: `pip install -r benchmark/requirements.txt`
-- An API key for your model
+- Either a provider API key, or a logged-in Claude/Codex CLI for headless mode
 
 ```bash
 # Run all unit tests (no API key needed) — this is what exercises the runner wiring
@@ -61,13 +78,29 @@ make test-unit
 # Test the verifier against the fixtures (no API key)
 make verify-calibration
 
-# Configure your run, then validate it with one tiny real call before the full batch
-cp submission.env.example submission.env   # fill in MODEL_NAME + key
-make preflight
+# Configure your run. Add an API key for mini-swe; a logged-in headless CLI needs only
+# MODEL_NAME in this file.
+cp submission.env.example submission.env
 
-# Run the benchmark via Docker → ./out/submission.json (this does NOT upload it)
+# Reproducible Docker batch (mini-swe by default): validate, then run
+make preflight
 make run
+
+# Or run directly on the host through a lightweight frontend agent:
+make run-local \
+  LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
+  LOCAL_OUTPUT=../runs/results/submission.json \
+  LOCAL_LOG_DIR=../runs/logs                                  # codex exec
+
+# Claude alternative: add LOCAL_BACKEND=claude-code
 ```
+
+`run-local` clones `PR_REF` into `LOCAL_REPO_DIR` when the path is absent. If the path
+already exists, its `HEAD` must match that ref; the runner never resets or checks out an
+existing working tree. `LOCAL_OUTPUT` and `LOCAL_LOG_DIR` are deliberately separate and
+required. Local mode runs one self-terminating whole-repository session with the same
+run-wide `submit` budget as Docker. There is no agent step or turn limit; the six-hour CLI
+timeout and per-command timeout only guard against hung processes.
 
 Key `make` targets:
 
@@ -78,6 +111,7 @@ Key `make` targets:
 | `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
 | `make preflight` | Validate `submission.env` with one tiny real call before a full run |
 | `make run` | Run the benchmark via Docker → `out/submission.json` (does not upload) |
+| `make run-local` | Run locally via `codex exec` or `claude -p` → the same output schema |
 | `make score-local` | Score submissions with the zero-trust backend |
 
 ## How to read the metrics

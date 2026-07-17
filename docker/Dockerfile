@@ -85,18 +85,24 @@ FROM runtime AS runner
 ARG PR_REF
 # Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.
 RUN pip install --no-cache-dir -r /app/benchmark/requirements.txt
+# Claude Code CLI — the optional claude-code backend (AGENT_BACKEND=claude-code).
+# Native installer, self-contained (no Node). Auth is supplied at run time via
+# CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in submission.env — never baked in.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.local/bin:${PATH}"
+RUN claude --version
 # The agent reads rule sources from REPO_DIR/src/rules — copy just the source tree
 # (not target/) from the build stage. pred itself is a self-contained binary on PATH.
 COPY --from=pred-build /src/src /app/pr-src/src
 COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
 RUN mkdir -p /out
 ENV REPO_DIR=/app/pr-src \
-    BUDGET_USD=20 \
-    PER_RULE_BUDGET=0.5 \
     OUTPUT=/out/submission.json
 VOLUME ["/out"]
 # Build-time sanity that the assembled runner imports and runs (no API/pred calls).
-RUN python -m benchmark.run_submission --fake --model fake/check --max-rules 1 \
+RUN python -m benchmark.run_submission --fake --model fake/check \
     --output /tmp/buildcheck.json && rm -f /tmp/buildcheck.json
 ENTRYPOINT ["python", "-m", "benchmark.run_submission"]
 CMD []

@@ -1,7 +1,7 @@
 // prb submission intake — a Cloudflare Worker (the `prb submit` endpoint).
 //
 // It is the write-only, confidential broker: a submitter POSTs their submission.json (which
-// carries the answer key — certificate + trajectory) over HTTPS; the Worker checks a bearer
+// carries the answer key — certificates + submit ledger) over HTTPS; the Worker checks a bearer
 // key and deposits the raw body into a PRIVATE R2 bucket. The submitter never reads the
 // bucket. The public repo / leaderboard only ever see the aggregate the scoring worker
 // derives later (see .github/workflows/score-from-r2.yml).

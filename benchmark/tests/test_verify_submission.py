@@ -121,6 +121,66 @@ class TestScoreSubmission:
         scored, _ = vs.score_submission(_submission(rows))
         assert scored["bugs_found"] == 0
 
+    def test_new_submission_requires_bounded_submit_ledger(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
+        sub = _submission(
+            [_bug_row(cert)], schema_version="2.1",
+            submit_limit=100,
+            submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
+                         "reason": "ok", "certificate": cert}],
+        )
+        scored, report = vs.score_submission(sub)
+        assert scored["bugs_found"] == 1
+        assert "bounded submit command" in report[0]["provenance"]
+
+    def test_schema_2_1_cannot_downgrade_by_deleting_ledger(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
+        scored, _ = vs.score_submission(_submission([_bug_row(cert)], schema_version="2.1"))
+        assert scored["bugs_found"] == 0
+        assert "missing submit_limit" in scored["results"][0]["reject_reason"]
+
+    def test_final_answer_certificate_not_in_submit_ledger_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        submitted = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
+        only_in_prose = {"rule": "r2", "source": {"n": 2}, "bundle": {}}
+        sub = _submission(
+            [_bug_row(only_in_prose)], schema_version="2.1",
+            submit_limit=100,
+            submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
+                         "reason": "ok", "certificate": submitted}],
+        )
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 0
+        assert "bounded submit command" in scored["results"][0]["reject_reason"]
+
+    def test_tampered_budget_log_fails_closed(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
+        sub = _submission(
+            [_bug_row(cert)], schema_version="2.1",
+            submit_limit=0,
+            submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
+                         "reason": "ok", "certificate": cert}],
+        )
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 0
+        assert "exceeds submit_limit" in scored["results"][0]["reject_reason"]
+
+    def test_ledger_certificate_cannot_be_counted_under_another_row_rule(self, monkeypatch):
+        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
+        cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
+        forged_row = _bug_row(cert, rule="r2")
+        sub = _submission(
+            [forged_row], schema_version="2.1", submit_limit=1,
+            submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
+                         "reason": "ok", "certificate": cert}],
+        )
+        scored, _ = vs.score_submission(sub)
+        assert scored["bugs_found"] == 0
+        assert "row rule" in scored["results"][0]["reject_reason"]
+
     def test_distinct_rule_dedup(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         cert = lambda rule, v: {"rule": rule, "violation": v, "source": {"r": rule}, "bundle": {}}
