@@ -17,6 +17,7 @@
 PR_REF   ?= v0.6.0
 IMAGE    ?= problem-reductions-runner:$(PR_REF)
 GHCR_IMAGE ?= ghcr.io/codingthrust/problem-reductions-runner
+JOBS     ?= 1
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
@@ -47,9 +48,10 @@ verify-calibration:
 	python -m benchmark.verify --calibrate
 
 ## Build the dockerized submission runner image (compiles pred at PR_REF + bundles the agent).
+## JOBS controls parallel rustc jobs in the pred build (default 1 = safe on small VMs).
 runner-build:
 	docker build -f docker/Dockerfile --target runner \
-	  --build-arg PR_REF=$(PR_REF) -t $(IMAGE) .
+	  --build-arg PR_REF=$(PR_REF) --build-arg CARGO_JOBS=$(JOBS) -t $(IMAGE) .
 
 ## Pull the prebuilt runner image from GHCR (built by .github/workflows/runner-image.yml)
 ## and tag it locally as $(IMAGE). Fast alternative to runner-build's local Rust compile.
