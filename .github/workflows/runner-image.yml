@@ -1,0 +1,58 @@
+name: Runner image (GHCR)
+
+# Builds the bug-finding runner image (mini-swe/LiteLLM agent + pinned pred) and pushes it
+# to GHCR, so `make run` can start with `make runner-pull` instead of a ~30–60 min local
+# Rust build. Tag = PR_REF from the Makefile (e.g. v0.6.0) + latest.
+#
+# One-time setup: after the first push, mark the package public
+# (Packages → problem-reductions-runner → Package settings) so anyone can pull it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/Dockerfile
+      - benchmark/requirements.txt
+      - .github/workflows/runner-image.yml
+      - Makefile            # PR_REF pin lives here
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read PR_REF from the Makefile
+        id: pins
+        run: echo "pr_ref=$(grep -E '^PR_REF[[:space:]]*\?=' Makefile | sed -E 's/.*=[[:space:]]*//')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the runner image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runner
+          build-args: |
+            PR_REF=${{ steps.pins.outputs.pr_ref }}
+            CARGO_JOBS=4
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/problem-reductions-runner:${{ steps.pins.outputs.pr_ref }}
+            ghcr.io/${{ github.repository_owner }}/problem-reductions-runner:latest
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -94,6 +94,7 @@ backend:
 
 ```bash
 cp submission.env.example submission.env
+make runner-pull   # prebuilt image from GHCR — or `make runner-build` to compile locally (~1 h)
 make preflight
 make run
 ```

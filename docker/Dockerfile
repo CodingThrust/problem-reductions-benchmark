@@ -31,11 +31,14 @@ RUN git clone --depth 1 --branch "${PR_REF}" \
 RUN git rev-parse HEAD > /src/PINNED_COMMIT
 # The upstream release profile uses LTO + codegen-units=1, which OOMs in a
 # constrained Docker VM. Relax it for the build (pred's solve perf is ample
-# without LTO) and cap parallel rustc jobs to keep peak memory low.
+# without LTO). The rustc job cap is a build ARG: default 1 keeps peak memory low
+# for small VMs, but on beefier machines / CI runners a parallel build is several
+# times faster:  docker build --build-arg CARGO_JOBS=8 ...
+ARG CARGO_JOBS=1
 RUN CARGO_PROFILE_RELEASE_LTO=off \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
     CARGO_PROFILE_RELEASE_OPT_LEVEL=2 \
-    CARGO_BUILD_JOBS=1 \
+    CARGO_BUILD_JOBS=${CARGO_JOBS} \
     cargo build --release -p problemreductions-cli
 # → /src/target/release/pred
 

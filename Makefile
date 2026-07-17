@@ -16,6 +16,8 @@
 #   make runner-build PR_REF=v0.7.0   →   builds + tags problem-reductions-runner:v0.7.0
 PR_REF   ?= v0.6.0
 IMAGE    ?= problem-reductions-runner:$(PR_REF)
+GHCR_IMAGE ?= ghcr.io/codingthrust/problem-reductions-runner
+JOBS     ?= 1
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
@@ -26,7 +28,7 @@ LOCAL_LOG_DIR ?=
 REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
 LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run run-local score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build runner-pull preflight run run-local score-local board publish-local serve
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -46,9 +48,16 @@ verify-calibration:
 	python -m benchmark.verify --calibrate
 
 ## Build the dockerized submission runner image (compiles pred at PR_REF + bundles the agent).
+## JOBS controls parallel rustc jobs in the pred build (default 1 = safe on small VMs).
 runner-build:
 	docker build -f docker/Dockerfile --target runner \
-	  --build-arg PR_REF=$(PR_REF) -t $(IMAGE) .
+	  --build-arg PR_REF=$(PR_REF) --build-arg CARGO_JOBS=$(JOBS) -t $(IMAGE) .
+
+## Pull the prebuilt runner image from GHCR (built by .github/workflows/runner-image.yml)
+## and tag it locally as $(IMAGE). Fast alternative to runner-build's local Rust compile.
+runner-pull:
+	docker pull $(GHCR_IMAGE):$(PR_REF)
+	docker tag $(GHCR_IMAGE):$(PR_REF) $(IMAGE)
 
 ## Preflight: validate submission.env with one tiny real API call + pred/rules checks,
 ## BEFORE committing to a full run. Makes one tiny real API call. (The no-API wiring of
@@ -129,6 +138,7 @@ help:
 	@echo "  test-unit           Run unit tests only (no real repo needed)"
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
 	@echo "  runner-build        Build the dockerized submission runner image"
+	@echo "  runner-pull         Pull the prebuilt runner image from GHCR (fast runner-build alternative)"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
 	@echo "  run-local           Clone/verify a repo and run a local headless CLI agent"
