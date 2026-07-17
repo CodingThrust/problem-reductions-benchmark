@@ -47,6 +47,24 @@ class TestValidate:
         p = _valid(tmp_path, results=[_bug_row()])
         assert sub.validate_submission(sub.load_submission(p)) == []
 
+    def test_submit_ledger_counters_must_match(self, tmp_path):
+        doc = sub.load_submission(_valid(tmp_path))
+        doc["submit_limit"] = 0
+        doc["submit_log"] = [{"attempt": 1, "accepted": False, "reason": "bad"}]
+        problems = sub.validate_submission(doc)
+        assert any("exceeds submit_limit" in p for p in problems)
+
+    def test_valid_submit_ledger_passes(self, tmp_path):
+        doc = sub.load_submission(_valid(tmp_path))
+        doc["submit_limit"] = 3
+        doc["submit_log"] = [{"attempt": 1, "accepted": False, "reason": "bad"}]
+        assert sub.validate_submission(doc) == []
+
+    def test_schema_2_1_requires_ledger(self, tmp_path):
+        doc = sub.load_submission(_valid(tmp_path))
+        doc["schema_version"] = "2.1"
+        assert any("missing submit_limit" in p for p in sub.validate_submission(doc))
+
 
 class TestSubmit:
     def test_dry_run_does_not_send(self, tmp_path, monkeypatch):

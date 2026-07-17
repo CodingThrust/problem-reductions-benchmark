@@ -7,12 +7,10 @@
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   preflight            Validate submission.env with one tiny real call before a full run
 #   run                  Run the benchmark via Docker → out/submission.json (does NOT upload)
+#   run-local            Clone/verify a repo and run a local headless CLI agent
 #
-# Model + key for the real run live in submission.env (any provider — see
-# submission.env.example); preflight/submission read it via --env-file. REPO_DIR is only
-# for the local-clone targets (audit).
-
-REPO_DIR ?= ../problem-reductions
+# Model/auth configuration lives in submission.env (see submission.env.example). Local
+# repository, submission, and log locations are intentionally explicit Make variables.
 # PR_REF = the problem-reductions version this benchmark round targets (tag or commit).
 # It drives BOTH the build arg and the image tag, so bumping the round is one place:
 #   make runner-build PR_REF=v0.7.0   →   builds + tags problem-reductions-runner:v0.7.0
@@ -21,8 +19,14 @@ IMAGE    ?= problem-reductions-runner:$(PR_REF)
 SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
+LOCAL_BACKEND ?= codex
+LOCAL_REPO_DIR ?=
+LOCAL_OUTPUT ?=
+LOCAL_LOG_DIR ?=
+REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
+LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build preflight run run-local score-local board publish-local serve
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:
@@ -65,6 +69,23 @@ run:
 	docker run --rm --env-file "$(ENV_FILE)" -v "$(PWD)/out:/out" $(IMAGE)
 	@echo "Wrote ./out/submission.json — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
 
+## Lightweight host run through an installed headless agent CLI. The checkout is cloned at
+## PR_REF when LOCAL_REPO_DIR is absent; an existing checkout must already match exactly.
+## Requires explicit repo/output/log paths, local Python deps, pred, and CLI authentication.
+run-local:
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+	  echo "No $(ENV_FILE) — copy submission.env.example and set MODEL_NAME first"; exit 1; fi
+	@if [ -z "$(LOCAL_REPO_DIR)" ] || [ -z "$(LOCAL_OUTPUT)" ] || [ -z "$(LOCAL_LOG_DIR)" ]; then \
+	  echo "Set LOCAL_REPO_DIR, LOCAL_OUTPUT, and LOCAL_LOG_DIR explicitly"; exit 1; fi
+	python3 -m benchmark.run_submission \
+	  --env-file "$(ENV_FILE)" \
+	  --repo-dir "$(abspath $(LOCAL_REPO_DIR))" \
+	  --repo-ref "$(PR_REF)" \
+	  --repo-url "$(REPO_URL)" \
+	  --output "$(abspath $(LOCAL_OUTPUT))" \
+	  --trajectory-dir "$(abspath $(LOCAL_LOG_DIR))" $(LOCAL_ARGS)
+	@echo "Wrote $(LOCAL_OUTPUT); logs are in $(LOCAL_LOG_DIR)."
+
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred). Writes scored
 ## results + leaderboard.json into SCORED, and one public entry per submission into SCORED/board.
 score-local:
@@ -95,7 +116,8 @@ serve: board
 
 ## Audit pred CLI capabilities against the pinned library commit.
 audit:
-	python -m benchmark.pred_audit $(REPO_DIR)
+	@if [ -z "$(LOCAL_REPO_DIR)" ]; then echo "Set LOCAL_REPO_DIR explicitly"; exit 1; fi
+	python -m benchmark.pred_audit $(LOCAL_REPO_DIR)
 
 ## Install Python dependencies.
 install-deps:
@@ -109,6 +131,7 @@ help:
 	@echo "  runner-build        Build the dockerized submission runner image"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
+	@echo "  run-local           Clone/verify a repo and run a local headless CLI agent"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  board               Build site/results.json from site/results/*.json (aggregate)"
 	@echo "  publish-local       Score + stage per-submission entries + rebuild board (SUBS_DIR stays local)"
@@ -117,5 +140,8 @@ help:
 	@echo "  install-deps        Install Python requirements"
 	@echo ""
 	@echo "Variables:"
-	@echo "  REPO_DIR=$(REPO_DIR)"
 	@echo "  ENV_FILE=$(ENV_FILE)  (model/key for preflight + submission)"
+	@echo "  LOCAL_BACKEND=$(LOCAL_BACKEND)  (codex default; set claude-code if desired)"
+	@echo "  LOCAL_REPO_DIR=$(LOCAL_REPO_DIR)  (required for run-local/audit)"
+	@echo "  LOCAL_OUTPUT=$(LOCAL_OUTPUT)  (required for run-local)"
+	@echo "  LOCAL_LOG_DIR=$(LOCAL_LOG_DIR)  (required for run-local)"

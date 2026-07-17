@@ -42,6 +42,24 @@ class TestHardening:
         assert int(out.strip()) == vf.CPU_LIMIT_SECONDS
 
 
+# ── target-type extraction ─────────────────────────────────────────────────────
+
+class TestCleanTargetType:
+    def test_clean_name_is_unchanged(self):
+        assert vf._clean_target_type("IntegralFlowBundles") == "IntegralFlowBundles"
+
+    def test_variant_path_with_slashes_is_preserved(self):
+        assert vf._clean_target_type("SpinGlass/SimpleGraph/f64") == "SpinGlass/SimpleGraph/f64"
+
+    def test_prose_bundle_yields_trailing_token(self):
+        # opus wrote the bundle as a phrase; the type name is the last token.
+        assert vf._clean_target_type("target type IntegralFlowBundles") == "IntegralFlowBundles"
+
+    def test_arrow_notation_yields_target_side(self):
+        assert vf._clean_target_type("QUBO -> SpinGlass") == "SpinGlass"
+        assert vf._clean_target_type("SubsetSum->ClosestVectorProblem") == "ClosestVectorProblem"
+
+
 # ── Eval.parse ────────────────────────────────────────────────────────────────
 
 class TestEvalParse:

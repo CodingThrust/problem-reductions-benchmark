@@ -1,9 +1,9 @@
 # prb submission intake (Cloudflare Worker)
 
 The write-only, confidential intake for `prb submit`. Submitters POST their `submission.json`
-over HTTPS; this Worker checks a bearer key and deposits the raw body (certificate +
-trajectory = the answer key) into a **private R2 bucket**. Nobody reads the bucket back; the
-public leaderboard only ever gets the aggregate that `score-from-r2.yml` derives.
+over HTTPS; this Worker checks a bearer key and deposits the raw body (certificates plus the
+bounded submit ledger) into a **private R2 bucket**. The public leaderboard only receives the
+aggregate that `score-from-r2.yml` derives.
 
 ```
 prb submit ──POST /submit──▶ Worker ──put──▶ R2 s3://prb-submissions/incoming/<ts>-<uuid>.json
@@ -53,5 +53,5 @@ See `.github/workflows/score-from-r2.yml`.
 ## Notes
 - Bearer auth is a single shared secret for now; per-submitter keys / quotas can move to a
   Worker KV lookup later without changing `prb submit`.
-- Max body 25 MB (embedded trajectories). For larger, hand out an R2 presigned PUT URL
+- Max body 25 MB. For larger submissions, hand out an R2 presigned PUT URL
   instead of POSTing the body — not needed at current scale.

@@ -1,8 +1,8 @@
 # Leaderboard site
 
 Static leaderboard (`index.html`, no app server) published to **GitHub Pages** by
-`.github/workflows/publish-on-merge.yml`. Every model gets the same step-limited agent
-session; every bug is re-verified by `pred`.
+`.github/workflows/publish-on-merge.yml`. Every model gets one whole-repository session and
+the same bounded certificate-submission channel; every bug is re-verified by `pred`.
 
 `index.html` reads two data files served alongside it:
 

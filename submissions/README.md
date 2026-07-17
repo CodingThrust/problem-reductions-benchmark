@@ -1,8 +1,8 @@
 # Submissions
 
-**Submissions are never committed to this public repo** — they carry the answer key
-(certificate + trajectory) and are `.gitignore`d. This directory is only local scratch for
-the self-run scoring path.
+**Submissions are never committed to this public repo** — they carry counterexample
+certificates and the evaluation-owned submit ledger, so they are `.gitignore`d. This
+directory is only local scratch for the self-run scoring path.
 
 ## How to submit (external)
 
