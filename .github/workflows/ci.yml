@@ -2,7 +2,7 @@ name: CI — unit tests and verifier calibration
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
 
 env:

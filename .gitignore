@@ -41,5 +41,15 @@ submission.env
 .wrangler/
 node_modules/
 
+# Local Python tooling
+.pytest_cache/
+.venv/
+
+# Local agent/CLI state and personal artifacts (not project docs — those live in
+# README.md, CONTRIBUTING.md, and benchmark/docs/)
+.claude/
+/docs/
+/reports/
+
 # macOS
 .DS_Store

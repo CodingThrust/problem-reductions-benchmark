@@ -10,7 +10,7 @@ name: Publish leaderboard (GitHub Pages)
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'site/**'
   workflow_dispatch: {}   # manual republish
