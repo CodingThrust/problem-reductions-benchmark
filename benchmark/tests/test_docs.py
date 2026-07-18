@@ -6,6 +6,9 @@ All tests are marked @pytest.mark.judgment.
 import pytest
 from pathlib import Path
 
+from benchmark.env_setup import DEFAULT_PINNED_COMMIT, DEFAULT_PINNED_VERSION
+from benchmark.schema_version import LATEST_SUBMISSION_SCHEMA_VERSION
+
 pytestmark = pytest.mark.judgment
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -39,6 +42,12 @@ class TestReadme:
     def test_readme_has_metrics_section(self):
         t = _text(README)
         assert "bugs/ktok" in t or "bugs_per_ktok" in t
+
+    def test_readme_lists_current_round_contract(self):
+        text = README.read_text(encoding="utf-8")
+        assert DEFAULT_PINNED_COMMIT in text
+        assert f"`{DEFAULT_PINNED_VERSION}`" in text
+        assert f"`{LATEST_SUBMISSION_SCHEMA_VERSION}`" in text
 
 
 class TestGuide:

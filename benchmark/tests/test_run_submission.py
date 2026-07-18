@@ -116,3 +116,5 @@ class TestSchemaValidity:
             (Path(rs.__file__).parent / "submission.schema.json").read_text())
         for field in schema["required"]:
             assert field in sub, f"missing required field: {field}"
+        assert sub["schema_version"] == schema["properties"]["schema_version"]["const"]
+        assert sub["schema_version"] == rs.SCHEMA_VERSION

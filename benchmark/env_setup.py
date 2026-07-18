@@ -12,8 +12,8 @@ from benchmark.env_context import EnvContext
 # below (benchmark/PINNED_COMMIT, benchmark/PINNED_VERSION), and this module reads them.
 # The literals here are only a fallback for local dev (no baked files, no env override).
 # Precedence for each: env override > baked file (image) > module default.
-_DEFAULT_PINNED_COMMIT = "aa2d1a10cffa434871d12a4d6f411147fb7e08a8"
-_DEFAULT_PINNED_VERSION = "0.6.0"
+DEFAULT_PINNED_COMMIT = "aa2d1a10cffa434871d12a4d6f411147fb7e08a8"
+DEFAULT_PINNED_VERSION = "0.6.0"
 DEFAULT_REPO_URL = "https://github.com/CodingThrust/problem-reductions.git"
 _PIN_DIR = Path(__file__).parent
 
@@ -31,7 +31,7 @@ def _read_pin_file(filename: str) -> str | None:
 def pinned_commit() -> str:
     """Target library commit: EXPECTED_PRED_COMMIT env > baked PINNED_COMMIT file > default."""
     return (os.environ.get("EXPECTED_PRED_COMMIT")
-            or _read_pin_file("PINNED_COMMIT") or _DEFAULT_PINNED_COMMIT)
+            or _read_pin_file("PINNED_COMMIT") or DEFAULT_PINNED_COMMIT)
 
 
 def pinned_pred_version() -> str:
@@ -40,7 +40,7 @@ def pinned_pred_version() -> str:
     (The EXPECTED_PRED_VERSION env is handled in verify_pred_version, where "" must mean
     "skip the check" rather than "use default" — so it is NOT folded in here.)
     """
-    return _read_pin_file("PINNED_VERSION") or _DEFAULT_PINNED_VERSION
+    return _read_pin_file("PINNED_VERSION") or DEFAULT_PINNED_VERSION
 
 
 # Importable module attributes (resolved once at import; the image's baked files exist by

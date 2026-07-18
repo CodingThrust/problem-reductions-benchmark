@@ -24,11 +24,12 @@ import sys
 from pathlib import Path
 
 from benchmark.env_setup import pinned_commit
+from benchmark.schema_version import LATEST_SUBMISSION_SCHEMA_VERSION
 from benchmark.submit import validate_submission
 from benchmark.verify_submission import leaderboard_entry, score_submission
 
 STATUS_SUFFIX = ".status.json"
-OFFICIAL_SCHEMA_VERSION = "2.1"
+OFFICIAL_SCHEMA_VERSION = LATEST_SUBMISSION_SCHEMA_VERSION
 
 
 class PermanentSubmissionError(ValueError):

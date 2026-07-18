@@ -4,6 +4,18 @@ A benchmark that measures how efficiently AI models find bugs in reduction rules
 
 The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a private store; the maintainer re-verifies it with `pred` and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
 
+## Current benchmark round
+
+| Contract | Current value | Ownership |
+|---|---|---|
+| Submission schema | `2.1` | The runner always writes the latest schema; submitters do not edit it. The official scorer enforces it when parsing. |
+| `problem-reductions` target | [`v0.6.0` / `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8) | Every official result is verified against this exact commit. |
+| `pred` | `0.6.0` | The runner/scorer image supplies and verifies the matching binary. |
+
+Do not hand-edit `schema_version` or `library_commit` in `submission.json`. The runner records
+both; the intake client performs a structural courtesy check, and the private scorer is the
+authority for the current schema and round pin.
+
 ## What this measures
 
 A reduction rule maps problem A → problem B. A **bug** is a round-trip failure:
