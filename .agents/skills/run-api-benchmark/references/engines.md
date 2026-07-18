@@ -1,16 +1,32 @@
 # Getting a container engine, per platform
 
 Read this when `detect-engine.sh` reports `ENGINE=none` (install one). The benchmark image
-compiles a Rust CLI, so the recurring failure everywhere is **build OOM (exit 137)** when the
-engine's Linux VM/host has < ~8GB RAM.
+is published on GHCR; pull it when available. A local build compiles a Rust CLI and can fail
+with **exit 137** when the engine's Linux VM/host has < ~8GB RAM.
+
+## Prepare the image
+
+With Docker or a Docker-compatible CLI:
+
+```bash
+make runner-pull PR_REF=v0.6.0
+# Fallback only: make runner-build PR_REF=v0.6.0
+```
+
+With rootless Podman, pull and tag the published amd64 image directly:
+
+```bash
+podman pull --arch amd64 ghcr.io/codingthrust/problem-reductions-runner:v0.6.0
+podman tag ghcr.io/codingthrust/problem-reductions-runner:v0.6.0 \
+  problem-reductions-runner:v0.6.0
+```
 
 ## macOS (Apple Silicon or Intel)
 
 Any docker-compatible engine works; pick by situation:
 
 - **Colima** — free, open source, scriptable. Best default when you don't know the licensing
-  situation. **Its VM defaults to 2 CPU / 2GB RAM, which OOMs the Rust link** — always start it
-  with more:
+  situation. Its VM defaults to 2 CPU / 2GB RAM; allocate more for a local image build:
   ```bash
   brew install colima docker
   colima start --cpu 4 --memory 8 --disk 100
@@ -39,8 +55,7 @@ Bind mounts + `--env-file` work natively and files come back owned by you (the V
     you (without it, files land as a high subuid you can't delete).
   - **`:z`** on the bind mount **only when SELinux is enforcing** (RHEL/Fedora) — relabels it so
     the container can write; omit on non-SELinux hosts.
-  The Makefile hardcodes `docker`, so either `alias docker=podman` for the session or run the raw
-  `podman build` / `podman run` commands.
+  The Makefile hardcodes `docker`, so use the raw `podman` pull/build/run commands.
 
 Build OOM: ensure the host (or its cgroup limit) has ≥8GB + swap; `CARGO_BUILD_JOBS=1` is already
 set in the Dockerfile.

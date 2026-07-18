@@ -34,16 +34,13 @@ The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + Li
 and the problem-reductions source pinned at `v0.6.0`. Any LiteLLM-routable provider key
 works.
 
-The **target library version is not hardcoded** — it tracks the benchmark. The single knob
-is the `PR_REF` build arg (a tag or commit of problem-reductions); the image bakes the
-commit and `pred` version it actually built into itself, and the runner records/verifies
-against those. Bump `PR_REF` and rebuild for each benchmark round.
+The **target library version is not hardcoded** — it tracks the benchmark. `PR_REF` selects
+a tag or commit of problem-reductions; the image records that commit and its matching
+`pred`. Pull the published image for that ref, or build it locally when unavailable:
 
 ```bash
-# Build once (compiles pred from source — takes a few minutes).
-# --build-arg PR_REF=<tag-or-commit> selects the library version (default in the Dockerfile):
-docker build -f docker/Dockerfile --target runner \
-  --build-arg PR_REF=v0.6.0 -t problem-reductions-runner:v0.6.0 .
+make runner-pull PR_REF=v0.6.0
+# Fallback: make runner-build PR_REF=v0.6.0
 ```
 
 ### Configure and run
@@ -59,8 +56,8 @@ docker run --rm --env-file submission.env -v "$PWD/out:/out" \
 # → ./out/submission.json      (or just: make run)
 ```
 
-`MODEL_NAME` and a provider API key are required for the mini-swe path. Everything else in
-the template has a sane default — uncomment only what you need. The knobs, by tier:
+`MODEL_NAME` and any credentials required by the selected provider are required for the
+mini-swe path. Everything else has a sane default — uncomment only what you need:
 
 | Tier | Vars | When |
 |---|---|---|
@@ -148,6 +145,10 @@ sandbox; Claude uses `claude -p`. Both receive the same benchmark prompts and ag
 exactly one whole-repository session and stop themselves; no turn count is passed to either
 CLI.
 
+The CLI backend always runs on the host through `make run-local` and is selected with
+`LOCAL_BACKEND`. Do not set `AGENT_BACKEND` or use Docker for Codex, Claude Code, or another
+coding-agent CLI.
+
 The runner gives every backend a writable scratch workspace. The `submit` CLI exchanges
 atomic request/response files there while the attempt budget and verified ledger remain in
 runner memory, avoiding sandbox-blocked sockets or localhost networking. The prompt begins
@@ -162,7 +163,8 @@ mutated automatically. Submission JSON and live/final logs go to the separate, r
 
 The CLI backend is intentionally less hermetic: it uses the host binary, authentication,
 Python environment, and `pred`. The runner still verifies the pinned `pred` version and
-records the target commit; use the API backend for an official reproducible batch.
+records the target commit; use the API backend when container-level reproducibility is
+required.
 
 #### Add another coding-agent CLI
 
@@ -174,8 +176,13 @@ must produce `verdict: reliable`.
 
 ## 2. Submit it (CLI upload)
 
-Submission is a **CLI upload** — no web form, and the file never enters git. Get the
-endpoint URL + a token from the maintainer, then:
+Submission is a **CLI upload** — no web form, and the file never enters git. Choose one:
+
+- validate and keep the result locally with `--dry-run`;
+- upload an intake test with `--test` (privately scored, excluded from the leaderboard);
+- upload an official submission with neither flag.
+
+For either upload, get the endpoint URL and token from the maintainer, then:
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer

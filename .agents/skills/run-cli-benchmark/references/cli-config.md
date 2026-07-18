@@ -3,6 +3,9 @@
 Derive support from `benchmark.run_submission.BACKENDS` and `_run_backend()` at runtime.
 Documentation may lag code.
 
+Run these adapters on the host through `make run-local LOCAL_BACKEND=<backend-id>`.
+Do not set `AGENT_BACKEND` or use a container command to select a CLI harness.
+
 ## Built-in adapters
 
 | Backend ID | Harness | Authentication | Model syntax |

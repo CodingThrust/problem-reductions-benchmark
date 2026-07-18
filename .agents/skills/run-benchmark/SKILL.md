@@ -27,5 +27,9 @@ in plain text. Do not combine both routes in one run.
 - For **Model API**, invoke `$run-api-benchmark` and follow it completely.
 - For **Coding-agent CLI**, invoke `$run-cli-benchmark` and follow it completely.
 
+The route also selects the runtime. Model API means mini-swe/LiteLLM in a container.
+Coding-agent CLI means an installed host process through `make run-local`; never place
+Codex, Claude Code, or another CLI harness inside the API container path.
+
 The child skill owns all later questions, preflight, execution, validation, and optional
 upload. Do not duplicate those workflows here.

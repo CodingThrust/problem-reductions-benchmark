@@ -35,15 +35,19 @@ Do not dump every configuration question into one message.
 
 3. Ask:
 
-   > Is this a local/test submission, or should the completed file be uploaded to the
-   > official intake?
+   > What should happen after the run?
+   >
+   > 1. Keep and validate the result locally without uploading.
+   > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
+   > 3. Upload an official submission.
 
-   Default to local/test only when the caller explicitly delegates the choice. Do not ask
-   for intake credentials unless upload is selected.
+   Default to local-only only when the caller explicitly delegates the choice. Do not ask
+   for intake credentials unless option 2 or 3 is selected.
 
-4. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), authoritative output
-   path, and log path. Offer defaults and ask the caller whether to accept them rather than
-   demanding paths one at a time.
+4. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and `STAMP` (default:
+   the Makefile timestamp). Show the derived authoritative path
+   `out/<stamp>/submission.json`; the trajectory is written alongside it. Do not ask for
+   arbitrary host output or log paths when using `make run`.
 
 ## Configure safely
 
@@ -55,6 +59,10 @@ guide the caller to set:
 - `API_BASE` and `MODEL_KWARGS` only when needed;
 - `SUBMIT_LIMIT` when non-default.
 
+This route always uses the `mini-swe` backend. If an existing env file contains
+`AGENT_BACKEND`, remove it or require it to be `mini-swe`. Never select a coding-agent CLI
+with `AGENT_BACKEND` and never run one inside the container.
+
 Do not expose secret values in command output or the final response. Do not add removed
 `AGENT_MODE`, `MAX_RULES`, or max-turn settings.
 
@@ -63,16 +71,18 @@ Do not expose secret values in command output or the final response. Do not add 
 1. Run `scripts/detect-engine.sh` and parse its `KEY=VALUE` output. Read
    [references/engines.md](references/engines.md) only if no engine is available or the RAM
    hint is low.
-2. Build with one consistent ref:
+2. Prepare one image at the selected ref. Prefer the published image:
 
    ```bash
-   make runner-build PR_REF=v0.6.0
+   make runner-pull PR_REF=v0.6.0
    ```
 
-   For Podman, use the equivalent command from `references/engines.md`.
+   Fall back to `make runner-build PR_REF=v0.6.0` only when the published image is
+   unavailable or the caller explicitly wants a local build. For Podman, use the equivalent
+   command from `references/engines.md`.
 3. Before the preflight's real API call, show the resolved model, backend `mini-swe`, API
-   endpoint with secrets redacted, `PR_REF`, submit limit, output path, and log path. Ask for
-   explicit confirmation.
+   endpoint with secrets redacted, `PR_REF`, submit limit, `STAMP`, derived submission path,
+   and upload goal. Ask for explicit confirmation.
 4. Run `make preflight`. It checks `pred`, rule sources, and one tiny LiteLLM call. Stop on
    any failure; never proceed to a full run after a failed preflight.
 
@@ -80,7 +90,8 @@ Do not expose secret values in command output or the final response. Do not add 
 
 After preflight passes, state that the full session can consume substantial time and API
 credits and ask for explicit confirmation to start it. Then run `make run` or the equivalent
-Podman command using the detector's `RUN_FLAGS`.
+Podman command using the detector's `RUN_FLAGS`. Pass `STAMP=<resolved-stamp>` when a fixed
+stamp was selected.
 
 Confirm the authoritative `submission.json` exists. Always validate it:
 
@@ -91,15 +102,15 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, and absolute output
 and log paths. A `run_error` means partial salvage, not a clean zero-bug completion.
 
-Upload only when the caller explicitly selected official intake and provided
+Upload only when the caller explicitly selected an intake upload and provided
 `PRB_SUBMIT_URL` plus `PRB_API_KEY` locally:
 
 ```bash
-python -m benchmark.submit --predictions <submission.json>
+python -m benchmark.submit --predictions <submission.json>          # official
+python -m benchmark.submit --predictions <submission.json> --test   # intake test
 ```
 
-Add `--test` only when the caller requests an end-to-end intake test excluded from the
-public board. Never upload merely because the run completed.
+Use `--test` only for option 2. Never upload merely because the run completed.
 
 An exit code 137 means the engine needs more memory. Preserve partial outputs and read
 actual command errors before recommending changes.

@@ -11,6 +11,9 @@ pytestmark = pytest.mark.judgment
 REPO_ROOT = Path(__file__).parent.parent.parent
 README = REPO_ROOT / "README.md"
 GUIDE = REPO_ROOT / "CONTRIBUTING.md"
+ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
+API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
+CLI_SKILL = REPO_ROOT / ".agents/skills/run-cli-benchmark/SKILL.md"
 
 
 def _text(path: Path) -> str:
@@ -50,3 +53,28 @@ class TestGuide:
         # The CLI upload flow: `benchmark.submit` → private store → aggregate on Pages.
         t = _text(GUIDE)
         assert "benchmark.submit" in t and "github pages" in t
+
+
+class TestBackendRouteSeparation:
+    def test_env_template_does_not_select_cli_with_agent_backend(self):
+        t = _text(ENV_EXAMPLE)
+        assert "agent_backend=" not in t
+        assert "local_backend=codex" in t
+
+    def test_api_skill_is_container_only(self):
+        t = _text(API_SKILL)
+        assert "mini-swe" in t and "runner-pull" in t
+        assert "never run one inside the container" in t
+
+    def test_cli_skill_is_host_only(self):
+        t = _text(CLI_SKILL)
+        assert "make run-local" in t and "local_backend" in t
+        assert "do not set `agent_backend`" in t
+        assert "or start docker/podman" in t
+
+    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    def test_each_skill_exposes_three_submission_goals(self, skill):
+        t = _text(skill)
+        assert "keep and validate" in t
+        assert "intake test" in t
+        assert "official submission" in t

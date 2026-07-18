@@ -49,10 +49,13 @@ numbered stage at a time when its answer controls the next branch.
 
 4. Ask:
 
-   > Is this a local/test submission, or should the completed file be uploaded to the
-   > official intake?
+   > What should happen after the run?
+   >
+   > 1. Keep and validate the result locally without uploading.
+   > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
+   > 3. Upload an official submission.
 
-   Do not ask for intake credentials unless upload is selected.
+   Do not ask for intake credentials unless option 2 or 3 is selected.
 
 5. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and three separate,
    explicit paths: clone destination, authoritative submission JSON, and log directory.
@@ -60,9 +63,9 @@ numbered stage at a time when its answer controls the next branch.
 
 ## Verify the selected harness
 
-For Codex, require `codex` and a successful `codex login status`. For Claude Code, require
-`claude` and its authenticated login/token flow. For newly integrated agents, follow their
-adapter's documented auth probe.
+For Codex, require `codex` plus either a successful `codex login status` or a configured
+`OPENAI_API_KEY`. For Claude Code, require `claude` and its authenticated login/token flow.
+For newly integrated agents, follow their adapter's documented auth probe.
 
 Also require:
 
@@ -88,8 +91,13 @@ Before the first real model call, show:
 
 State that the run can consume substantial time or credits, then get explicit confirmation.
 
-Run through `make run-local` with the selected backend, or invoke
-`benchmark.run_submission` directly with the same explicit values. For example:
+This route runs the selected CLI directly on the host. Select it only with
+`LOCAL_BACKEND=<backend-id>`. Do not set `AGENT_BACKEND`, invoke `make run`/`make preflight`,
+or start Docker/Podman for a CLI run.
+
+Run through `make run-local` with the selected backend. If invoking
+`benchmark.run_submission` directly, pass `--host-cli` with the same explicit values. For
+example:
 
 ```bash
 make run-local \
@@ -115,11 +123,12 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, CLI warnings, and
 absolute output/log paths. Preserve partial results and logs on failure.
 
-Upload only when the caller explicitly selected official intake and configured
+Upload only when the caller explicitly selected an intake upload and configured
 `PRB_SUBMIT_URL` plus `PRB_API_KEY` locally:
 
 ```bash
-python -m benchmark.submit --predictions <submission.json>
+python -m benchmark.submit --predictions <submission.json>          # official
+python -m benchmark.submit --predictions <submission.json> --test   # intake test
 ```
 
-Never upload merely because the run completed.
+Use `--test` only for option 2. Never upload merely because the run completed.

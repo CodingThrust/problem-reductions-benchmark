@@ -3,6 +3,9 @@
 Use `submission.env.example` as the source of truth. Keep secrets in the gitignored
 `submission.env`; never ask the caller to paste them into chat.
 
+This configuration is only for the containerized `mini-swe` API route. Do not select Codex,
+Claude Code, or another host CLI with `AGENT_BACKEND`.
+
 ## Variables
 
 | Variable | Purpose |

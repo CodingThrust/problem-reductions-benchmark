@@ -74,7 +74,7 @@ preflight:
 ## whole-repo trajectory lands alongside it). Each run gets its own timestamped dir so
 ## successive runs never overwrite each other (override with STAMP=... to reproduce).
 ## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
-## (open a GitHub PR adding the file, see CONTRIBUTING.md). Config lives in submission.env
+## (upload it with benchmark.submit, see CONTRIBUTING.md). Config lives in submission.env
 ## (copy submission.env.example); run `make preflight` first to validate it.
 run:
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -97,7 +97,7 @@ run-local:
 	  --repo-ref "$(PR_REF)" \
 	  --repo-url "$(REPO_URL)" \
 	  --output "$(abspath $(LOCAL_OUTPUT))" \
-	  --trajectory-dir "$(abspath $(LOCAL_LOG_DIR))" $(LOCAL_ARGS)
+	  --trajectory-dir "$(abspath $(LOCAL_LOG_DIR))" --host-cli $(LOCAL_ARGS)
 	@echo "Wrote $(LOCAL_OUTPUT); logs are in $(LOCAL_LOG_DIR)."
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred). Writes scored
@@ -145,7 +145,7 @@ help:
 	@echo "  runner-build        Build the dockerized submission runner image"
 	@echo "  runner-pull         Pull the prebuilt runner image from GHCR (fast runner-build alternative)"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
-	@echo "  run                 Run the benchmark via Docker → out/submission.json (not upload)"
+	@echo "  run                 Run the API backend via Docker → out/<stamp>/submission.json (not upload)"
 	@echo "  run-local           Clone/verify a repo and run a local headless CLI agent"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  board               Build site/results.json from site/results/*.json (aggregate)"

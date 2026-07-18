@@ -74,10 +74,8 @@ printed only in the agent's final response do not count.
 
 ## How to run
 
-Both backends require:
-
-- `pred` binary in PATH (pinned commit `aa2d1a1` of problem-reductions)
-- Python 3.12 with dependencies: `pip install -r benchmark/requirements.txt`
+The API image contains `pred`, Python, dependencies, and the target source. The CLI backend
+instead uses those tools from the host.
 
 ```bash
 # Run all unit tests (no API key needed) — this exercises the backend wiring
@@ -89,8 +87,8 @@ make verify-calibration
 
 ### Model API backend
 
-Configure a provider key in `submission.env`, then run the containerized mini-swe/LiteLLM
-backend:
+Install Docker, configure the model API in `submission.env`, then run mini-swe/LiteLLM in
+the container:
 
 ```bash
 cp submission.env.example submission.env
@@ -101,8 +99,8 @@ make run
 
 ### Coding-agent CLI backend
 
-Install and authenticate a supported CLI, set `MODEL_NAME` in `submission.env`, and run it
-directly on the host:
+Install Python 3.12, the benchmark dependencies, the pinned `pred`, and a supported CLI.
+Authenticate the CLI, set `MODEL_NAME` in `submission.env`, and run it directly on the host:
 
 ```bash
 cp submission.env.example submission.env
@@ -129,7 +127,7 @@ Key `make` targets:
 | `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
 | `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
 | `make preflight` | Validate the API backend with one tiny real call before a full run |
-| `make run` | Run the API backend in Docker → `out/submission.json` (does not upload) |
+| `make run` | Run the API backend in Docker → `out/<stamp>/submission.json` (does not upload) |
 | `make run-local` | Run a coding-agent CLI on the host → the same output schema |
 | `make score-local` | Score submissions with the zero-trust backend |
 

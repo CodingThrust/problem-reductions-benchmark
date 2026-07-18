@@ -135,6 +135,13 @@ class TestCodexRuns:
 
 
 class TestWiring:
+    @pytest.mark.parametrize("backend", ["codex", "claude-code"])
+    def test_container_mode_rejects_cli_backend(self, backend, monkeypatch, capsys):
+        monkeypatch.delenv("REPO_REF", raising=False)
+        with pytest.raises(SystemExit):
+            run_submission.main(["--model", "test-model", "--backend", backend])
+        assert "make run-local" in capsys.readouterr().err
+
     def test_env_file_preserves_ambient_values(self, tmp_path, monkeypatch):
         env_file = tmp_path / "submission.env"
         env_file.write_text("# comment\nMODEL_NAME='from-file'\nAGENT_BACKEND=codex\n",
@@ -159,6 +166,7 @@ class TestWiring:
         run_submission.main([
             "--model", "gpt-5.4", "--repo-dir", str(tmp_path / "repo"),
             "--repo-ref", "v0.6.0", "--backend", "codex",
+            "--host-cli",
             "--output", str(tmp_path / "submission.json"),
             "--trajectory-dir", str(tmp_path / "logs"),
         ])
