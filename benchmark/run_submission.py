@@ -330,10 +330,20 @@ def main(argv: list[str] | None = None) -> None:
                              "provider (default). claude-code: headless `claude -p`; auth via "
                              "Claude login/token. codex: headless `codex exec`; auth via Codex "
                              "login or OPENAI_API_KEY.")
+    parser.add_argument("--host-cli", action="store_true",
+                        help="Confirm a coding-agent backend is running directly on the host "
+                             "(set by make run-local; never use in the API container route)")
     args = parser.parse_args(argv)
 
     if not args.model:
         parser.error("--model (or env MODEL_NAME) is required")
+    if args.backend != "mini-swe" and not args.host_cli:
+        parser.error(
+            "container/API runs require backend 'mini-swe'; run coding-agent CLIs on "
+            "the host with `make run-local LOCAL_BACKEND=<backend-id>`"
+        )
+    if args.host_cli and args.backend == "mini-swe":
+        parser.error("--host-cli requires a coding-agent backend, not 'mini-swe'")
 
     library_commit = None
     if args.repo_ref:
