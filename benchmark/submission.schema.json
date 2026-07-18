@@ -118,7 +118,7 @@
     "test": {"type": "boolean", "description": "When true, the backend scores and stores the submission privately but EXCLUDES it from the public leaderboard (for end-to-end tests). Set via `prb submit --test`."},
     "trajectory": {
       "type": "array",
-      "description": "Envelope-level session trajectory for a whole-repo run, stored once instead of on every row. Schema 2.1 provenance comes from submit_log.",
+      "description": "Envelope-level session trajectory for a whole-repo run, stored once instead of on every row. Current submissions use submit_log for provenance.",
       "items": {
         "type": "object",
         "properties": {

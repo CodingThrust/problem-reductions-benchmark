@@ -6,7 +6,7 @@ All tests are marked @pytest.mark.judgment.
 import pytest
 from pathlib import Path
 
-from benchmark.env_setup import DEFAULT_PINNED_COMMIT, DEFAULT_PINNED_VERSION
+from benchmark.env_setup import PINNED_COMMIT, PINNED_PRED_VERSION
 
 pytestmark = pytest.mark.judgment
 
@@ -44,8 +44,8 @@ class TestReadme:
 
     def test_readme_lists_current_round_contract(self):
         text = README.read_text(encoding="utf-8")
-        assert DEFAULT_PINNED_COMMIT in text
-        assert f"`{DEFAULT_PINNED_VERSION}`" in text
+        assert PINNED_COMMIT in text
+        assert f"`{PINNED_PRED_VERSION}`" in text
         assert "no schema-version field" in text.lower()
 
 

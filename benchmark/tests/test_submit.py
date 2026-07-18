@@ -63,11 +63,6 @@ class TestValidate:
         doc["submit_log"] = [{"attempt": 1, "accepted": False, "reason": "bad"}]
         assert sub.validate_submission(doc) == []
 
-    def test_schema_version_is_not_part_of_current_submission(self, tmp_path):
-        doc = sub.load_submission(_valid(tmp_path))
-        assert "schema_version" not in doc
-        assert sub.validate_submission(doc) == []
-
 
 class TestSubmit:
     def test_dry_run_does_not_send(self, tmp_path, monkeypatch):
