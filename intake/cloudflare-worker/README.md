@@ -50,6 +50,21 @@ python3 -m benchmark.submit --predictions out/submission.json --test
 
 Remove `--test` only when the run is ready to become an official leaderboard submission.
 
+### Authentication direction
+
+`PRB_API_KEY` is the legacy bootstrap mode. For multiple submitters, prefer placing this
+Worker behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/choose-application-type/),
+using [GitHub as the identity provider](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/github/),
+and authorizing the intended GitHub organization, team, or accounts. Cloudflare supports
+protecting a Worker directly, including its `workers.dev` route, and end users can obtain an
+application-scoped CLI session with `cloudflared access login`.
+
+Do not accept a user's `gh auth token` or GitHub personal access token. Before removing the
+legacy key, update the submit client to send the application-scoped Access token and make the
+Worker validate the signed `Cf-Access-Jwt-Assertion` issuer and audience as documented by
+Cloudflare. Until both pieces are deployed, the repository skill reports GitHub self-service
+authentication as unavailable rather than silently weakening authentication.
+
 ## R2 credentials for the scoring worker
 
 The GitHub Actions scorer reads the bucket via the S3 API. In the Cloudflare dashboard →

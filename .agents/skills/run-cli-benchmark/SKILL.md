@@ -55,7 +55,7 @@ numbered stage at a time when its answer controls the next branch.
    > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
    > 3. Upload an official submission.
 
-   Do not ask for intake credentials unless option 2 or 3 is selected.
+   The `$submit-benchmark-result` skill owns intake authentication and upload.
 
 5. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and three separate,
    explicit paths: clone destination, authoritative submission JSON, and log directory.
@@ -123,12 +123,6 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, CLI warnings, and
 absolute output/log paths. Preserve partial results and logs on failure.
 
-Upload only when the caller explicitly selected an intake upload and configured
-`PRB_SUBMIT_URL` plus `PRB_API_KEY` locally:
-
-```bash
-python -m benchmark.submit --predictions <submission.json>          # official
-python -m benchmark.submit --predictions <submission.json> --test   # intake test
-```
-
-Use `--test` only for option 2. Never upload merely because the run completed.
+For option 2 or 3, invoke `$submit-benchmark-result` with the authoritative path and the
+already-selected test/official mode. That skill owns authentication, final confirmation,
+upload, and submission-ID reporting. Never upload merely because the run completed.

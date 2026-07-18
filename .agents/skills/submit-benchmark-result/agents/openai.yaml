@@ -1,0 +1,4 @@
+interface:
+  display_name: "Submit Benchmark Result"
+  short_description: "Validate and upload a benchmark result securely"
+  default_prompt: "Use $submit-benchmark-result to validate and submit my benchmark result."

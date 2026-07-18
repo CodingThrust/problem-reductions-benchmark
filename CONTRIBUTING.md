@@ -182,7 +182,13 @@ Submission is a **CLI upload** — no web form, and the file never enters git. C
 - upload an intake test with `--test` (privately scored, excluded from the leaderboard);
 - upload an official submission with neither flag.
 
-For either upload, get the endpoint URL and token from the maintainer, then:
+Use `$submit-benchmark-result` when the result already exists. It validates the authoritative
+file, preserves test/official intent, handles the authentication mode actually deployed by
+the intake, asks before the external write, and reports the opaque submission ID. Submitters
+do not need repository write access, R2 access, or permission to run the scoring workflow.
+
+The current legacy deployment uses an endpoint URL plus an intake credential configured
+locally. Do not paste the credential into chat or commit it:
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
