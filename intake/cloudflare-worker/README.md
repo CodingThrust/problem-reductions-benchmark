@@ -45,8 +45,10 @@ Give submitters the endpoint URL + a key:
 ```bash
 export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
 export PRB_API_KEY=<token>
-python -m benchmark.submit --predictions out/submission.json
+python3 -m benchmark.submit --predictions out/submission.json --test
 ```
+
+Remove `--test` only when the run is ready to become an official leaderboard submission.
 
 ## R2 credentials for the scoring worker
 

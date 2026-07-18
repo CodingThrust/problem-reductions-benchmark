@@ -215,8 +215,12 @@ def main() -> None:
     else:
         sid = result.get("submission_id", "(no id returned)")
         print(f"✓ submitted — id {sid} ({result.get('status', 'accepted')}){tag}")
-        print("The backend re-verifies every certificate with pred; only the aggregate "
-              "(counts, no rules/certs) becomes public.")
+        if args.test:
+            print("The backend re-verifies every certificate with pred; this test submission "
+                  "is stored privately and will not update the public leaderboard.")
+        else:
+            print("The backend re-verifies every certificate with pred; only the aggregate "
+                  "(counts, no rules/certs) becomes public.")
 
 
 if __name__ == "__main__":
