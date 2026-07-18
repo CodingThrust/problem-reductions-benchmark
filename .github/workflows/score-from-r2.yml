@@ -31,18 +31,14 @@ permissions:
 env:
   PR_REF: v0.6.0
 
+concurrency:
+  group: score-from-r2
+  cancel-in-progress: false
+
 jobs:
   score:
     runs-on: ubuntu-latest
-    # R2_* are repository secrets (Settings → Secrets → Actions). No environment / pre-run
-    # approval — the single human checkpoint is reviewing + merging the aggregate PR this
-    # job opens. cron (1x/day) + the bearer key on the intake Worker bound abuse.
-    env:
-      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-      BUCKET: ${{ secrets.R2_BUCKET }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: auto
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
 
@@ -64,6 +60,13 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Pull pending submissions + prior scored detail from R2
+        id: pull
+        env:
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         run: |
           mkdir -p incoming results/scored
           # reset_results (manual): wipe prior scored detail so the board is rebuilt from
@@ -72,30 +75,59 @@ jobs:
             echo "reset_results: wiping s3://$BUCKET/results"
             aws s3 rm "s3://$BUCKET/results" --recursive --endpoint-url "$R2_ENDPOINT" || true
           fi
-          # incoming/ = raw submissions to score; results/ = all prior scored detail, so the
-          # rebuilt board reflects the FULL history, not just this batch.
-          aws s3 sync "s3://$BUCKET/incoming" ./incoming --endpoint-url "$R2_ENDPOINT"
+          # Snapshot the exact queue keys before downloading. Only this immutable manifest
+          # may be archived later; an object arriving while scoring remains in incoming/.
+          aws s3api list-objects-v2 --bucket "$BUCKET" --prefix incoming/ \
+            --endpoint-url "$R2_ENDPOINT" --query 'Contents[].Key' --output json \
+            | jq -r '.[] | select(endswith(".json"))' > queue-manifest.txt
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            rel="${key#incoming/}"
+            [ "$rel" != "$key" ] && [ -n "$rel" ] || continue
+            mkdir -p "incoming/$(dirname "$rel")"
+            aws s3 cp "s3://$BUCKET/$key" "incoming/$rel" --endpoint-url "$R2_ENDPOINT"
+          done < queue-manifest.txt
+
+          # results/ = all prior scored detail, so the rebuilt board reflects full history.
           aws s3 sync "s3://$BUCKET/results"  ./results/scored --endpoint-url "$R2_ENDPOINT"
-          echo "pending: $(ls -1 incoming/*.json 2>/dev/null | wc -l) file(s)"
+          echo "pending snapshot: $(wc -l < queue-manifest.txt) object(s)"
 
       - name: Re-verify with pred (zero-trust + provenance), rebuild the leaderboard
+        id: score
+        continue-on-error: true
         run: |
           docker run --rm --network none \
             -v "$PWD/incoming:/app/submissions" \
             -v "$PWD/results:/app/results" \
             --entrypoint python prb-scoring:latest \
-            -m benchmark.backend_score --local /app/submissions /app/results/scored
+            -m benchmark.backend_score --official \
+            --local /app/submissions /app/results/scored
 
-      - name: Persist scored detail privately (R2), archive processed submissions
+      - name: Persist results and transition only the snapshotted queue objects
+        if: always() && steps.pull.outcome == 'success'
+        env:
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         run: |
           # Scored detail carries certificates — it goes back to PRIVATE R2, never to git.
           aws s3 sync ./results/scored "s3://$BUCKET/results" --endpoint-url "$R2_ENDPOINT"
-          # Move the now-scored raw submissions out of the queue. Runs only when the scoring
-          # step exited 0 (no FAILED), so we never archive an un-scored item. Limitation: the
-          # archive is coarse (whole incoming/ at once), so a permanently-malformed submission
-          # FAILs every run and jams the queue until deleted from R2 incoming/ by hand.
-          aws s3 mv "s3://$BUCKET/incoming" "s3://$BUCKET/processed" \
-            --recursive --endpoint-url "$R2_ENDPOINT" || true
+
+          # FINISHED objects move to processed/. Permanent input failures move to failed/
+          # with their diagnostic status. Retryable or unclassified failures stay queued.
+          python -m benchmark.r2_queue \
+            --manifest queue-manifest.txt --incoming-dir incoming > queue-transitions.tsv
+          while IFS=$'\t' read -r source destination status_path status_destination; do
+            [ -n "$source" ] || continue
+            if [ "$status_destination" != "-" ]; then
+              aws s3 cp "$status_path" "s3://$BUCKET/$status_destination" \
+                --endpoint-url "$R2_ENDPOINT"
+            fi
+            aws s3 mv "s3://$BUCKET/$source" "s3://$BUCKET/$destination" \
+              --endpoint-url "$R2_ENDPOINT"
+          done < queue-transitions.tsv
 
       - name: Open ONE PR per new/changed submission entry (main is protected)
         env:
@@ -141,3 +173,10 @@ jobs:
           done
           echo "opened/updated $opened submission PR(s)"
           git checkout -q "$BASE" 2>/dev/null || true
+
+      - name: Report retryable scoring failure
+        if: always() && steps.score.outcome == 'failure'
+        run: |
+          echo "One or more submissions had a retryable verifier/infrastructure failure."
+          echo "They remain under R2 incoming/ and will be retried on the next run."
+          exit 1

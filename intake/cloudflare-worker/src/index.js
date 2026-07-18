@@ -20,8 +20,13 @@ export default {
     const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (!env.PRB_API_KEY || token !== env.PRB_API_KEY) return json({ error: "unauthorized" }, 401);
 
-    const body = await request.text();
-    if (body.length > MAX_BYTES) return json({ error: "submission too large" }, 413);
+    const declaredBytes = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BYTES) {
+      return json({ error: "submission too large" }, 413);
+    }
+    const bodyBytes = await request.arrayBuffer();
+    if (bodyBytes.byteLength > MAX_BYTES) return json({ error: "submission too large" }, 413);
+    const body = new TextDecoder().decode(bodyBytes);
 
     // Light shape check — the backend re-verifies every certificate with pred regardless.
     let sub;
@@ -43,7 +48,7 @@ export default {
 
     // The submission now sits in R2; the scoring workflow sweeps it up on its daily cron
     // (score-from-r2.yml). The Worker does nothing else — no GitHub token, no trigger.
-    return json({ submission_id: id, status: "accepted", key }, 201);
+    return json({ submission_id: id, status: "accepted" }, 201);
   },
 };
 

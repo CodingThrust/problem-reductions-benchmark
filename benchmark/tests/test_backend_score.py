@@ -21,6 +21,7 @@ def _traj(cert: dict) -> list[dict]:
 
 
 def _write_submission(subs_dir: Path, name: str, results, **over) -> Path:
+    results = [{"tokens_k": 0, **row} for row in results]
     sub = {
         "schema_version": "2.0",
         "model": over.pop("model", "anthropic/test"),
@@ -116,17 +117,41 @@ class TestProcessLocal:
         assert summary[0]["status"] == "FAILED"
         status = json.loads((subs / "bad.status.json").read_text())
         assert status["status"] == "FAILED"
+        assert status["retryable"] is False
 
-    def test_main_exits_nonzero_on_failure(self, tmp_path, monkeypatch):
-        # A FAILED submission must make the CLI exit non-zero, so score-from-r2.yml
-        # stops before archiving incoming/ → processed/ and the submission stays queued.
+    def test_malformed_certificate_is_permanent_not_retryable(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(
+            subs, "bad-cert.json",
+            [{"rule": "R", "result": "bug_found", "certificate": ["not", "an", "object"],
+              "trajectory": [{"role": "assistant", "content": "x"}]}])
+        summary = bs.process_local(str(subs), str(results))
+        assert summary[0]["status"] == "FAILED"
+        assert summary[0]["retryable"] is False
+        assert "certificate must be an object" in summary[0]["error"]
+
+    def test_main_exits_zero_on_permanent_input_failure(self, tmp_path, monkeypatch):
+        # A malformed object is quarantined by the workflow and must not jam valid work.
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         (subs / "bad.json").write_text("{not valid json", encoding="utf-8")
         monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
+        bs.main()  # permanent FAILED → exit 0 so the workflow can move it to failed/
+
+    def test_main_exits_nonzero_on_retryable_failure(self, tmp_path, monkeypatch):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(subs, "a.json", [{"rule": "R", "result": "no_bug",
+                                             "tokens_k": 0}])
+        monkeypatch.setattr(bs, "score_submission",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("pred crashed")))
+        monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
         with pytest.raises(SystemExit) as ei:
             bs.main()
         assert ei.value.code == 1
+        status = json.loads((subs / "a.status.json").read_text())
+        assert status["retryable"] is True
 
     def test_main_exits_zero_when_all_scored(self, tmp_path, monkeypatch):
         # A clean batch (no FAILED) exits 0 so the workflow proceeds to archive + publish.
@@ -135,6 +160,45 @@ class TestProcessLocal:
         _write_submission(subs, "a.json", [{"rule": "R", "result": "no_bug"}])
         monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
         bs.main()  # returns normally (no SystemExit) → exit 0
+
+    def test_official_gate_rejects_wrong_schema_commit_and_partial_run(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(
+            subs, "bad-round.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
+            schema_version="2.0", library_commit="wrong", run_error="quota exhausted")
+        summary = bs.process_local(
+            str(subs), str(results), official=True, expected_commit="expected")
+        assert summary[0]["status"] == "FAILED"
+        assert summary[0]["retryable"] is False
+        error = summary[0]["error"]
+        assert "schema_version 2.1" in error
+        assert "library_commit" in error
+        assert "partial run" in error
+
+    def test_official_gate_accepts_current_clean_submission(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(
+            subs, "ok.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
+            schema_version="2.1", library_commit="expected", submit_limit=1,
+            submit_log=[])
+        summary = bs.process_local(
+            str(subs), str(results), official=True, expected_commit="expected")
+        assert summary[0]["status"] == "FINISHED"
+
+    def test_official_test_submission_may_preserve_run_error(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(
+            subs, "test.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
+            schema_version="2.1", library_commit="expected", submit_limit=1,
+            submit_log=[], test=True, run_error="intentional smoke failure")
+        summary = bs.process_local(
+            str(subs), str(results), official=True, expected_commit="expected")
+        assert summary[0]["status"] == "FINISHED"
+        scored = json.loads((results / "test.json").read_text())
+        assert scored["run_error"] == "intentional smoke failure"
 
     def test_test_submission_excluded_from_board(self, tmp_path):
         # A submission marked test=true is scored + stored, but kept off the public board.
@@ -196,6 +260,18 @@ class TestPerSubmissionBoard:
         after = {p.name for p in (results / "board").glob("*.json")}
         assert before == after and len(after) == 1
 
+    def test_board_entry_preserves_submitter_and_created_at(self, tmp_path):
+        subs, results = tmp_path / "subs", tmp_path / "results"
+        subs.mkdir()
+        _write_submission(
+            subs, self.F1, [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
+            submitted_by="alice", created_at="2026-07-18T12:34:56Z")
+        bs.process_local(str(subs), str(results))
+        board_file = next((results / "board").glob("*.json"))
+        entry = json.loads(board_file.read_text())
+        assert entry["submitted_by"] == "alice"
+        assert entry["timestamp"] == "20260718T123456"
+
     def test_build_board_dedups_best_per_model(self, tmp_path):
         d = tmp_path / "entries"
         d.mkdir()
@@ -247,7 +323,8 @@ class TestRealFixture:
         cert = json.loads((FIXTURES / "valid_bug.json").read_text(encoding="utf-8"))
         _write_submission(subs, "real.json",
                           [{"rule": cert.get("rule", "r"), "result": "bug_found",
-                            "tokens_k": 10.0, "certificate": cert}],
+                            "tokens_k": 10.0, "certificate": cert,
+                            "trajectory": _traj(cert)}],
                           model="anthropic/real")
         bs.process_local(str(subs), str(results))
         board = json.loads((results / "leaderboard.json").read_text())

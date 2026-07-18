@@ -23,9 +23,16 @@ import shutil
 import sys
 from pathlib import Path
 
+from benchmark.env_setup import pinned_commit
+from benchmark.submit import validate_submission
 from benchmark.verify_submission import leaderboard_entry, score_submission
 
 STATUS_SUFFIX = ".status.json"
+OFFICIAL_SCHEMA_VERSION = "2.1"
+
+
+class PermanentSubmissionError(ValueError):
+    """A submission-data error that retrying the same object cannot fix."""
 
 # One PUBLIC file per submission lives at site/results/<slug>.json, where the slug ties the
 # file (and its PR branch) to that specific run: model + submission time + a short id. The
@@ -156,15 +163,53 @@ def _pending_submissions(subs_dir: Path) -> list[Path]:
         if p.name.endswith(STATUS_SUFFIX):
             continue
         st = _read_status(p)
-        if st and st.get("status") == "FINISHED":
-            continue
+        if st:
+            if st.get("status") == "FINISHED":
+                continue
+            if st.get("status") == "FAILED" and st.get("retryable") is False:
+                continue
         out.append(p)
     return out
 
 
 # ── scoring one submission ────────────────────────────────────────────────────
 
-def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None) -> dict:
+def _validate_for_scoring(submission: object, *, official: bool,
+                          expected_commit: str | None) -> dict:
+    """Validate the durable queue envelope before invoking ``pred``.
+
+    Basic validation applies to local and production scoring so malformed input is a
+    permanent per-object failure instead of an exception that jams the whole queue.  The
+    official gate additionally fixes the schema and target commit, and rejects partial runs
+    from the public leaderboard. Test submissions may be partial because they never publish.
+    """
+    if not isinstance(submission, dict):
+        raise PermanentSubmissionError("submission is not a JSON object")
+
+    problems = validate_submission(submission)
+
+    if official:
+        if submission.get("schema_version") != OFFICIAL_SCHEMA_VERSION:
+            problems.append(
+                f"official submissions require schema_version {OFFICIAL_SCHEMA_VERSION}")
+        target_commit = expected_commit or pinned_commit()
+        if submission.get("library_commit") != target_commit:
+            problems.append(
+                "library_commit does not match this benchmark round "
+                f"(expected {target_commit})")
+        if submission.get("run_error") and not submission.get("test"):
+            problems.append(
+                "partial run has run_error; resubmit a clean run or upload it with --test")
+
+    if problems:
+        # Preserve order while removing duplicate messages emitted by overlapping checks.
+        unique = list(dict.fromkeys(problems))
+        raise PermanentSubmissionError("; ".join(unique))
+    return submission
+
+
+def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None, *,
+              official: bool = False, expected_commit: str | None = None) -> dict:
     """Score a single submission file. Returns its leaderboard entry.
 
     Writes the scored results.json (results.schema-shaped) to results_dir/<stem>.json and
@@ -173,7 +218,12 @@ def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None) ->
     results_dir.mkdir(parents=True, exist_ok=True)
     _write_status(sub_path, "RUNNING")
     try:
-        submission = json.loads(sub_path.read_text(encoding="utf-8"))
+        try:
+            raw_submission = json.loads(sub_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeError) as e:
+            raise PermanentSubmissionError(f"invalid submission JSON: {e}") from e
+        submission = _validate_for_scoring(
+            raw_submission, official=official, expected_commit=expected_commit)
         scored, report = score_submission(submission, repo_dir)
         entry = leaderboard_entry(submission, scored)
         (results_dir / f"{sub_path.stem}.json").write_text(
@@ -182,8 +232,9 @@ def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None) ->
                       model=scored["model"], bugs_found=scored["bugs_found"],
                       verdicts=report)
         return entry
-    except Exception as e:  # any failure → FAILED status with the reason (user feedback)
-        _write_status(sub_path, "FAILED", error=str(e))
+    except Exception as e:  # isolate permanent input failures from retryable infra failures
+        retryable = not isinstance(e, PermanentSubmissionError)
+        _write_status(sub_path, "FAILED", error=str(e), retryable=retryable)
         raise
 
 
@@ -230,7 +281,9 @@ def aggregate_leaderboard(results_dir: Path) -> list[dict]:
 
 # ── local queue ───────────────────────────────────────────────────────────────
 
-def process_local(subs_dir: str, results_dir: str, repo_dir: str | None = None) -> list[dict]:
+def process_local(subs_dir: str, results_dir: str, repo_dir: str | None = None, *,
+                  official: bool = False,
+                  expected_commit: str | None = None) -> list[dict]:
     """Score all pending submissions in subs_dir; return a per-submission summary."""
     _assert_pred_version()
     subs = Path(subs_dir)
@@ -238,11 +291,18 @@ def process_local(subs_dir: str, results_dir: str, repo_dir: str | None = None) 
     summary = []
     for sub_path in _pending_submissions(subs):
         try:
-            entry = score_one(sub_path, results, repo_dir)
+            entry = score_one(
+                sub_path, results, repo_dir,
+                official=official, expected_commit=expected_commit)
             summary.append({"submission": sub_path.name, "status": "FINISHED",
                             "model": entry["model"], "bugs_found": entry["bugs_found"]})
         except Exception as e:
-            summary.append({"submission": sub_path.name, "status": "FAILED", "error": str(e)})
+            summary.append({
+                "submission": sub_path.name,
+                "status": "FAILED",
+                "error": str(e),
+                "retryable": not isinstance(e, PermanentSubmissionError),
+            })
     aggregate_leaderboard(results)
     # Public per-submission entry files (one PR each downstream); test entries are excluded.
     write_board_entries(results, results / "board")
@@ -258,6 +318,12 @@ def main() -> None:
                       help="Aggregate per-submission entry files (site/results/*.json) into "
                            "a ranked leaderboard JSON (the deployed site/results.json)")
     parser.add_argument("--repo-dir", default=None, help="problem-reductions repo (default: pred on PATH)")
+    parser.add_argument(
+        "--official", action="store_true",
+        help="Require the current schema, pinned library commit, and a clean non-test run")
+    parser.add_argument(
+        "--expected-commit", default=None,
+        help="Override the official target commit (tests/operations; default: image pin)")
     args = parser.parse_args()
 
     if args.build_board:
@@ -266,7 +332,9 @@ def main() -> None:
         print(f"built {args.build_board[1]}: {len(board)} model(s)")
         return
 
-    summary = process_local(args.local[0], args.local[1], args.repo_dir)
+    summary = process_local(
+        args.local[0], args.local[1], args.repo_dir,
+        official=args.official, expected_commit=args.expected_commit)
 
     for s in summary:
         line = f"{s['status']:8}  {s['submission']}"
@@ -276,13 +344,14 @@ def main() -> None:
             line += f"  ({s.get('error', '')})"
         print(line)
     n_failed = sum(1 for s in summary if s["status"] == "FAILED")
+    n_retryable = sum(
+        1 for s in summary if s["status"] == "FAILED" and s.get("retryable", True))
     print(f"\n{sum(1 for s in summary if s['status'] == 'FINISHED')} scored, "
-          f"{n_failed} failed")
-    # A FAILED status is an infra/verification error (crash, pred error), NOT a legit
-    # "no bug" verdict (that is FINISHED with bugs_found=0). Exit non-zero so the caller
-    # (score-from-r2.yml) stops BEFORE archiving incoming/ → processed/ — an un-scored
-    # submission must stay queued for retry, never be silently lost.
-    if n_failed:
+          f"{n_failed} failed ({n_retryable} retryable)")
+    # Permanent input failures are quarantined object-by-object by the R2 workflow. Only a
+    # retryable failure makes the process non-zero, so transient verifier/infra failures stay
+    # in incoming/ while other submissions can still be persisted and published.
+    if n_retryable:
         sys.exit(1)
 
 

@@ -34,6 +34,12 @@ The Worker only writes to R2 — no GitHub token needed. Scoring is picked up by
 `workflow_dispatch`). It scores privately and opens a PR; the maintainer reviewing +
 merging that aggregate PR is the single human checkpoint (no pre-run approval).
 
+The scorer snapshots the exact `incoming/` object keys at the start of each run and moves
+them individually afterward. Successfully scored objects go to `processed/`; permanent
+submission-format failures go to `failed/` with diagnostics under `failed-status/`;
+retryable verifier/infrastructure failures stay in `incoming/`. An upload that arrives
+during scoring is not in that run's snapshot and remains queued for the next run.
+
 Give submitters the endpoint URL + a key:
 
 ```bash
@@ -55,3 +61,5 @@ See `.github/workflows/score-from-r2.yml`.
   Worker KV lookup later without changing `prb submit`.
 - Max body 25 MB. For larger submissions, hand out an R2 presigned PUT URL
   instead of POSTing the body — not needed at current scale.
+- The intake response intentionally exposes only the opaque submission ID, not the internal
+  R2 object key.

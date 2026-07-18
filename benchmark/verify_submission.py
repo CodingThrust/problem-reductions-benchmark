@@ -139,6 +139,7 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
     total_tokens = usage_from_dict(submission.get("usage_totals")).total_tokens
     tokens_k = total_tokens / 1000 if total_tokens else (submission.get("total_tokens_k", 0.0) or 0.0)
     scored = {
+        "schema_version": submission.get("schema_version"),
         "model": submission.get("model", "unknown"),
         "library_commit": submission.get("library_commit", "unknown"),
         # Test submissions (end-to-end checks) are scored and stored privately like any
@@ -155,6 +156,13 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
         "submit_limit": submission.get("submit_limit"),
         "submit_log": submission.get("submit_log"),
     }
+    # Private operational/provenance metadata must survive scoring. In particular,
+    # backend_score rebuilds public entries from these scored files later, so dropping
+    # submitted_by here silently erased the submitter. run_error remains private and is used
+    # by the official intake gate; test runs may retain it for diagnosis.
+    for key in ("submitted_by", "created_at", "run_error", "pred_version", "agent_mode"):
+        if key in submission:
+            scored[key] = submission[key]
     return scored, report
 
 

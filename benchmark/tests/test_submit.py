@@ -10,6 +10,7 @@ from benchmark import submit as sub
 def _valid(tmp_path: Path, results=None) -> Path:
     doc = {
         "schema_version": "2.0", "model": "anthropic/test", "library_commit": "deadbeef",
+        "bugs_found": 0,
         "total_tokens_k": 10.0,
         "rules_tested": 1, "results": results if results is not None else [
             {"rule": "r1", "result": "no_certificate", "tokens_k": 1.0}],

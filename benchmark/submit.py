@@ -33,7 +33,7 @@ from pathlib import Path
 
 from benchmark.submit_ledger import schema_requires_ledger, submit_ledger_error
 
-REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit",
+REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit", "bugs_found",
                      "total_tokens_k", "rules_tested", "results")
 
 
@@ -54,6 +54,38 @@ def validate_submission(sub: dict) -> list[str]:
     for field in REQUIRED_ENVELOPE:
         if field not in sub:
             problems.append(f"missing required field: {field}")
+
+    if "model" in sub and (not isinstance(sub["model"], str) or not sub["model"].strip()):
+        problems.append("model must be a non-empty string")
+    if "library_commit" in sub and not isinstance(sub["library_commit"], str):
+        problems.append("library_commit must be a string")
+    bugs_found = sub.get("bugs_found")
+    if ("bugs_found" in sub
+            and (not isinstance(bugs_found, int) or isinstance(bugs_found, bool)
+                 or bugs_found < 0)):
+        problems.append("bugs_found must be a non-negative integer")
+    rules_tested = sub.get("rules_tested")
+    if ("rules_tested" in sub
+            and (not isinstance(rules_tested, int) or isinstance(rules_tested, bool)
+                 or rules_tested < 0)):
+        problems.append("rules_tested must be a non-negative integer")
+    tokens_k = sub.get("total_tokens_k")
+    if ("total_tokens_k" in sub
+            and (not isinstance(tokens_k, (int, float)) or isinstance(tokens_k, bool)
+                 or tokens_k < 0)):
+        problems.append("total_tokens_k must be a non-negative number")
+
+    usage_totals = sub.get("usage_totals")
+    if usage_totals is not None:
+        if not isinstance(usage_totals, dict):
+            problems.append("usage_totals must be an object")
+        else:
+            for bucket in ("input", "output", "cache_read", "cache_write"):
+                value = usage_totals.get(bucket, 0)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    problems.append(
+                        f"usage_totals.{bucket} must be a non-negative integer")
+
     results = sub.get("results")
     if not isinstance(results, list):
         problems.append("results must be a list")
@@ -63,6 +95,17 @@ def validate_submission(sub: dict) -> list[str]:
         if not isinstance(row, dict):
             problems.append(f"results[{i}] is not an object")
             continue
+        if not isinstance(row.get("rule"), str) or not row.get("rule", "").strip():
+            problems.append(f"results[{i}].rule must be a non-empty string")
+        if not isinstance(row.get("result"), str):
+            problems.append(f"results[{i}].result must be a string")
+        row_tokens = row.get("tokens_k")
+        if (not isinstance(row_tokens, (int, float)) or isinstance(row_tokens, bool)
+                or row_tokens < 0):
+            problems.append(f"results[{i}].tokens_k must be a non-negative number")
+        certificate = row.get("certificate")
+        if certificate is not None and not isinstance(certificate, dict):
+            problems.append(f"results[{i}].certificate must be an object")
         if row.get("result") == "bug_found":
             rule = row.get("rule", "?")
             if not row.get("certificate"):
