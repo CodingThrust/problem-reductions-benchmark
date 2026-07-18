@@ -6,6 +6,10 @@
   "type": "object",
   "required": ["model", "library_commit", "bugs_found", "total_tokens_k", "efficiency_bugs_per_ktok", "rules_tested", "results"],
   "properties": {
+    "schema_version": {
+      "type": ["string", "null"],
+      "description": "Submission schema version carried through for private auditability"
+    },
     "model": {
       "type": "string",
       "description": "LiteLLM model name (e.g. 'anthropic/claude-sonnet-4-6')"
@@ -22,6 +26,26 @@
     "test": {
       "type": "boolean",
       "description": "Carried through from the submission: scored + stored privately but excluded from the public leaderboard."
+    },
+    "submitted_by": {
+      "type": ["string", "null"],
+      "description": "Submitter identity carried through to the aggregate entry"
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO-8601 timestamp recorded by the runner"
+    },
+    "run_error": {
+      "type": "string",
+      "description": "Private diagnostic for a salvaged partial run"
+    },
+    "pred_version": {
+      "type": "string",
+      "description": "pred version recorded by the runner"
+    },
+    "agent_mode": {
+      "type": ["string", "null"],
+      "description": "Agent harness mode recorded by the runner"
     },
     "total_tokens_k": {
       "type": "number",
@@ -96,6 +120,15 @@
           }
         }
       }
+    },
+    "submit_limit": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Run-wide submit attempt limit retained in the private scored detail"
+    },
+    "submit_log": {
+      "type": ["array", "null"],
+      "description": "Bounded submit ledger retained in the private scored detail"
     }
   },
   "additionalProperties": false

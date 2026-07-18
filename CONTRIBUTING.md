@@ -210,15 +210,17 @@ python -m benchmark.backend_score --local submissions/ results/scored/
 
 For each `PENDING` submission it:
 
-1. flips status `PENDING → RUNNING`,
+1. validates the current schema, pinned library commit, and clean-run status, then flips
+   status `PENDING → RUNNING`,
 2. re-runs `benchmark/verify_submission.py` — which calls `verify()` on **every**
    certificate and re-derives the bundle from `pred`, so a fabricated or tampered
    counterexample is rejected, and checks new runs against the bounded submit ledger
    (legacy submissions retain trajectory provenance),
 3. recomputes `bugs_found` as **distinct rules with a confirmed bug** (many certificates
    for one rule collapse to one — no count padding),
-4. writes the scored result + a ranked `leaderboard.json`, and sets status
-   `FINISHED` (or `FAILED` with a reason).
+4. writes the scored result + a ranked `leaderboard.json`, and sets status `FINISHED`; a
+   permanent input error is isolated under R2 `failed/`, while a retryable verifier or
+   infrastructure failure remains in `incoming/` for the next run.
 
 In production this runs unattended inside GitHub Actions: `score-from-r2.yml` pulls pending
 submissions from private R2, re-verifies them, and opens a PR with the refreshed aggregate;
