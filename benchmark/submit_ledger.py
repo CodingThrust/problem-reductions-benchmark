@@ -3,17 +3,6 @@ from __future__ import annotations
 
 import json
 
-LEDGER_SCHEMA = (2, 1)
-
-
-def schema_requires_ledger(version) -> bool:
-    try:
-        parts = tuple(int(part) for part in str(version).split(".")[:2])
-    except ValueError:
-        return False
-    return parts >= LEDGER_SCHEMA
-
-
 def has_submit_ledger(submission: dict) -> bool:
     return "submit_limit" in submission or "submit_log" in submission
 
@@ -21,8 +10,7 @@ def has_submit_ledger(submission: dict) -> bool:
 def submit_ledger_error(submission: dict) -> str | None:
     """Return one structural error, or ``None`` for a valid/legacy submission."""
     if not has_submit_ledger(submission):
-        return ("schema 2.1+ submission is missing submit_limit and submit_log"
-                if schema_requires_ledger(submission.get("schema_version")) else None)
+        return None
 
     limit, log = submission.get("submit_limit"), submission.get("submit_log")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:

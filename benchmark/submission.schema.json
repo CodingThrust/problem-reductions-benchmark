@@ -4,13 +4,8 @@
   "title": "BenchmarkSubmission",
   "description": "A self-describing, rankable whole-repository benchmark submission. The bounded submit ledger lets the backend rank and re-verify every claimed counterexample.",
   "type": "object",
-  "required": ["schema_version", "model", "library_commit", "bugs_found", "total_tokens_k", "rules_tested", "results", "submit_limit", "submit_log"],
+  "required": ["model", "library_commit", "bugs_found", "total_tokens_k", "rules_tested", "results", "submit_limit", "submit_log"],
   "properties": {
-    "schema_version": {
-      "type": "string",
-      "const": "2.1",
-      "description": "Current official submission schema version. Written by the runner and enforced by the scorer; submitters do not edit it."
-    },
     "model": {
       "type": "string",
       "description": "LiteLLM model name (e.g. 'anthropic/claude-sonnet-4-6')"
@@ -76,7 +71,7 @@
           },
           "trajectory": {
             "type": "array",
-            "description": "The agent's own message history for this rule. Schema 2.1 uses submit_log for provenance; legacy submissions use this trajectory.",
+            "description": "The agent's own message history for this rule. Retained for historical data; current submissions use submit_log for provenance.",
             "items": {
               "type": "object",
               "properties": {

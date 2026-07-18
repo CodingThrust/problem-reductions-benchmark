@@ -8,13 +8,13 @@ The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submit
 
 | Contract | Current value | Ownership |
 |---|---|---|
-| Submission schema | `2.1` | The runner always writes the latest schema; submitters do not edit it. The official scorer enforces it when parsing. |
+| Submission format | [`benchmark/submission.schema.json`](benchmark/submission.schema.json) | The runner writes the current structure and the scorer parses that structure directly. The payload has no schema-version field. |
 | `problem-reductions` target | [`v0.6.0` / `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8) | Every official result is verified against this exact commit. |
 | `pred` | `0.6.0` | The runner/scorer image supplies and verifies the matching binary. |
 
-Do not hand-edit `schema_version` or `library_commit` in `submission.json`. The runner records
-both; the intake client performs a structural courtesy check, and the private scorer is the
-authority for the current schema and round pin.
+Do not hand-edit `library_commit` in `submission.json`. The runner records it; the intake
+client performs a structural courtesy check, and the private scorer is the authority for
+the current submission structure and round pin.
 
 ## What this measures
 

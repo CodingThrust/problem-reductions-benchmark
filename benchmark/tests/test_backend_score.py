@@ -23,7 +23,6 @@ def _traj(cert: dict) -> list[dict]:
 def _write_submission(subs_dir: Path, name: str, results, **over) -> Path:
     results = [{"tokens_k": 0, **row} for row in results]
     sub = {
-        "schema_version": "2.0",
         "model": over.pop("model", "anthropic/test"),
         "library_commit": "deadbeef",
         "bugs_found": over.pop("bugs_found", 0),
@@ -161,18 +160,18 @@ class TestProcessLocal:
         monkeypatch.setattr("sys.argv", ["backend_score", "--local", str(subs), str(results)])
         bs.main()  # returns normally (no SystemExit) → exit 0
 
-    def test_official_gate_rejects_wrong_schema_commit_and_partial_run(self, tmp_path):
+    def test_official_gate_rejects_missing_ledger_wrong_commit_and_partial_run(self, tmp_path):
         subs, results = tmp_path / "subs", tmp_path / "results"
         subs.mkdir()
         _write_submission(
             subs, "bad-round.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
-            schema_version="2.0", library_commit="wrong", run_error="quota exhausted")
+            library_commit="wrong", run_error="quota exhausted")
         summary = bs.process_local(
             str(subs), str(results), official=True, expected_commit="expected")
         assert summary[0]["status"] == "FAILED"
         assert summary[0]["retryable"] is False
         error = summary[0]["error"]
-        assert "schema_version 2.1" in error
+        assert "require submit_limit and submit_log" in error
         assert "library_commit" in error
         assert "partial run" in error
 
@@ -181,7 +180,7 @@ class TestProcessLocal:
         subs.mkdir()
         _write_submission(
             subs, "ok.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
-            schema_version="2.1", library_commit="expected", submit_limit=1,
+            library_commit="expected", submit_limit=1,
             submit_log=[])
         summary = bs.process_local(
             str(subs), str(results), official=True, expected_commit="expected")
@@ -192,7 +191,7 @@ class TestProcessLocal:
         subs.mkdir()
         _write_submission(
             subs, "test.json", [{"rule": "R", "result": "no_bug", "tokens_k": 0}],
-            schema_version="2.1", library_commit="expected", submit_limit=1,
+            library_commit="expected", submit_limit=1,
             submit_log=[], test=True, run_error="intentional smoke failure")
         summary = bs.process_local(
             str(subs), str(results), official=True, expected_commit="expected")

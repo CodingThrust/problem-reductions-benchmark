@@ -7,7 +7,6 @@ import pytest
 from pathlib import Path
 
 from benchmark.env_setup import DEFAULT_PINNED_COMMIT, DEFAULT_PINNED_VERSION
-from benchmark.schema_version import LATEST_SUBMISSION_SCHEMA_VERSION
 
 pytestmark = pytest.mark.judgment
 
@@ -47,7 +46,7 @@ class TestReadme:
         text = README.read_text(encoding="utf-8")
         assert DEFAULT_PINNED_COMMIT in text
         assert f"`{DEFAULT_PINNED_VERSION}`" in text
-        assert f"`{LATEST_SUBMISSION_SCHEMA_VERSION}`" in text
+        assert "no schema-version field" in text.lower()
 
 
 class TestGuide:

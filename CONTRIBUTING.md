@@ -212,7 +212,7 @@ python -m benchmark.backend_score --local submissions/ results/scored/
 
 For each `PENDING` submission it:
 
-1. validates the current schema, pinned library commit, and clean-run status, then flips
+1. validates the current submission structure, pinned library commit, and clean-run status, then flips
    status `PENDING → RUNNING`,
 2. re-runs `benchmark/verify_submission.py` — which calls `verify()` on **every**
    certificate and re-derives the bundle from `pred`, so a fabricated or tampered

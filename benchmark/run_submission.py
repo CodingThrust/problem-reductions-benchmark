@@ -38,12 +38,10 @@ from benchmark.env_setup import (
     pinned_commit,
     verify_pred_version,
 )
-from benchmark.schema_version import LATEST_SUBMISSION_SCHEMA_VERSION
 from benchmark.submit_session import SubmissionSession
 from benchmark.usage import Usage, usage_as_dict, usage_from_dict
 from benchmark.verify import count_bugs
 
-SCHEMA_VERSION = LATEST_SUBMISSION_SCHEMA_VERSION
 RUNNER_VERSION = "0.8.0"
 BACKENDS = ("mini-swe", "claude-code", "codex")
 
@@ -90,7 +88,6 @@ def build_submission(
 
     submit_attempts = submit_attempts or []
     envelope = {
-        "schema_version": SCHEMA_VERSION,
         "model": model,
         "library_commit": library_commit,
         "bugs_found": bugs,

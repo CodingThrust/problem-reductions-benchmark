@@ -52,7 +52,7 @@ class TestBuildSubmission:
     def test_envelope_fields_present(self):
         rows = [{"rule": "r1", "result": "no_certificate", "tokens_k": 2.0}]
         sub = rs.build_submission("anthropic/x", rows, library_commit="abc123")
-        for k in ("schema_version", "model", "library_commit",
+        for k in ("model", "library_commit",
                   "bugs_found", "total_tokens_k", "rules_tested",
                   "results", "efficiency_bugs_per_ktok", "submit_limit", "submit_log"):
             assert k in sub
@@ -91,7 +91,7 @@ class TestRunFake:
     def test_produces_rankable_submission(self, tmp_path):
         repo = _fake_repo(tmp_path)
         sub = rs.run("fake/model", str(repo), fake=True, library_commit="deadbeef")
-        assert sub["schema_version"]
+        assert "schema_version" not in sub
         assert sub["agent_mode"] == "whole-repo"
         assert sub["rules_tested"] == 0
         assert sub["bugs_found"] == 0
@@ -116,5 +116,4 @@ class TestSchemaValidity:
             (Path(rs.__file__).parent / "submission.schema.json").read_text())
         for field in schema["required"]:
             assert field in sub, f"missing required field: {field}"
-        assert sub["schema_version"] == schema["properties"]["schema_version"]["const"]
-        assert sub["schema_version"] == rs.SCHEMA_VERSION
+        assert "schema_version" not in schema["properties"]

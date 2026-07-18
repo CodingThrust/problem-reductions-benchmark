@@ -24,12 +24,11 @@ import sys
 from pathlib import Path
 
 from benchmark.env_setup import pinned_commit
-from benchmark.schema_version import LATEST_SUBMISSION_SCHEMA_VERSION
 from benchmark.submit import validate_submission
+from benchmark.submit_ledger import has_submit_ledger
 from benchmark.verify_submission import leaderboard_entry, score_submission
 
 STATUS_SUFFIX = ".status.json"
-OFFICIAL_SCHEMA_VERSION = LATEST_SUBMISSION_SCHEMA_VERSION
 
 
 class PermanentSubmissionError(ValueError):
@@ -181,8 +180,9 @@ def _validate_for_scoring(submission: object, *, official: bool,
 
     Basic validation applies to local and production scoring so malformed input is a
     permanent per-object failure instead of an exception that jams the whole queue.  The
-    official gate additionally fixes the schema and target commit, and rejects partial runs
-    from the public leaderboard. Test submissions may be partial because they never publish.
+    official gate additionally requires the current ledger-backed structure and target
+    commit, and rejects partial runs from the public leaderboard. Test submissions may be
+    partial because they never publish.
     """
     if not isinstance(submission, dict):
         raise PermanentSubmissionError("submission is not a JSON object")
@@ -190,9 +190,8 @@ def _validate_for_scoring(submission: object, *, official: bool,
     problems = validate_submission(submission)
 
     if official:
-        if submission.get("schema_version") != OFFICIAL_SCHEMA_VERSION:
-            problems.append(
-                f"official submissions require schema_version {OFFICIAL_SCHEMA_VERSION}")
+        if not has_submit_ledger(submission):
+            problems.append("official submissions require submit_limit and submit_log")
         target_commit = expected_commit or pinned_commit()
         if submission.get("library_commit") != target_commit:
             problems.append(
@@ -321,7 +320,8 @@ def main() -> None:
     parser.add_argument("--repo-dir", default=None, help="problem-reductions repo (default: pred on PATH)")
     parser.add_argument(
         "--official", action="store_true",
-        help="Require the current schema, pinned library commit, and a clean non-test run")
+        help="Require the current submission structure, pinned library commit, and a clean "
+             "non-test run")
     parser.add_argument(
         "--expected-commit", default=None,
         help="Override the official target commit (tests/operations; default: image pin)")
