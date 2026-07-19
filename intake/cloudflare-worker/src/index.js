@@ -6,8 +6,7 @@
 // submitter never reads the bucket. The public repo / leaderboard only ever see the
 // aggregate the scoring worker derives later (see .github/workflows/score-from-r2.yml).
 //
-// Bindings (wrangler.toml): R2 bucket `SUBMISSIONS`.
-// Migration-only secret: `PRB_API_KEY` (set with `wrangler secret put PRB_API_KEY`).
+// Bindings (wrangler.toml): R2 bucket `SUBMISSIONS` plus the Access issuer/audience.
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
@@ -74,16 +73,8 @@ export async function authenticate(request, env) {
         },
       };
     } catch {
-      // An assertion must never fall back to the legacy key after failed verification.
       return { response: json({ error: "invalid Access identity" }, 403) };
     }
-  }
-
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (env.PRB_API_KEY && token === env.PRB_API_KEY) {
-    return {
-      identity: { method: "legacy-api-key", subject: "", email: "" },
-    };
   }
   return { response: json({ error: "unauthorized" }, 401) };
 }

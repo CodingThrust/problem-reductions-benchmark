@@ -195,16 +195,17 @@ GitHub-backed Cloudflare Access application:
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
 PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
-PRB_ACCESS_TOKEN="$(cloudflared access token -app="$PRB_ACCESS_APP")" \
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
   python -m benchmark.submit --predictions out/submission.json
 #   --dry-run   validate locally, don't send
 #   --test      scored + stored privately, but excluded from the public leaderboard
 ```
 
-The token is short-lived and scoped to this Access application. Keep token acquisition
-inside command substitution because a standalone `cloudflared access login` or
-`cloudflared access token` may print it. Never substitute `gh auth token`, a GitHub PAT, or
-`GITHUB_TOKEN`.
+The token is short-lived and scoped to this Access application. Keep the login inside
+command substitution so its JWT goes directly into the one upload process instead of the
+terminal. A later upload may replace `access login --no-verbose --auto-close` with
+`access token -app` while the local Access session is still valid. Never substitute
+`gh auth token`, a GitHub PAT, or `GITHUB_TOKEN`.
 
 The CLI validates the file against `submission.schema.json`, then uploads it to a private
 store (Cloudflare R2). The maintainer's scorer re-verifies it with `pred` (see §3) and opens
