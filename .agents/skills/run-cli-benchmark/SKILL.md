@@ -52,10 +52,10 @@ numbered stage at a time when its answer controls the next branch.
    > What should happen after the run?
    >
    > 1. Keep and validate the result locally without uploading.
-   > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
-   > 3. Upload an official submission.
+   > 2. Upload an official submission.
 
-   The `$submit-benchmark-result` skill owns intake authentication and upload.
+   The `$submit-benchmark-result` skill owns submission validation, authentication, and
+   upload.
 
 5. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and three separate,
    explicit paths: clone destination, authoritative submission JSON, and log directory.
@@ -87,7 +87,7 @@ Before the first real model call, show:
 - target `PR_REF` and resolved commit;
 - submit limit;
 - clone destination, authoritative output path, and log path;
-- local/test versus official-upload goal.
+- local versus official-upload goal.
 
 State that the run can consume substantial time or credits, then get explicit confirmation.
 
@@ -114,7 +114,7 @@ attempt reaches the service, require `run_error` and inspect
 
 ## Validate and hand off
 
-Always validate the authoritative file:
+For option 1, validate the authoritative file locally:
 
 ```bash
 python -m benchmark.submit --predictions <submission.json> --dry-run
@@ -123,6 +123,6 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, CLI warnings, and
 absolute output/log paths. Preserve partial results and logs on failure.
 
-For option 2 or 3, invoke `$submit-benchmark-result` with the authoritative path and the
-already-selected test/official mode. That skill owns authentication, final confirmation,
-upload, and submission-ID reporting. Never upload merely because the run completed.
+For option 2, invoke `$submit-benchmark-result` with the authoritative path. Do not validate
+it first: that skill owns validation, authentication, final confirmation, upload, scoring,
+and PR reporting. Never upload merely because the run completed.

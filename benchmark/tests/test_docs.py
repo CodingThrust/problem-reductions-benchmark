@@ -113,15 +113,22 @@ class TestBackendRouteSeparation:
         assert "or start docker/podman" in t
 
     @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
-    def test_each_skill_exposes_three_submission_goals(self, skill):
+    def test_each_skill_exposes_only_local_and_official_goals(self, skill):
         t = _text(skill)
         assert "keep and validate" in t
-        assert "intake test" in t
         assert "official submission" in t
+        assert "intake test" not in t
 
     @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
     def test_run_skills_delegate_upload(self, skill):
-        assert "$submit-benchmark-result" in _text(skill)
+        t = _text(skill)
+        assert "$submit-benchmark-result" in t
+        assert "that skill owns validation" in t
+
+    def test_router_sends_existing_results_to_submit_skill(self):
+        t = _text(REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md")
+        assert "already has a `submission.json`" in t
+        assert "$submit-benchmark-result" in t
 
 
 class TestSubmitSkill:

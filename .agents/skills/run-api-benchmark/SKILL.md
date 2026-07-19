@@ -38,11 +38,10 @@ Do not dump every configuration question into one message.
    > What should happen after the run?
    >
    > 1. Keep and validate the result locally without uploading.
-   > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
-   > 3. Upload an official submission.
+   > 2. Upload an official submission.
 
    Default to local-only only when the caller explicitly delegates the choice. The
-   `$submit-benchmark-result` skill owns intake authentication and upload.
+   `$submit-benchmark-result` skill owns submission validation, authentication, and upload.
 
 4. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and `STAMP` (default:
    the Makefile timestamp). Show the derived authoritative path
@@ -93,7 +92,7 @@ credits and ask for explicit confirmation to start it. Then run `make run` or th
 Podman command using the detector's `RUN_FLAGS`. Pass `STAMP=<resolved-stamp>` when a fixed
 stamp was selected.
 
-Confirm the authoritative `submission.json` exists. Always validate it:
+Confirm the authoritative `submission.json` exists. For option 1, validate it locally:
 
 ```bash
 python -m benchmark.submit --predictions <submission.json> --dry-run
@@ -102,9 +101,9 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, and absolute output
 and log paths. A `run_error` means partial salvage, not a clean zero-bug completion.
 
-For option 2 or 3, invoke `$submit-benchmark-result` with the authoritative path and the
-already-selected test/official mode. That skill owns authentication, final confirmation,
-upload, and submission-ID reporting. Never upload merely because the run completed.
+For option 2, invoke `$submit-benchmark-result` with the authoritative path. Do not validate
+it first: that skill owns validation, authentication, final confirmation, upload, scoring,
+and PR reporting. Never upload merely because the run completed.
 
 An exit code 137 means the engine needs more memory. Preserve partial outputs and read
 actual command errors before recommending changes.
