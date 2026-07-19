@@ -134,6 +134,14 @@ class TestSubmitSkill:
         assert "github primary email" in t
         assert "authorization list by a maintainer" in t
 
+    def test_submit_skill_triggers_scoring_without_reset(self):
+        t = _text(SUBMIT_SKILL)
+        assert "gh workflow run score-from-r2.yml" in t
+        assert "--repo codingthrust/problem-reductions-benchmark" in t
+        assert "-f reset_results=false" in t
+        assert "never set `reset_results=true`" in t
+        assert "actions write permission" in t
+
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
     def test_public_submission_docs_have_no_shared_intake_key(self, path):

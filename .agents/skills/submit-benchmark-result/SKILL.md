@@ -95,3 +95,25 @@ stop. For 413 or 429, stop and report the error.
 On success, report the `submission_id`, model, and endpoint. Say that `accepted` means
 queued privately, not scored or published. Keep the local submission until scoring is
 confirmed.
+
+## 6. Trigger scoring
+
+After reporting an accepted submission, trigger the scoring workflow once. If GitHub CLI
+is installed and authenticated, run:
+
+```bash
+gh workflow run score-from-r2.yml \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --ref main \
+  -f reset_results=false
+```
+
+Never set `reset_results=true` for a submission. If `gh` is unavailable, give the user the
+[workflow page](https://github.com/CodingThrust/problem-reductions-benchmark/actions/workflows/score-from-r2.yml)
+and ask them to select **Run workflow** on `main` without enabling `reset_results`.
+
+The intake authorization list and GitHub Actions permissions are separate. If GitHub hides
+the **Run workflow** button or returns 403, explain that a repository maintainer or a
+collaborator with Actions write permission must trigger it. Do not upload again: the
+accepted submission remains privately queued and the daily scheduled workflow will process
+it if nobody triggers a run manually.
