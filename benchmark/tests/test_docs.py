@@ -3,8 +3,11 @@ Structural checks for the two root docs: README.md (overview) and CONTRIBUTING.m
 (the single run-and-submit guide). No rendering, no external calls.
 All tests are marked @pytest.mark.judgment.
 """
-import pytest
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from benchmark.env_setup import PINNED_COMMIT, PINNED_PRED_VERSION
 
@@ -17,6 +20,7 @@ ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
 API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
 CLI_SKILL = REPO_ROOT / ".agents/skills/run-cli-benchmark/SKILL.md"
 SUBMIT_SKILL = REPO_ROOT / ".agents/skills/submit-benchmark-result/SKILL.md"
+TRIGGER_SCORING = SUBMIT_SKILL.parent / "scripts/trigger-scoring.sh"
 SCORER_WORKFLOW = REPO_ROOT / ".github/workflows/score-from-r2.yml"
 SUBMISSIONS_README = REPO_ROOT / "submissions/README.md"
 SITE_INDEX = REPO_ROOT / "site/index.html"
@@ -25,6 +29,29 @@ INTAKE_README = REPO_ROOT / "intake/cloudflare-worker/README.md"
 
 def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8").lower()
+
+
+def _run_trigger_with_fake_gh(
+        tmp_path, gh_cases,
+        submission_id="d78aad10-e44a-40b9-b57c-093a7bb47330"):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    gh = fake_bin / "gh"
+    gh.write_text(
+        f'''#!/bin/sh
+case "$1 $2" in
+  "auth status") exit 0 ;;
+  "api user") echo submitter ;;
+{gh_cases}
+  *) exit 1 ;;
+esac
+''',
+        encoding="utf-8")
+    gh.chmod(0o755)
+    env = os.environ | {"PATH": f"{fake_bin}:{os.environ['PATH']}"}
+    return subprocess.run(
+        ["bash", str(TRIGGER_SCORING), submission_id],
+        text=True, capture_output=True, env=env, check=False)
 
 
 class TestReadme:
@@ -100,6 +127,7 @@ class TestBackendRouteSeparation:
 class TestSubmitSkill:
     def test_submit_skill_exists(self):
         assert SUBMIT_SKILL.exists(), "submit-benchmark-result skill missing"
+        assert os.access(TRIGGER_SCORING, os.X_OK), "trigger-scoring.sh must be executable"
 
     def test_submit_skill_validates_before_upload(self):
         t = _text(SUBMIT_SKILL)
@@ -116,7 +144,8 @@ class TestSubmitSkill:
         t = _text(SUBMIT_SKILL)
         assert "cloudflared access login" in t
         assert "prb_access_token" in t
-        assert 'test -n "$prb_access_token"' in t
+        assert '&& [ -n "$prb_access_token" ]' in t
+        assert "submission was not uploaded" in t
         assert "unset prb_access_token" in t
         assert "gh auth token" in t
         assert "github pat" in t
@@ -136,16 +165,42 @@ class TestSubmitSkill:
 
     def test_submit_skill_triggers_scoring_without_reset(self):
         t = _text(SUBMIT_SKILL)
-        assert "gh workflow run score-from-r2.yml" in t
-        assert "--repo codingthrust/problem-reductions-benchmark" in t
+        assert "scripts/trigger-scoring.sh" in t
         assert "reset_results" not in t
         assert "actions write permission" in t
-        assert 'run_id="${run_url##*/}"' in t
-        assert "gh run watch" in t
-        assert 'short_id="${submission_id:0:8}"' in t
-        assert "--json headrefname,url" in t
-        assert "return the matching pr url" in t
-        assert "do not return an unrelated latest pr" in t
+        assert "return that pr url" in t
+
+    def test_trigger_scoring_returns_matching_pr(self, tmp_path):
+        marker = tmp_path / "pr-list-called"
+        result = _run_trigger_with_fake_gh(
+            tmp_path,
+            f'''  "workflow run") echo https://github.com/CodingThrust/problem-reductions-benchmark/actions/runs/123 ;;
+  "run watch") exit 0 ;;
+  "pr list") : > "{marker}"; echo https://github.com/CodingThrust/problem-reductions-benchmark/pull/456 ;;''')
+        assert result.returncode == 0
+        assert result.stdout.rstrip().endswith("/pull/456")
+        assert marker.exists()
+
+    def test_trigger_scoring_stops_before_pr_lookup_when_run_fails(self, tmp_path):
+        marker = tmp_path / "pr-list-called"
+        result = _run_trigger_with_fake_gh(
+            tmp_path,
+            f'''  "workflow run") echo https://github.com/CodingThrust/problem-reductions-benchmark/actions/runs/123 ;;
+  "run watch") exit 1 ;;
+  "pr list") : > "{marker}"; exit 0 ;;''')
+        assert result.returncode == 1
+        assert "actions/runs/123" in result.stderr
+        assert not marker.exists()
+
+    def test_trigger_scoring_recovers_run_url_when_dispatch_prints_none(self, tmp_path):
+        result = _run_trigger_with_fake_gh(
+            tmp_path,
+            '''  "workflow run") exit 0 ;;
+  "run list") echo https://github.com/CodingThrust/problem-reductions-benchmark/actions/runs/789 ;;
+  "run watch") exit 0 ;;
+  "pr list") echo https://github.com/CodingThrust/problem-reductions-benchmark/pull/987 ;;''')
+        assert result.returncode == 0
+        assert result.stdout.rstrip().endswith("/pull/987")
 
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])

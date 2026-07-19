@@ -33,14 +33,18 @@ Do not submit a result containing `run_error`. Report the error and stop.
 
 ## 2. Confirm the upload
 
-Immediately before uploading, show:
+Immediately before uploading, show this confirmation with the real values filled in:
 
-- endpoint hostname;
-- absolute file path;
-- model and claimed bug count;
+> Ready to officially submit this benchmark result:
+> - Destination: `intake.prb-bench.workers.dev`
+> - File: `<absolute path to submission.json>`
+> - Model: `<model>`
+> - Claimed bugs: `<count>`
+>
+> This private submission file will leave the machine and be uploaded to the benchmark's
+> private storage. Confirm submission?
 
-State that this is an official submission and that the private file will leave the machine,
-then obtain explicit confirmation.
+Wait for explicit confirmation before continuing.
 
 ## 3. Prepare authentication
 
@@ -71,11 +75,18 @@ Use the official intake:
 ```bash
 export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
 PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
-PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")"
-test -n "$PRB_ACCESS_TOKEN"
-PRB_ACCESS_TOKEN="$PRB_ACCESS_TOKEN" \
-  python3 -m benchmark.submit --predictions <submission.json>
-unset PRB_ACCESS_TOKEN
+if PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
+    && [ -n "$PRB_ACCESS_TOKEN" ]; then
+  PRB_ACCESS_TOKEN="$PRB_ACCESS_TOKEN" \
+    python3 -m benchmark.submit --predictions "<submission.json>"
+  UPLOAD_STATUS=$?
+  unset PRB_ACCESS_TOKEN
+  [ "$UPLOAD_STATUS" -eq 0 ]
+else
+  unset PRB_ACCESS_TOKEN
+  echo "Cloudflare Access login failed; submission was not uploaded." >&2
+  false
+fi
 ```
 
 The login opens GitHub in the user's browser. If no browser opens, give the user the login
@@ -99,24 +110,10 @@ confirmed.
 ## 6. Trigger scoring
 
 After reporting an accepted submission, trigger the scoring workflow once. If GitHub CLI
-is installed and authenticated, run:
+is installed, run the bundled helper with the `submission_id` returned by the upload:
 
 ```bash
-SUBMISSION_ID="<submission_id returned by the upload>"
-RUN_URL="$(gh workflow run score-from-r2.yml \
-  --repo CodingThrust/problem-reductions-benchmark \
-  --ref main)"
-RUN_ID="${RUN_URL##*/}"
-gh run watch "$RUN_ID" \
-  --repo CodingThrust/problem-reductions-benchmark \
-  --exit-status --compact
-
-SHORT_ID="${SUBMISSION_ID:0:8}"
-gh pr list \
-  --repo CodingThrust/problem-reductions-benchmark \
-  --state all --limit 100 \
-  --json headRefName,url \
-  --jq ".[] | select(.headRefName | endswith(\"--${SHORT_ID}\")) | .url"
+bash <skill-directory>/scripts/trigger-scoring.sh "<submission_id>"
 ```
 
 If `gh` is unavailable, give the user the
@@ -129,8 +126,7 @@ collaborator with Actions write permission must trigger it. Do not upload again:
 accepted submission remains privately queued and the daily scheduled workflow will process
 it if nobody triggers a run manually.
 
-When the triggered run succeeds, return the matching PR URL. Match it using the first eight
-characters of this upload's `submission_id`, which appear at the end of the leaderboard
-branch name; do not return an unrelated latest PR. If the run fails, return its URL and the
-failure. If it succeeds but no matching PR exists, return the run URL and explain that no PR
-was created instead of guessing a link.
+The helper validates or recovers the run URL, stops if the run fails, and prints the PR that
+matches this upload's `submission_id` as its final line. Return that PR URL to the user. If
+the helper reports a run failure or no matching PR, return its run URL and explanation
+instead of guessing a link.
