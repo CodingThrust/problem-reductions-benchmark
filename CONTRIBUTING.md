@@ -182,6 +182,11 @@ Submission is a **CLI upload** — no web form, and the file never enters git. C
 - upload an intake test with `--test` (privately scored, excluded from the leaderboard);
 - upload an official submission with neither flag.
 
+Use `$submit-benchmark-result` when the result already exists. It validates the authoritative
+file, preserves test/official intent, handles the authentication mode actually deployed by
+the intake, asks before the external write, and reports the opaque submission ID. Submitters
+do not need repository write access, R2 access, or permission to run the scoring workflow.
+
 For either upload, get the endpoint URL from the maintainer and authenticate through the
 GitHub-backed Cloudflare Access application:
 

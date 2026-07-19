@@ -55,7 +55,9 @@ Add its direct dispatch case to `_run_backend()` in `benchmark/run_submission.py
 The backend is supported only after its adapter tests pass and
 `harness-evaluation.json` reports `verdict: reliable`; command success alone is not enough.
 
-A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`) and uploaded with `python -m benchmark.submit`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`). Use
+`$submit-benchmark-result` to validate and upload an existing result without repository or
+R2 access. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 During evaluation, counterexamples use a different, agent-only command:
 
