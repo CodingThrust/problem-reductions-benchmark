@@ -85,7 +85,10 @@ command. Never print or ask for the token. Do not substitute a GitHub PAT, `gh a
 or `GITHUB_TOKEN`.
 
 Upload only once. Do not retry a timeout because the first request may already be queued.
-For HTTP 401/403, re-authenticate; for 413 or 429, stop and report the error.
+For HTTP 401, re-authenticate. If the login page says access is denied or the upload returns
+HTTP 403, explain that the GitHub account is not authorized. Tell the user to ensure their
+GitHub primary email has been added to the intake authorization list by a maintainer, then
+stop. For 413 or 429, stop and report the error.
 
 ## 5. Report the result
 

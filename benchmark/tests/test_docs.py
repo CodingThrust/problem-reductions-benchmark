@@ -128,6 +128,12 @@ class TestSubmitSkill:
         assert "brew install cloudflared" in t
         assert "obtain confirmation before running an installer" in t
 
+    def test_submit_skill_explains_access_denial(self):
+        t = _text(SUBMIT_SKILL)
+        assert "http 403" in t
+        assert "github primary email" in t
+        assert "authorization list by a maintainer" in t
+
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
     def test_public_submission_docs_have_no_shared_intake_key(self, path):
