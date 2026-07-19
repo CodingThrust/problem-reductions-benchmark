@@ -182,16 +182,22 @@ Submission is a **CLI upload** — no web form, and the file never enters git. C
 - upload an intake test with `--test` (privately scored, excluded from the leaderboard);
 - upload an official submission with neither flag.
 
-For either upload, get the endpoint URL and token from the maintainer, then:
+For either upload, get the endpoint URL from the maintainer and authenticate through the
+GitHub-backed Cloudflare Access application:
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
-export PRB_API_KEY=<token>                 # from the maintainer
-
-python -m benchmark.submit --predictions out/submission.json
+PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
+PRB_ACCESS_TOKEN="$(cloudflared access token -app="$PRB_ACCESS_APP")" \
+  python -m benchmark.submit --predictions out/submission.json
 #   --dry-run   validate locally, don't send
 #   --test      scored + stored privately, but excluded from the public leaderboard
 ```
+
+The token is short-lived and scoped to this Access application. Keep token acquisition
+inside command substitution because a standalone `cloudflared access login` or
+`cloudflared access token` may print it. Never substitute `gh auth token`, a GitHub PAT, or
+`GITHUB_TOKEN`.
 
 The CLI validates the file against `submission.schema.json`, then uploads it to a private
 store (Cloudflare R2). The maintainer's scorer re-verifies it with `pred` (see §3) and opens

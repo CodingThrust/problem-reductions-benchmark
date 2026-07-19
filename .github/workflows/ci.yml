@@ -24,6 +24,24 @@ jobs:
       - name: Run unit tests (judgment + non-integration)
         run: pytest -v -m "not integration"
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: intake/cloudflare-worker/package-lock.json
+
+      - name: Install intake Worker dependencies
+        working-directory: intake/cloudflare-worker
+        run: npm ci
+
+      - name: Test intake Worker
+        working-directory: intake/cloudflare-worker
+        run: npm test
+
+      - name: Bundle intake Worker
+        working-directory: intake/cloudflare-worker
+        run: npm run check
+
       # Calibration needs the real `pred` binary (Rust, built from problem-reductions at
       # PR_REF). The bare runner has no pred, so run it inside the scoring image — the same
       # pinned-pred environment used to score submissions. The image's default CMD is the

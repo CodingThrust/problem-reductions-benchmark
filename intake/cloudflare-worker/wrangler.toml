@@ -1,6 +1,13 @@
 name = "intake"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
+preview_urls = true
+
+# Cloudflare Access application configuration. These identify the issuer and application;
+# neither value is a secret. The Worker verifies Cf-Access-Jwt-Assertion against both.
+[vars]
+TEAM_DOMAIN = "https://dawn-cloud-cfed.cloudflareaccess.com"
+POLICY_AUD = "9dbeab04b28ab3bfeeebf0014e13a221ccb1a8ccd2858055c867579b7393d880"
 
 # Private R2 bucket that holds raw submissions (the answer key). Create it first:
 #   wrangler r2 bucket create prb-submissions
@@ -8,7 +15,7 @@ compatibility_date = "2026-01-01"
 binding = "SUBMISSIONS"
 bucket_name = "prb-submissions"
 
-# Secret (NOT stored here) — the bearer token `prb submit` sends:
+# Migration-only secret (NOT stored here) — remove after the Access cutover:
 #   wrangler secret put PRB_API_KEY
 # (Scoring is triggered by score-from-r2.yml's daily cron, so the Worker needs no GitHub
 #  token — it only writes to R2.)
