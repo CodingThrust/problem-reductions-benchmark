@@ -344,8 +344,10 @@ make run         <span class="c"># → ./out/submission.json</span></pre>
       <div class="step"><div class="num">2</div><div>
         <h4>Upload it</h4>
         <p>The backend picks it up and re-verifies every certificate.</p>
-        <pre class="cmd">export PRB_SUBMIT_URL=… PRB_API_KEY=…
-python -m benchmark.submit --predictions out/submission.json</pre>
+        <pre class="cmd">export PRB_SUBMIT_URL=&lt;intake endpoint&gt;
+PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
+  python -m benchmark.submit --predictions out/submission.json</pre>
       </div></div>
     </div>
     <p class="note" style="margin-top:14px">Self-reported counts are advisory; only confirmed distinct-rule bugs are ranked.</p>

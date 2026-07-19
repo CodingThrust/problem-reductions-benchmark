@@ -15,7 +15,5 @@ POLICY_AUD = "9dbeab04b28ab3bfeeebf0014e13a221ccb1a8ccd2858055c867579b7393d880"
 binding = "SUBMISSIONS"
 bucket_name = "prb-submissions"
 
-# Migration-only secret (NOT stored here) — remove after the Access cutover:
-#   wrangler secret put PRB_API_KEY
-# (Scoring is triggered by score-from-r2.yml's daily cron, so the Worker needs no GitHub
-#  token — it only writes to R2.)
+# Scoring is triggered by score-from-r2.yml's daily cron, so the Worker needs no GitHub
+# token or intake secret — it only verifies Access identity and writes to R2.

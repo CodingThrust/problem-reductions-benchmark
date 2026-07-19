@@ -6,8 +6,7 @@
 // submitter never reads the bucket. The public repo / leaderboard only ever see the
 // aggregate the scoring worker derives later (see .github/workflows/score-from-r2.yml).
 //
-// Bindings (wrangler.toml): R2 bucket `SUBMISSIONS`.
-// Migration-only secret: `PRB_API_KEY` (set with `wrangler secret put PRB_API_KEY`).
+// Bindings (wrangler.toml): R2 bucket `SUBMISSIONS` plus the Access issuer/audience.
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
@@ -19,14 +18,15 @@ export default {
     if (request.method !== "POST") return json({ error: "POST only" }, 405);
     if (new URL(request.url).pathname !== "/submit") return json({ error: "not found" }, 404);
 
-    const authentication = await authenticate(request, env);
-    if (authentication.response) return authentication.response;
-    const identity = authentication.identity;
-
     const declaredBytes = Number(request.headers.get("content-length"));
     if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BYTES) {
       return json({ error: "submission too large" }, 413);
     }
+
+    const authentication = await authenticate(request, env);
+    if (authentication.response) return authentication.response;
+    const identity = authentication.identity;
+
     const bodyBytes = await request.arrayBuffer();
     if (bodyBytes.byteLength > MAX_BYTES) return json({ error: "submission too large" }, 413);
     const body = new TextDecoder().decode(bodyBytes);
@@ -46,7 +46,6 @@ export default {
       customMetadata: {
         model: String(sub.model).slice(0, 128),
         submitted_by: String(sub.submitted_by || "").slice(0, 128),
-        auth_method: identity.method,
         authenticated_subject: identity.subject,
         authenticated_email: identity.email,
       },
@@ -68,22 +67,13 @@ export async function authenticate(request, env) {
       const payload = await verifyAccessAssertion(assertion, env);
       return {
         identity: {
-          method: "cloudflare-access",
           subject: String(payload.sub || "").slice(0, 128),
           email: String(payload.email || "").slice(0, 128),
         },
       };
     } catch {
-      // An assertion must never fall back to the legacy key after failed verification.
       return { response: json({ error: "invalid Access identity" }, 403) };
     }
-  }
-
-  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (env.PRB_API_KEY && token === env.PRB_API_KEY) {
-    return {
-      identity: { method: "legacy-api-key", subject: "", email: "" },
-    };
   }
   return { response: json({ error: "unauthorized" }, 401) };
 }

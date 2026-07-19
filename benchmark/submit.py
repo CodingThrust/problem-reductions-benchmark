@@ -4,11 +4,11 @@
 Uploads a run's ``submission.json`` (produced by ``make run``) to the benchmark's
 serverless intake endpoint, which deposits it into the PRIVATE submission store. The
 submission body carries the answer key (certificates + submit ledger), so it never goes to a
-public repo — it travels over HTTPS to the endpoint, which holds the write token.
+public repo — it travels over HTTPS through GitHub-backed Cloudflare Access.
 
     export PRB_SUBMIT_URL=https://<your-worker>/submit
-    export PRB_ACCESS_TOKEN="$(cloudflared access token -app=https://<your-worker>)"
-    python -m benchmark.submit --predictions out/submission.json
+    PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close https://<your-worker>)" \
+      python -m benchmark.submit --predictions out/submission.json
     # → prints the submission id returned by the endpoint
 
 The client validates the file locally FIRST (valid JSON, required envelope fields, and —
@@ -19,7 +19,6 @@ courtesy gate. Use ``--dry-run`` to validate without sending.
 
 HTTP contract (endpoint side):
     POST <url>   Cf-Access-Token: <app-scoped JWT>   Content-Type: application/json
-    legacy:      Authorization: Bearer <PRB_API_KEY>
     body    = the submission.json object
     200/201 → {"submission_id": "...", "status": "accepted", ...}
     4xx/5xx → {"error": "..."}  (or a non-JSON body, surfaced as text)
@@ -121,15 +120,6 @@ def validate_submission(sub: dict) -> list[str]:
     return problems
 
 
-def _auth_headers(api_key: str | None, access_token: str | None) -> dict[str, str]:
-    """Build one authentication header, preferring the scoped Access credential."""
-    if access_token:
-        return {"Cf-Access-Token": access_token}
-    if api_key:
-        return {"Authorization": f"Bearer {api_key}"}
-    return {}
-
-
 def _post(url: str, payload: bytes, auth_headers: dict[str, str],
           timeout: float = 60.0) -> tuple[int, dict | str]:
     """POST raw JSON bytes. Returns (status_code, parsed-or-text body).
@@ -158,8 +148,8 @@ def _maybe_json(text: str):
         return text
 
 
-def submit(path: Path, url: str | None, api_key: str | None = None, *,
-           access_token: str | None = None, dry_run: bool = False,
+def submit(path: Path, url: str | None, *, access_token: str | None = None,
+           dry_run: bool = False,
            timeout: float = 60.0, mark_test: bool = False) -> dict:
     """Validate and (unless dry_run) upload a submission. Returns a result dict.
 
@@ -181,13 +171,12 @@ def submit(path: Path, url: str | None, api_key: str | None = None, *,
 
     if not url:
         raise ValueError("no endpoint URL — set PRB_SUBMIT_URL or pass --url")
-    auth_headers = _auth_headers(api_key, access_token)
-    if not auth_headers:
-        raise ValueError("no intake credential — set PRB_ACCESS_TOKEN (preferred) or "
-                         "PRB_API_KEY (legacy)")
+    if not access_token:
+        raise ValueError("no intake credential — set PRB_ACCESS_TOKEN")
 
     payload = json.dumps(sub).encode("utf-8")
-    status, body = _post(url, payload, auth_headers, timeout=timeout)
+    status, body = _post(
+        url, payload, {"Cf-Access-Token": access_token}, timeout=timeout)
     if not (200 <= status < 300):
         reason = body.get("error") if isinstance(body, dict) else body
         raise ValueError(f"endpoint returned HTTP {status}: {reason}")
@@ -206,8 +195,6 @@ def main() -> None:
                         help="Path to submission.json (from `make run`)")
     parser.add_argument("--url", default=os.environ.get("PRB_SUBMIT_URL"),
                         help="Intake endpoint URL (env PRB_SUBMIT_URL)")
-    parser.add_argument("--api-key", default=os.environ.get("PRB_API_KEY"),
-                        help="Legacy bearer token (env PRB_API_KEY); prefer PRB_ACCESS_TOKEN")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate the file locally and report what would be sent; no upload")
     parser.add_argument("--test", action="store_true",
@@ -221,7 +208,7 @@ def main() -> None:
         parser.error(f"no such file: {path}")
 
     try:
-        result = submit(path, args.url, args.api_key,
+        result = submit(path, args.url,
                         access_token=os.environ.get("PRB_ACCESS_TOKEN"), dry_run=args.dry_run,
                         timeout=args.timeout, mark_test=args.test)
     except (ValueError, json.JSONDecodeError, OSError) as e:

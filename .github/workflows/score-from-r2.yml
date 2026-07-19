@@ -79,7 +79,7 @@ jobs:
           # may be archived later; an object arriving while scoring remains in incoming/.
           aws s3api list-objects-v2 --bucket "$BUCKET" --prefix incoming/ \
             --endpoint-url "$R2_ENDPOINT" --query 'Contents[].Key' --output json \
-            | jq -r '.[] | select(endswith(".json"))' > queue-manifest.txt
+            | jq -r '.[]? | select(endswith(".json"))' > queue-manifest.txt
           while IFS= read -r key; do
             [ -n "$key" ] || continue
             rel="${key#incoming/}"

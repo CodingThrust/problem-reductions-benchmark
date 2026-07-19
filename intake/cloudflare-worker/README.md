@@ -21,10 +21,7 @@ npx wrangler login
 # 1. private bucket for raw submissions
 npx wrangler r2 bucket create prb-submissions
 
-# 2. migration-only bearer token; remove it after the Access test succeeds
-npx wrangler secret put PRB_API_KEY
-
-# 3. deploy the legacy-compatible Worker once
+# 2. deploy the Access-only Worker
 npm run deploy
 # → registers your workers.dev subdomain (e.g. prb-bench) and prints the endpoint,
 #   e.g. https://intake.prb-bench.workers.dev
@@ -33,10 +30,9 @@ npm run deploy
 ### GitHub-backed Cloudflare Access
 
 Create a GitHub identity provider under **Zero Trust → Integrations → Identity providers**.
-Then create a self-hosted Access application for the `intake` Worker. During migration,
-protect the preview hostname first. Its Allow policy should select the intended GitHub
-organization/team, or exact GitHub-verified emails together with `Login Methods: GitHub`;
-never use `Everyone`.
+Then create a self-hosted Access application for the `intake` Worker. Its Allow policy
+should select the intended GitHub organization/team, or exact GitHub-verified emails
+together with `Login Methods: GitHub`; never use `Everyone`.
 
 The checked-in `TEAM_DOMAIN` and `POLICY_AUD` in `wrangler.toml` identify the configured
 Access organization and application. They are public identifiers, not credentials. The
@@ -51,8 +47,8 @@ npm run preview
 
 The Worker validates the `Cf-Access-Jwt-Assertion` signature, issuer, audience, and expiry
 against Cloudflare's rotating JWKS. It records the verified Access subject/email separately
-from the submitter-claimed `submitted_by` field. If an assertion is present but invalid, the
-request is rejected and cannot fall back to `PRB_API_KEY`.
+from the submitter-claimed `submitted_by` field. A missing or invalid assertion is rejected;
+there is no shared intake credential.
 
 The Worker only writes to R2 — no GitHub token needed. Scoring is picked up by
 `.github/workflows/score-from-r2.yml` on its **daily cron** (or trigger it manually via
@@ -69,25 +65,16 @@ Submitters authenticate in their own browser and obtain a short-lived, applicati
 token. No maintainer-issued secret or GitHub personal access token is involved:
 
 ```bash
-export PRB_SUBMIT_URL=https://access-auth-intake.prb-bench.workers.dev/submit
+export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
 PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
-PRB_ACCESS_TOKEN="$(cloudflared access token -app="$PRB_ACCESS_APP")" \
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
   python3 -m benchmark.submit --predictions out/submission.json --test
 ```
 
 Remove `--test` only when the run is ready to become an official leaderboard submission.
-Keep the `cloudflared access token` call inside command substitution: running
-`cloudflared access login` or `cloudflared access token` by itself may print the JWT. Do not
-print, persist, or pass `PRB_ACCESS_TOKEN` as a command-line argument. The client prefers it
-over an ambient legacy `PRB_API_KEY` and never sends both.
-
-After an end-to-end preview test succeeds, change the Access destination from Preview Worker
-to the production `intake` Worker, deploy the tested version with `npm run deploy`, repeat the
-`--test` upload against the production URL, and remove the migration secret:
-
-```bash
-npx wrangler secret delete PRB_API_KEY
-```
+Keep token acquisition inside command substitution so the JWT goes directly into the upload
+process instead of the terminal. While the local Access session is valid, a later upload may
+use `cloudflared access token -app="$PRB_ACCESS_APP"` in the same position.
 
 ## R2 credentials for the scoring worker
 
@@ -98,7 +85,6 @@ R2 → *Manage API Tokens*, create an **Object Read & Write** token, then add th
 See `.github/workflows/score-from-r2.yml`.
 
 ## Notes
-- `PRB_API_KEY` is only a migration fallback for requests with no Access assertion.
 - `gh auth token`, GitHub PATs, and `GITHUB_TOKEN` are never intake credentials.
 - Max body 25 MB. For larger submissions, hand out an R2 presigned PUT URL
   instead of POSTing the body — not needed at current scale.

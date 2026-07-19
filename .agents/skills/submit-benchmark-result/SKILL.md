@@ -54,25 +54,24 @@ offer local-only or test upload instead.
 Require `PRB_SUBMIT_URL` from the repository documentation or maintainer. Never ask the user
 to paste any token into chat, print an environment variable, or commit credentials.
 
-Prefer GitHub-backed Cloudflare Access when the deployed client documents
-`PRB_ACCESS_TOKEN`:
+Use GitHub-backed Cloudflare Access through `PRB_ACCESS_TOKEN`:
 
 1. Require `cloudflared` locally.
-2. Obtain the application-scoped token only inside the confirmed upload command, for example
-   `PRB_ACCESS_TOKEN="$(cloudflared access token -app=<application-url>)" <submit-command>`.
-   `cloudflared` opens the configured GitHub login in a browser when needed.
-3. Never run `cloudflared access login` or `cloudflared access token` standalone because
-   some versions print the JWT. Pass it through the client-supported environment variable
-   for that one process only; do not display, persist, or put it in a command-line flag.
+2. For a new session, obtain the application-scoped token only inside the confirmed upload
+   command: `PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close <application-url>)" <submit-command>`.
+   `cloudflared` opens the configured GitHub login.
+3. A later upload may use `cloudflared access token -app=<application-url>` inside the same
+   command substitution while the local Access session remains valid.
+4. Never run either token-producing command standalone. Pass its stdout directly through
+   the client-supported environment variable; do not display it, save it yourself, or put it
+   in a command-line flag.
 
 Do not substitute `gh auth token`, a GitHub personal access token, or `GITHUB_TOKEN`; the
 intake must never receive the user's general GitHub credential.
 
-If the deployed client does not yet support Access, use the legacy `PRB_API_KEY` path only
-when a credential is already configured locally and the maintainer confirms that endpoint
-mode is enabled. If it is absent, stop and report that self-service authentication is not
-deployed. Ask the maintainer to enable GitHub Access or issue an out-of-band per-user or
-one-time intake credential; never request a shared long-lived key in chat.
+If Cloudflare Access is not deployed or the user is not allowed by its policy, stop and ask
+the maintainer to fix the Access application. There is no shared-key fallback. Never request
+an intake key in chat.
 
 ## 4. Confirm and upload once
 

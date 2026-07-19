@@ -10,9 +10,10 @@ Use the CLI intake — it uploads to a private store; only the aggregate becomes
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
-export PRB_API_KEY=<token>                 # from the maintainer
 make run                                   # → out/submission.json
-python -m benchmark.submit --predictions out/submission.json
+PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
+  python -m benchmark.submit --predictions out/submission.json
 ```
 
 Add `--test` to run an end-to-end check that is scored + stored privately but excluded from

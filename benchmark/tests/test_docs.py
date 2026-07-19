@@ -17,6 +17,10 @@ ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
 API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
 CLI_SKILL = REPO_ROOT / ".agents/skills/run-cli-benchmark/SKILL.md"
 SUBMIT_SKILL = REPO_ROOT / ".agents/skills/submit-benchmark-result/SKILL.md"
+SCORER_WORKFLOW = REPO_ROOT / ".github/workflows/score-from-r2.yml"
+SUBMISSIONS_README = REPO_ROOT / "submissions/README.md"
+SITE_INDEX = REPO_ROOT / "site/index.html"
+INTAKE_README = REPO_ROOT / "intake/cloudflare-worker/README.md"
 
 
 def _text(path: Path) -> str:
@@ -106,8 +110,18 @@ class TestSubmitSkill:
 
     def test_submit_skill_keeps_github_credentials_out_of_intake(self):
         t = _text(SUBMIT_SKILL)
-        prose = " ".join(t.split())
         assert "github-backed cloudflare access" in t
         assert "gh auth token" in t
         assert "personal access token" in t
-        assert "self-service authentication is not deployed" in prose
+        assert "cloudflare access is not deployed" in t
+
+    @pytest.mark.parametrize(
+        "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
+    def test_public_submission_docs_have_no_shared_intake_key(self, path):
+        assert "PRB_API_KEY" not in path.read_text(encoding="utf-8")
+
+
+class TestScorerWorkflow:
+    def test_empty_r2_queue_is_valid(self):
+        text = SCORER_WORKFLOW.read_text(encoding="utf-8")
+        assert "jq -r '.[]? | select(endswith(\".json\"))'" in text

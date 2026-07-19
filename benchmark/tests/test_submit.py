@@ -67,51 +67,43 @@ class TestValidate:
 class TestSubmit:
     def test_dry_run_does_not_send(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post", lambda *a, **k: pytest.fail("must not POST on dry-run"))
-        out = sub.submit(_valid(tmp_path, results=[_bug_row()]), "https://x/submit", "k", dry_run=True)
+        out = sub.submit(_valid(tmp_path, results=[_bug_row()]),
+                         "https://x/submit", dry_run=True)
         assert out["claimed_bugs"] == 1 and "dry-run" in out["status"]
 
     def test_invalid_submission_raises_before_network(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post", lambda *a, **k: pytest.fail("must not POST invalid"))
         p = _valid(tmp_path, results=[_bug_row(with_cert=False, with_traj=False)])
         with pytest.raises(ValueError, match="certificate"):
-            sub.submit(p, "https://x/submit", "k")
+            sub.submit(p, "https://x/submit")
 
     def test_success_returns_body(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post",
                             lambda url, payload, headers, timeout=60.0: (
                                 201, {"submission_id": "abc", "status": "accepted"}))
-        out = sub.submit(_valid(tmp_path), "https://x/submit", "k")
+        out = sub.submit(_valid(tmp_path), "https://x/submit", access_token="access-jwt")
         assert out["submission_id"] == "abc"
 
-    def test_access_token_is_preferred_over_legacy_key(self, tmp_path, monkeypatch):
+    def test_access_token_uses_access_header(self, tmp_path, monkeypatch):
         def post(url, payload, headers, timeout=60.0):
             assert headers == {"Cf-Access-Token": "access-jwt"}
             return 201, {"submission_id": "abc", "status": "accepted"}
 
         monkeypatch.setattr(sub, "_post", post)
-        out = sub.submit(_valid(tmp_path), "https://x/submit", "legacy-key",
-                         access_token="access-jwt")
+        out = sub.submit(_valid(tmp_path), "https://x/submit", access_token="access-jwt")
         assert out["submission_id"] == "abc"
-
-    def test_legacy_key_uses_authorization_header(self, tmp_path, monkeypatch):
-        def post(url, payload, headers, timeout=60.0):
-            assert headers == {"Authorization": "Bearer legacy-key"}
-            return 201, {"submission_id": "abc", "status": "accepted"}
-
-        monkeypatch.setattr(sub, "_post", post)
-        sub.submit(_valid(tmp_path), "https://x/submit", "legacy-key")
 
     def test_non_2xx_raises(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post",
                             lambda *a, **k: (429, {"error": "quota exceeded"}))
         with pytest.raises(ValueError, match="429.*quota"):
-            sub.submit(_valid(tmp_path), "https://x/submit", "k")
+            sub.submit(_valid(tmp_path), "https://x/submit", access_token="access-jwt")
 
     def test_missing_url_or_key_raises(self, tmp_path):
         with pytest.raises(ValueError, match="URL"):
-            sub.submit(_valid(tmp_path), "", "k")
+            sub.submit(_valid(tmp_path), "", access_token="access-jwt")
         with pytest.raises(ValueError, match="intake credential"):
-            sub.submit(_valid(tmp_path), "https://x/submit", "")
+            sub.submit(_valid(tmp_path), "https://x/submit")
 
     def test_non_json_success_is_not_reported_as_accepted(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post", lambda *a, **k: (200, "Access login page"))

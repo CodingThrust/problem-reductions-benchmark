@@ -73,7 +73,6 @@ test("accepts a valid Access assertion and records the authenticated identity", 
   assert.deepEqual(writes[0].options.customMetadata, {
     model: "test/model",
     submitted_by: "claimed",
-    auth_method: "cloudflare-access",
     authenticated_subject: "access-user-id",
     authenticated_email: "submitter@example.com",
   });
@@ -84,12 +83,10 @@ test("rejects an assertion issued for a different Access application", async () 
   const { env, writes } = environment({
     TEAM_DOMAIN: auth.teamDomain,
     POLICY_AUD: auth.expectedAudience,
-    PRB_API_KEY: "legacy-secret",
   });
 
   const response = await worker.fetch(submissionRequest({
     "cf-access-jwt-assertion": auth.token,
-    authorization: "Bearer legacy-secret",
   }), env);
 
   assert.equal(response.status, 403);
@@ -110,14 +107,26 @@ test("rejects a valid application token with no user identity", async () => {
   assert.equal(writes.length, 0);
 });
 
-test("supports the legacy API key only when no Access assertion is present", async () => {
-  const { env, writes } = environment({ PRB_API_KEY: "legacy-secret" });
+test("rejects bearer authorization without an Access assertion", async () => {
+  const { env, writes } = environment();
 
   const response = await worker.fetch(
-    submissionRequest({ authorization: "Bearer legacy-secret" }), env);
+    submissionRequest({ authorization: "Bearer obsolete-secret" }), env);
 
-  assert.equal(response.status, 201);
-  assert.equal(writes[0].options.customMetadata.auth_method, "legacy-api-key");
+  assert.equal(response.status, 401);
+  assert.equal(writes.length, 0);
+});
+
+test("rejects a declared oversized body before Access verification", async () => {
+  const { env, writes } = environment();
+
+  const response = await worker.fetch(submissionRequest({
+    "cf-access-jwt-assertion": "not-a-jwt",
+    "content-length": String(25 * 1024 * 1024 + 1),
+  }), env);
+
+  assert.equal(response.status, 413);
+  assert.equal(writes.length, 0);
 });
 
 test("rejects unauthenticated requests", async () => {
