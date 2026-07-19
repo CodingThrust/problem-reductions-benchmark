@@ -14,6 +14,7 @@ GUIDE = REPO_ROOT / "CONTRIBUTING.md"
 ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
 API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
 CLI_SKILL = REPO_ROOT / ".agents/skills/run-cli-benchmark/SKILL.md"
+SUBMIT_SKILL = REPO_ROOT / ".agents/skills/submit-benchmark-result/SKILL.md"
 
 
 def _text(path: Path) -> str:
@@ -78,3 +79,27 @@ class TestBackendRouteSeparation:
         assert "keep and validate" in t
         assert "intake test" in t
         assert "official submission" in t
+
+    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    def test_run_skills_delegate_upload(self, skill):
+        assert "$submit-benchmark-result" in _text(skill)
+
+
+class TestSubmitSkill:
+    def test_submit_skill_exists(self):
+        assert SUBMIT_SKILL.exists(), "submit-benchmark-result skill missing"
+
+    def test_submit_skill_validates_before_upload(self):
+        t = _text(SUBMIT_SKILL)
+        assert "python3 -m benchmark.submit" in t
+        assert "--dry-run" in t
+        assert "--test" in t
+        assert "explicit confirmation" in t
+
+    def test_submit_skill_keeps_github_credentials_out_of_intake(self):
+        t = _text(SUBMIT_SKILL)
+        prose = " ".join(t.split())
+        assert "github-backed cloudflare access" in t
+        assert "gh auth token" in t
+        assert "personal access token" in t
+        assert "self-service authentication is not deployed" in prose

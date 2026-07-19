@@ -41,8 +41,8 @@ Do not dump every configuration question into one message.
    > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
    > 3. Upload an official submission.
 
-   Default to local-only only when the caller explicitly delegates the choice. Do not ask
-   for intake credentials unless option 2 or 3 is selected.
+   Default to local-only only when the caller explicitly delegates the choice. The
+   `$submit-benchmark-result` skill owns intake authentication and upload.
 
 4. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and `STAMP` (default:
    the Makefile timestamp). Show the derived authoritative path
@@ -102,15 +102,9 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, and absolute output
 and log paths. A `run_error` means partial salvage, not a clean zero-bug completion.
 
-Upload only when the caller explicitly selected an intake upload and provided
-`PRB_SUBMIT_URL` plus `PRB_API_KEY` locally:
-
-```bash
-python -m benchmark.submit --predictions <submission.json>          # official
-python -m benchmark.submit --predictions <submission.json> --test   # intake test
-```
-
-Use `--test` only for option 2. Never upload merely because the run completed.
+For option 2 or 3, invoke `$submit-benchmark-result` with the authoritative path and the
+already-selected test/official mode. That skill owns authentication, final confirmation,
+upload, and submission-ID reporting. Never upload merely because the run completed.
 
 An exit code 137 means the engine needs more memory. Preserve partial outputs and read
 actual command errors before recommending changes.
