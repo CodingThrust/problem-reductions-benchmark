@@ -78,6 +78,7 @@ class TestReadme:
     def test_readme_lists_current_round_contract(self):
         text = README.read_text(encoding="utf-8")
         benchmark_version = VERSION_FILE.read_text(encoding="utf-8").strip()
+        assert f"badge/benchmark-{benchmark_version}-blue" in text
         assert f"[`{benchmark_version}`](VERSION)" in text
         assert PINNED_COMMIT in text
         assert f"`{PINNED_PRED_VERSION}`" in text
