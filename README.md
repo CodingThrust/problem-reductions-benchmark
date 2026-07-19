@@ -1,7 +1,5 @@
 # Problem-Reductions Bug-Finding Benchmark
 
-[![Benchmark version](https://img.shields.io/badge/benchmark-v0.6.0-blue)](VERSION)
-
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
 The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a private store; the maintainer re-verifies it with `pred` and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
