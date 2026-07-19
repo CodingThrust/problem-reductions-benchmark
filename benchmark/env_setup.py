@@ -51,14 +51,18 @@ PINNED_PRED_VERSION = pinned_pred_version()
 
 
 def find_pred_binary() -> Path:
-    """Find pred binary in PATH."""
-    pred_path = shutil.which("pred")
+    """Find the trusted pred binary from PRED_BINARY or PATH."""
+    configured = os.environ.get("PRED_BINARY")
+    pred_path = configured or shutil.which("pred")
     if not pred_path:
         raise RuntimeError(
             "pred binary not found in PATH. "
             "Install with: cargo install --git https://github.com/CodingThrust/problem-reductions problemreductions-cli"
         )
-    return Path(pred_path)
+    path = Path(pred_path).expanduser().resolve()
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise RuntimeError(f"pred binary is not executable: {path}")
+    return path
 
 
 def pred_version(binary: str | Path = "pred") -> str:

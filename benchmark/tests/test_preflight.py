@@ -35,6 +35,7 @@ class _FakeModel:
 
 
 def _patch(monkeypatch, *, ver="0.6.0", rules=("a", "b"), model=None, build_exc=None):
+    monkeypatch.setattr(pf, "find_pred_binary", lambda: "/fake/pred")
     monkeypatch.setattr(pf, "verify_pred_version", lambda *a, **k: ver)
     monkeypatch.setattr(pf, "list_rules", lambda repo: list(rules))
 

@@ -16,7 +16,7 @@ covered by the pytest suite (tests/test_run_submission.py), not here.
 """
 from __future__ import annotations
 
-from benchmark.env_setup import verify_pred_version
+from benchmark.env_setup import find_pred_binary, verify_pred_version
 from benchmark.run_mini import DEFAULT_MAX_TOKENS, _build_model, list_rules
 from benchmark.usage import usage_from_response
 
@@ -39,7 +39,7 @@ def run_checks(
 
     # 1. pred binary + version (no API).
     try:
-        ver = verify_pred_version("pred")
+        ver = verify_pred_version(find_pred_binary())
         results.append(("pred binary", True, f"version {ver}"))
     except Exception as e:
         results.append(("pred binary", False, str(e)))

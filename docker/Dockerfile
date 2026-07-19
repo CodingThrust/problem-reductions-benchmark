@@ -46,7 +46,7 @@ RUN CARGO_PROFILE_RELEASE_LTO=off \
 FROM python:3.12-slim-bookworm AS runtime
 # Runtime libs pred may dynamically link (HiGHS uses OpenMP / libstdc++) — ref-independent,
 # so keep before ARG to preserve the cache across ref bumps.
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 passwd \
     && rm -rf /var/lib/apt/lists/*
 ARG PR_REF
 LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
@@ -54,18 +54,37 @@ LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
       org.opencontainers.image.licenses="MIT" \
       problem_reductions_ref="${PR_REF}"
 
-COPY --from=pred-build /src/target/release/pred /usr/local/bin/pred
-ENV PRED_BINARY=pred PYTHONUNBUFFERED=1
+RUN groupadd --gid 10003 prb-evidence \
+    && groupadd --gid 10001 prb-agent \
+    && groupadd --gid 10002 prb-oracle \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin prb-agent \
+    && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin prb-oracle \
+    && usermod -a -G prb-evidence prb-agent \
+    && usermod -a -G prb-evidence prb-oracle \
+    && install -d -o root -g prb-oracle -m 0750 /usr/local/libexec/prb
+COPY --from=pred-build /src/target/release/pred /usr/local/libexec/prb/pred
+RUN chown root:prb-oracle /usr/local/libexec/prb/pred \
+    && chmod 0750 /usr/local/libexec/prb/pred
+ENV PRED_BINARY=/usr/local/libexec/prb/pred \
+    PRB_AGENT_UID=10001 \
+    PRB_AGENT_GID=10001 \
+    PRB_ORACLE_UID=10002 \
+    PRB_ORACLE_GID=10002 \
+    PRB_EVIDENCE_GID=10003 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 COPY benchmark/ ./benchmark/
 
 # Fail the build if pred can't run (catches a missing runtime lib early).
-RUN pred --version
+RUN /usr/local/libexec/prb/pred --version
 # Bake the target version pins so benchmark/env_setup.py reads the *built* commit/version
 # rather than a frozen Python literal (the target tracks PR_REF, not a constant).
 COPY --from=pred-build /src/PINNED_COMMIT /app/benchmark/PINNED_COMMIT
-RUN pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
+RUN /usr/local/libexec/prb/pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
+# Prove the complete privilege boundary, not just a file mode: the dedicated agent user can
+# call both shims while an absolute-path oracle invocation is denied.
+RUN python -m benchmark.privilege_smoke
 
 # Default: run the verifier calibration (fixtures) as a self-test.
 # Override CMD to verify a certificate, e.g. (run with NO network — the verifier only needs

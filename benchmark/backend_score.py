@@ -19,7 +19,6 @@ import datetime
 import hashlib
 import json
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -123,10 +122,12 @@ def _assert_pred_version() -> None:
     """The backend is the authoritative verifier, so its pred must be the pinned version.
     Skip when no pred is on PATH (pred-free unit tests never verify real certificates) or
     when EXPECTED_PRED_VERSION is set empty; otherwise hard-fail on a mismatch."""
-    if not shutil.which("pred"):
+    from benchmark.env_setup import find_pred_binary, verify_pred_version
+    try:
+        pred_binary = find_pred_binary()
+    except RuntimeError:
         return
-    from benchmark.env_setup import verify_pred_version
-    verify_pred_version("pred")  # raises ValueError on mismatch
+    verify_pred_version(pred_binary)  # raises ValueError on mismatch
 
 
 # ── status helpers ────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ Test categories:
 import subprocess
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from benchmark.env_setup import (
     PINNED_COMMIT,
@@ -137,6 +137,7 @@ class TestFindPredBinary:
     def test_pred_found_returns_path(self, monkeypatch, tmp_path):
         fake_pred = tmp_path / "pred"
         fake_pred.touch()
+        fake_pred.chmod(0o755)
         monkeypatch.setattr("shutil.which", lambda name: str(fake_pred))
         result = find_pred_binary()
         assert result == fake_pred
