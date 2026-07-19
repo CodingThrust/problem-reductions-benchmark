@@ -9,11 +9,13 @@ from benchmark import submit as sub
 
 def _valid(tmp_path: Path, results=None) -> Path:
     doc = {
-        "schema_version": "2.0", "model": "anthropic/test", "library_commit": "deadbeef",
+        "model": "anthropic/test", "library_commit": "deadbeef",
         "bugs_found": 0,
         "total_tokens_k": 10.0,
         "rules_tested": 1, "results": results if results is not None else [
             {"rule": "r1", "result": "no_certificate", "tokens_k": 1.0}],
+        "submit_limit": 100,
+        "submit_log": [],
     }
     p = tmp_path / "submission.json"
     p.write_text(json.dumps(doc), encoding="utf-8")
@@ -36,13 +38,13 @@ class TestValidate:
     def test_missing_envelope_field(self):
         assert any("model" in p for p in sub.validate_submission({"results": []}))
 
-    def test_bug_found_needs_certificate_and_trajectory(self):
-        doc = {**json.loads('{"schema_version":"2","model":"m","library_commit":"c",'
-                            '"total_tokens_k":0,"rules_tested":1}'),
+    def test_bug_found_needs_certificate(self):
+        doc = {**json.loads('{"model":"m","library_commit":"c",'
+                            '"total_tokens_k":0,"rules_tested":1,'
+                            '"submit_limit":100,"submit_log":[]}'),
                "results": [_bug_row(with_cert=False, with_traj=False)]}
         problems = sub.validate_submission(doc)
         assert any("no certificate" in p for p in problems)
-        assert any("no trajectory" in p for p in problems)
 
     def test_bug_found_complete_passes(self, tmp_path):
         p = _valid(tmp_path, results=[_bug_row()])
@@ -61,11 +63,6 @@ class TestValidate:
         doc["submit_log"] = [{"attempt": 1, "accepted": False, "reason": "bad"}]
         assert sub.validate_submission(doc) == []
 
-    def test_schema_2_1_requires_ledger(self, tmp_path):
-        doc = sub.load_submission(_valid(tmp_path))
-        doc["schema_version"] = "2.1"
-        assert any("missing submit_limit" in p for p in sub.validate_submission(doc))
-
 
 class TestSubmit:
     def test_dry_run_does_not_send(self, tmp_path, monkeypatch):
@@ -75,8 +72,8 @@ class TestSubmit:
 
     def test_invalid_submission_raises_before_network(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post", lambda *a, **k: pytest.fail("must not POST invalid"))
-        p = _valid(tmp_path, results=[_bug_row(with_traj=False)])
-        with pytest.raises(ValueError, match="trajectory"):
+        p = _valid(tmp_path, results=[_bug_row(with_cert=False, with_traj=False)])
+        with pytest.raises(ValueError, match="certificate"):
             sub.submit(p, "https://x/submit", "k")
 
     def test_success_returns_body(self, tmp_path, monkeypatch):

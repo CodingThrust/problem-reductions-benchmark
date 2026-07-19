@@ -30,7 +30,6 @@ def _bug_row(cert: dict, **over) -> dict:
 
 def _submission(results, **over) -> dict:
     base = {
-        "schema_version": "2.0",
         "model": "anthropic/test",
         "library_commit": "deadbeef",
         "bugs_found": 999,  # deliberately wrong — the scorer must ignore it
@@ -125,7 +124,7 @@ class TestScoreSubmission:
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
         sub = _submission(
-            [_bug_row(cert)], schema_version="2.1",
+            [_bug_row(cert)],
             submit_limit=100,
             submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
                          "reason": "ok", "certificate": cert}],
@@ -134,19 +133,12 @@ class TestScoreSubmission:
         assert scored["bugs_found"] == 1
         assert "bounded submit command" in report[0]["provenance"]
 
-    def test_schema_2_1_cannot_downgrade_by_deleting_ledger(self, monkeypatch):
-        monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
-        cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
-        scored, _ = vs.score_submission(_submission([_bug_row(cert)], schema_version="2.1"))
-        assert scored["bugs_found"] == 0
-        assert "missing submit_limit" in scored["results"][0]["reject_reason"]
-
     def test_final_answer_certificate_not_in_submit_ledger_is_rejected(self, monkeypatch):
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         submitted = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
         only_in_prose = {"rule": "r2", "source": {"n": 2}, "bundle": {}}
         sub = _submission(
-            [_bug_row(only_in_prose)], schema_version="2.1",
+            [_bug_row(only_in_prose)],
             submit_limit=100,
             submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
                          "reason": "ok", "certificate": submitted}],
@@ -159,7 +151,7 @@ class TestScoreSubmission:
         monkeypatch.setattr(vs, "verify", lambda c, r=None: Verdict(True, "ok"))
         cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
         sub = _submission(
-            [_bug_row(cert)], schema_version="2.1",
+            [_bug_row(cert)],
             submit_limit=0,
             submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
                          "reason": "ok", "certificate": cert}],
@@ -173,7 +165,7 @@ class TestScoreSubmission:
         cert = {"rule": "r1", "source": {"n": 1}, "bundle": {}}
         forged_row = _bug_row(cert, rule="r2")
         sub = _submission(
-            [forged_row], schema_version="2.1", submit_limit=1,
+            [forged_row], submit_limit=1,
             submit_log=[{"attempt": 1, "accepted": True, "rule": "r1",
                          "reason": "ok", "certificate": cert}],
         )

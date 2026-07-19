@@ -32,10 +32,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from benchmark.submit_ledger import schema_requires_ledger, submit_ledger_error
+from benchmark.submit_ledger import submit_ledger_error
 
-REQUIRED_ENVELOPE = ("schema_version", "model", "library_commit", "bugs_found",
-                     "total_tokens_k", "rules_tested", "results")
+REQUIRED_ENVELOPE = ("model", "library_commit", "bugs_found", "total_tokens_k",
+                     "rules_tested", "results")
 
 
 def load_submission(path: Path) -> dict:
@@ -111,7 +111,7 @@ def validate_submission(sub: dict) -> list[str]:
             rule = row.get("rule", "?")
             if not row.get("certificate"):
                 problems.append(f"results[{i}] ({rule}): bug_found row has no certificate")
-            if (not schema_requires_ledger(sub.get("schema_version"))
+            if ("submit_log" not in sub
                     and not row.get("trajectory") and not envelope_traj):
                 problems.append(f"results[{i}] ({rule}): bug_found row has no trajectory "
                                 "(required as provenance — on the row or the envelope)")

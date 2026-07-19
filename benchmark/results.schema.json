@@ -6,10 +6,6 @@
   "type": "object",
   "required": ["model", "library_commit", "bugs_found", "total_tokens_k", "efficiency_bugs_per_ktok", "rules_tested", "results"],
   "properties": {
-    "schema_version": {
-      "type": ["string", "null"],
-      "description": "Submission schema version carried through for private auditability"
-    },
     "model": {
       "type": "string",
       "description": "LiteLLM model name (e.g. 'anthropic/claude-sonnet-4-6')"

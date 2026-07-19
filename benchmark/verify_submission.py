@@ -24,8 +24,7 @@ import sys
 from pathlib import Path
 
 from benchmark.submit_ledger import (accepted_certificate_index, certificate_key,
-                                     has_submit_ledger, schema_requires_ledger,
-                                     submit_ledger_error)
+                                     has_submit_ledger, submit_ledger_error)
 from benchmark.usage import usage_from_dict
 from benchmark.verify import count_bugs, verify
 
@@ -76,15 +75,14 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
     """Re-verify every certificate and recompute the score.
 
     A bug counts only when pred confirms the round-trip failure and provenance succeeds:
-    bounded submit ledger for schema 2.1+, trajectory certificate for legacy submissions.
+    bounded submit ledger for current submissions, trajectory certificate for legacy data.
     Returns (scored, report); ``scored`` is results.schema.json-shaped and ``report`` is a
     per-certificate list of {rule, violation, accepted, reason, provenance}.
     """
     rescored: list[dict] = []
     report: list[dict] = []
     ledger_problem = submit_ledger_error(submission)
-    uses_ledger = (has_submit_ledger(submission)
-                   or schema_requires_ledger(submission.get("schema_version")))
+    uses_ledger = has_submit_ledger(submission)
     accepted_keys = (accepted_certificate_index(submission)
                      if uses_ledger and ledger_problem is None else set())
     # Only legacy submissions use trajectory provenance. New runs use the ledger directly.
@@ -139,7 +137,6 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
     total_tokens = usage_from_dict(submission.get("usage_totals")).total_tokens
     tokens_k = total_tokens / 1000 if total_tokens else (submission.get("total_tokens_k", 0.0) or 0.0)
     scored = {
-        "schema_version": submission.get("schema_version"),
         "model": submission.get("model", "unknown"),
         "library_commit": submission.get("library_commit", "unknown"),
         # Test submissions (end-to-end checks) are scored and stored privately like any

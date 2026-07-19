@@ -34,9 +34,11 @@ The runner image bundles the `pred` binary, the agent stack (mini-swe-agent + Li
 and the problem-reductions source pinned at `v0.6.0`. Any LiteLLM-routable provider key
 works.
 
-The **target library version is not hardcoded** — it tracks the benchmark. `PR_REF` selects
-a tag or commit of problem-reductions; the image records that commit and its matching
-`pred`. Pull the published image for that ref, or build it locally when unavailable:
+The official round is pinned to the exact tag and commit listed in the
+[README](README.md#current-benchmark-round). `PR_REF` selects the corresponding
+problem-reductions source when preparing an image; the runner records the resolved commit
+and its matching `pred`. Pull the published image for that ref, or build it locally when
+unavailable:
 
 ```bash
 make runner-pull PR_REF=v0.6.0
@@ -221,7 +223,7 @@ python -m benchmark.backend_score --local submissions/ results/scored/
 
 For each `PENDING` submission it:
 
-1. validates the current schema, pinned library commit, and clean-run status, then flips
+1. validates the current submission structure, pinned library commit, and clean-run status, then flips
    status `PENDING → RUNNING`,
 2. re-runs `benchmark/verify_submission.py` — which calls `verify()` on **every**
    certificate and re-derives the bundle from `pred`, so a fabricated or tampered
