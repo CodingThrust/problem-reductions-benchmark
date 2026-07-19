@@ -57,9 +57,10 @@ numbered stage at a time when its answer controls the next branch.
    The `$submit-benchmark-result` skill owns submission validation, authentication, and
    upload.
 
-5. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and three separate,
-   explicit paths: clone destination, authoritative submission JSON, and log directory.
-   Offer concrete defaults and ask whether to accept them.
+5. Read the current benchmark round with `make -s print-pr-ref`; use that `PR_REF` unless the
+   caller explicitly requested an override. Resolve `SUBMIT_LIMIT` (default 100) and three
+   separate, explicit paths: clone destination, authoritative submission JSON, and log
+   directory. Offer concrete defaults and ask whether to accept them.
 
 ## Verify the selected harness
 
@@ -100,10 +101,10 @@ Run through `make run-local` with the selected backend. If invoking
 example:
 
 ```bash
+PR_REF="$(make -s print-pr-ref)"
 make run-local \
-  PR_REF=v0.6.0 \
   LOCAL_BACKEND=codex \
-  LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
+  LOCAL_REPO_DIR="../runs/problem-reductions-${PR_REF}" \
   LOCAL_OUTPUT=../runs/results/submission.json \
   LOCAL_LOG_DIR=../runs/logs
 ```

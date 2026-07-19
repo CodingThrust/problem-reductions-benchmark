@@ -29,7 +29,11 @@ LOCAL_LOG_DIR ?=
 REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
 LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build runner-pull preflight run run-local score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help print-pr-ref runner-build runner-pull preflight run run-local score-local board publish-local serve
+
+## Print the current benchmark round's problem-reductions ref for tools and skills.
+print-pr-ref:
+	@echo "$(PR_REF)"
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:

@@ -125,6 +125,18 @@ class TestBackendRouteSeparation:
         assert "$submit-benchmark-result" in t
         assert "that skill owns validation" in t
 
+    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    def test_run_skills_read_the_round_from_make(self, skill):
+        t = _text(skill)
+        assert "make -s print-pr-ref" in t
+        assert "v0.6.0" not in t
+
+    def test_make_exposes_the_current_round(self):
+        result = subprocess.run(
+            ["make", "-s", "print-pr-ref"], cwd=REPO_ROOT,
+            text=True, capture_output=True, check=True)
+        assert result.stdout.strip()
+
     def test_router_sends_existing_results_to_submit_skill(self):
         t = _text(REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md")
         assert "already has a `submission.json`" in t

@@ -43,8 +43,9 @@ Do not dump every configuration question into one message.
    Default to local-only only when the caller explicitly delegates the choice. The
    `$submit-benchmark-result` skill owns submission validation, authentication, and upload.
 
-4. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and `STAMP` (default:
-   the Makefile timestamp). Show the derived authoritative path
+4. Read the current benchmark round with `make -s print-pr-ref`; use that `PR_REF` unless the
+   caller explicitly requested an override. Resolve `SUBMIT_LIMIT` (default 100) and `STAMP`
+   (default: the Makefile timestamp). Show the derived authoritative path
    `out/<stamp>/submission.json`; the trajectory is written alongside it. Do not ask for
    arbitrary host output or log paths when using `make run`.
 
@@ -73,12 +74,12 @@ Do not expose secret values in command output or the final response. Do not add 
 2. Prepare one image at the selected ref. Prefer the published image:
 
    ```bash
-   make runner-pull PR_REF=v0.6.0
+   make runner-pull
    ```
 
-   Fall back to `make runner-build PR_REF=v0.6.0` only when the published image is
-   unavailable or the caller explicitly wants a local build. For Podman, use the equivalent
-   command from `references/engines.md`.
+   Fall back to `make runner-build` only when the published image is unavailable or the
+   caller explicitly wants a local build. For Podman, use the equivalent command from
+   `references/engines.md`.
 3. Before the preflight's real API call, show the resolved model, backend `mini-swe`, API
    endpoint with secrets redacted, `PR_REF`, submit limit, `STAMP`, derived submission path,
    and upload goal. Ask for explicit confirmation.
