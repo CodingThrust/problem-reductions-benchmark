@@ -108,12 +108,12 @@ class TestSubmitSkill:
         assert "--test" in t
         assert "explicit confirmation" in t
 
-    def test_submit_skill_keeps_github_credentials_out_of_intake(self):
+    def test_submit_skill_uses_access_without_github_credentials(self):
         t = _text(SUBMIT_SKILL)
-        assert "github-backed cloudflare access" in t
+        assert "cloudflared access login" in t
+        assert "prb_access_token" in t
         assert "gh auth token" in t
-        assert "personal access token" in t
-        assert "cloudflare access is not deployed" in t
+        assert "github pat" in t
 
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
