@@ -102,10 +102,22 @@ After reporting an accepted submission, trigger the scoring workflow once. If Gi
 is installed and authenticated, run:
 
 ```bash
-gh workflow run score-from-r2.yml \
+SUBMISSION_ID="<submission_id returned by the upload>"
+RUN_URL="$(gh workflow run score-from-r2.yml \
   --repo CodingThrust/problem-reductions-benchmark \
   --ref main \
-  -f reset_results=false
+  -f reset_results=false)"
+RUN_ID="${RUN_URL##*/}"
+gh run watch "$RUN_ID" \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --exit-status --compact
+
+SHORT_ID="${SUBMISSION_ID:0:8}"
+gh pr list \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --state all --limit 100 \
+  --json headRefName,url \
+  --jq ".[] | select(.headRefName | endswith(\"--${SHORT_ID}\")) | .url"
 ```
 
 Never set `reset_results=true` for a submission. If `gh` is unavailable, give the user the
@@ -117,3 +129,9 @@ the **Run workflow** button or returns 403, explain that a repository maintainer
 collaborator with Actions write permission must trigger it. Do not upload again: the
 accepted submission remains privately queued and the daily scheduled workflow will process
 it if nobody triggers a run manually.
+
+When the triggered run succeeds, return the matching PR URL. Match it using the first eight
+characters of this upload's `submission_id`, which appear at the end of the leaderboard
+branch name; do not return an unrelated latest PR. If the run fails, return its URL and the
+failure. If it succeeds but no matching PR exists, return the run URL and explain that no PR
+was created instead of guessing a link.

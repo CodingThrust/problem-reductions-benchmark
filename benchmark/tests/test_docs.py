@@ -141,6 +141,12 @@ class TestSubmitSkill:
         assert "-f reset_results=false" in t
         assert "never set `reset_results=true`" in t
         assert "actions write permission" in t
+        assert 'run_id="${run_url##*/}"' in t
+        assert "gh run watch" in t
+        assert 'short_id="${submission_id:0:8}"' in t
+        assert "--json headrefname,url" in t
+        assert "return the matching pr url" in t
+        assert "do not return an unrelated latest pr" in t
 
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
