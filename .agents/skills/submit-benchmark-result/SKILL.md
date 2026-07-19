@@ -55,14 +55,15 @@ Require `PRB_SUBMIT_URL` from the repository documentation or maintainer. Never 
 to paste any token into chat, print an environment variable, or commit credentials.
 
 Prefer GitHub-backed Cloudflare Access when the deployed client documents
-`PRB_ACCESS_TOKEN` or `--access-token`:
+`PRB_ACCESS_TOKEN`:
 
 1. Require `cloudflared` locally.
-2. Run `cloudflared access login <application-url>`; the user completes the configured
-   GitHub login in a browser.
-3. Obtain the application-scoped Access token with `cloudflared access token
-   -app=<application-url>` and pass it only through the client-supported environment
-   variable or flag. Do not display or persist it.
+2. Obtain the application-scoped token only inside the confirmed upload command, for example
+   `PRB_ACCESS_TOKEN="$(cloudflared access token -app=<application-url>)" <submit-command>`.
+   `cloudflared` opens the configured GitHub login in a browser when needed.
+3. Never run `cloudflared access login` or `cloudflared access token` standalone because
+   some versions print the JWT. Pass it through the client-supported environment variable
+   for that one process only; do not display, persist, or put it in a command-line flag.
 
 Do not substitute `gh auth token`, a GitHub personal access token, or `GITHUB_TOKEN`; the
 intake must never receive the user's general GitHub credential.
