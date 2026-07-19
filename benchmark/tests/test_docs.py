@@ -116,8 +116,17 @@ class TestSubmitSkill:
         t = _text(SUBMIT_SKILL)
         assert "cloudflared access login" in t
         assert "prb_access_token" in t
+        assert 'test -n "$prb_access_token"' in t
+        assert "unset prb_access_token" in t
         assert "gh auth token" in t
         assert "github pat" in t
+
+    def test_submit_skill_prepares_cloudflared(self):
+        t = _text(SUBMIT_SKILL)
+        assert "command -v cloudflared" in t
+        assert "cloudflared --version" in t
+        assert "brew install cloudflared" in t
+        assert "obtain confirmation before running an installer" in t
 
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])

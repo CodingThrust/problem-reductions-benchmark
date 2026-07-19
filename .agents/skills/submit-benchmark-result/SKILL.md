@@ -42,25 +42,52 @@ Immediately before uploading, show:
 State that this is an official submission and that the private file will leave the machine,
 then obtain explicit confirmation.
 
-## 3. Log in and upload once
+## 3. Prepare authentication
+
+Check whether the Cloudflare Access client is already available:
+
+```bash
+command -v cloudflared >/dev/null && cloudflared --version
+```
+
+If it is missing, identify the operating system and tell the user that `cloudflared` must
+be installed before submission. Give the installation step from Cloudflare's official
+[downloads page](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)
+for that system. Obtain confirmation before running an installer or package-manager
+command. On macOS with Homebrew, the official command is:
+
+```bash
+brew install cloudflared
+```
+
+Do not improvise a download URL, use `sudo`, or change the system without confirmation.
+After installation, run `cloudflared --version`. If installation cannot be completed,
+report the prerequisite and stop before uploading.
+
+## 4. Log in and upload once
 
 Use the official intake:
 
 ```bash
 export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
 PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
-PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")" \
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")"
+test -n "$PRB_ACCESS_TOKEN"
+PRB_ACCESS_TOKEN="$PRB_ACCESS_TOKEN" \
   python3 -m benchmark.submit --predictions <submission.json>
+unset PRB_ACCESS_TOKEN
 ```
 
-Require `cloudflared`; the login opens GitHub in the user's browser. Keep token acquisition
-inside command substitution. Never print or ask for the token, and never substitute a
-GitHub PAT, `gh auth token`, or `GITHUB_TOKEN`.
+The login opens GitHub in the user's browser. If no browser opens, give the user the login
+URL printed by `cloudflared` and wait for them to finish. Keep token acquisition inside
+command substitution. Stop if login fails or returns an empty token; do not run the upload
+command. Never print or ask for the token. Do not substitute a GitHub PAT, `gh auth token`,
+or `GITHUB_TOKEN`.
 
 Upload only once. Do not retry a timeout because the first request may already be queued.
 For HTTP 401/403, re-authenticate; for 413 or 429, stop and report the error.
 
-## 4. Report the result
+## 5. Report the result
 
 On success, report the `submission_id`, model, and endpoint. Say that `accepted` means
 queued privately, not scored or published. Keep the local submission until scoring is
