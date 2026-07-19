@@ -187,17 +187,22 @@ file, preserves test/official intent, handles the authentication mode actually d
 the intake, asks before the external write, and reports the opaque submission ID. Submitters
 do not need repository write access, R2 access, or permission to run the scoring workflow.
 
-The current legacy deployment uses an endpoint URL plus an intake credential configured
-locally. Do not paste the credential into chat or commit it:
+For either upload, get the endpoint URL from the maintainer and authenticate through the
+GitHub-backed Cloudflare Access application:
 
 ```bash
 export PRB_SUBMIT_URL=<intake endpoint>   # from the maintainer
-export PRB_API_KEY=<token>                 # from the maintainer
-
-python -m benchmark.submit --predictions out/submission.json
+PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
+PRB_ACCESS_TOKEN="$(cloudflared access token -app="$PRB_ACCESS_APP")" \
+  python -m benchmark.submit --predictions out/submission.json
 #   --dry-run   validate locally, don't send
 #   --test      scored + stored privately, but excluded from the public leaderboard
 ```
+
+The token is short-lived and scoped to this Access application. Keep token acquisition
+inside command substitution because a standalone `cloudflared access login` or
+`cloudflared access token` may print it. Never substitute `gh auth token`, a GitHub PAT, or
+`GITHUB_TOKEN`.
 
 The CLI validates the file against `submission.schema.json`, then uploads it to a private
 store (Cloudflare R2). The maintainer's scorer re-verifies it with `pred` (see §3) and opens

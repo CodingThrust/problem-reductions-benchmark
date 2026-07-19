@@ -1,24 +1,27 @@
 // prb submission intake — a Cloudflare Worker (the `prb submit` endpoint).
 //
 // It is the write-only, confidential broker: a submitter POSTs their submission.json (which
-// carries the answer key — certificates + submit ledger) over HTTPS; the Worker checks a bearer
-// key and deposits the raw body into a PRIVATE R2 bucket. The submitter never reads the
-// bucket. The public repo / leaderboard only ever see the aggregate the scoring worker
-// derives later (see .github/workflows/score-from-r2.yml).
+// carries the answer key — certificates + submit ledger) over HTTPS; the Worker verifies the
+// Cloudflare Access identity and deposits the raw body into a PRIVATE R2 bucket. The
+// submitter never reads the bucket. The public repo / leaderboard only ever see the
+// aggregate the scoring worker derives later (see .github/workflows/score-from-r2.yml).
 //
 // Bindings (wrangler.toml): R2 bucket `SUBMISSIONS`.
-// Secret: `PRB_API_KEY` (set with `wrangler secret put PRB_API_KEY`).
+// Migration-only secret: `PRB_API_KEY` (set with `wrangler secret put PRB_API_KEY`).
+
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const MAX_BYTES = 25 * 1024 * 1024; // guard against oversized bodies
+const remoteJwks = new Map();
 
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") return json({ error: "POST only" }, 405);
     if (new URL(request.url).pathname !== "/submit") return json({ error: "not found" }, 404);
 
-    // Auth — constant-ish bearer check against the configured secret.
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (!env.PRB_API_KEY || token !== env.PRB_API_KEY) return json({ error: "unauthorized" }, 401);
+    const authentication = await authenticate(request, env);
+    if (authentication.response) return authentication.response;
+    const identity = authentication.identity;
 
     const declaredBytes = Number(request.headers.get("content-length"));
     if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BYTES) {
@@ -43,6 +46,9 @@ export default {
       customMetadata: {
         model: String(sub.model).slice(0, 128),
         submitted_by: String(sub.submitted_by || "").slice(0, 128),
+        auth_method: identity.method,
+        authenticated_subject: identity.subject,
+        authenticated_email: identity.email,
       },
     });
 
@@ -51,6 +57,53 @@ export default {
     return json({ submission_id: id, status: "accepted" }, 201);
   },
 };
+
+export async function authenticate(request, env) {
+  const assertion = request.headers.get("cf-access-jwt-assertion");
+  if (assertion) {
+    if (!env.TEAM_DOMAIN || !env.POLICY_AUD) {
+      return { response: json({ error: "Access authentication is not configured" }, 503) };
+    }
+    try {
+      const payload = await verifyAccessAssertion(assertion, env);
+      return {
+        identity: {
+          method: "cloudflare-access",
+          subject: String(payload.sub || "").slice(0, 128),
+          email: String(payload.email || "").slice(0, 128),
+        },
+      };
+    } catch {
+      // An assertion must never fall back to the legacy key after failed verification.
+      return { response: json({ error: "invalid Access identity" }, 403) };
+    }
+  }
+
+  const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  if (env.PRB_API_KEY && token === env.PRB_API_KEY) {
+    return {
+      identity: { method: "legacy-api-key", subject: "", email: "" },
+    };
+  }
+  return { response: json({ error: "unauthorized" }, 401) };
+}
+
+export async function verifyAccessAssertion(token, env) {
+  const teamDomain = new URL(env.TEAM_DOMAIN).origin;
+  let jwks = remoteJwks.get(teamDomain);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(`${teamDomain}/cdn-cgi/access/certs`));
+    remoteJwks.set(teamDomain, jwks);
+  }
+  const { payload } = await jwtVerify(token, jwks, {
+    issuer: teamDomain,
+    audience: env.POLICY_AUD,
+  });
+  if (payload.type !== "app" || !payload.sub || !payload.email) {
+    throw new Error("Access token has no user identity");
+  }
+  return payload;
+}
 
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {

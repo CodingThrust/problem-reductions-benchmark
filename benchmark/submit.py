@@ -7,7 +7,7 @@ submission body carries the answer key (certificates + submit ledger), so it nev
 public repo — it travels over HTTPS to the endpoint, which holds the write token.
 
     export PRB_SUBMIT_URL=https://<your-worker>/submit
-    export PRB_API_KEY=...
+    export PRB_ACCESS_TOKEN="$(cloudflared access token -app=https://<your-worker>)"
     python -m benchmark.submit --predictions out/submission.json
     # → prints the submission id returned by the endpoint
 
@@ -18,7 +18,8 @@ The endpoint re-checks and the backend re-verifies with pred regardless; this is
 courtesy gate. Use ``--dry-run`` to validate without sending.
 
 HTTP contract (endpoint side):
-    POST <url>   Authorization: Bearer <key>   Content-Type: application/json
+    POST <url>   Cf-Access-Token: <app-scoped JWT>   Content-Type: application/json
+    legacy:      Authorization: Bearer <PRB_API_KEY>
     body    = the submission.json object
     200/201 → {"submission_id": "...", "status": "accepted", ...}
     4xx/5xx → {"error": "..."}  (or a non-JSON body, surfaced as text)
@@ -120,15 +121,25 @@ def validate_submission(sub: dict) -> list[str]:
     return problems
 
 
-def _post(url: str, api_key: str, payload: bytes, timeout: float = 60.0) -> tuple[int, dict | str]:
-    """POST raw JSON bytes with a bearer token. Returns (status_code, parsed-or-text body).
+def _auth_headers(api_key: str | None, access_token: str | None) -> dict[str, str]:
+    """Build one authentication header, preferring the scoped Access credential."""
+    if access_token:
+        return {"Cf-Access-Token": access_token}
+    if api_key:
+        return {"Authorization": f"Bearer {api_key}"}
+    return {}
+
+
+def _post(url: str, payload: bytes, auth_headers: dict[str, str],
+          timeout: float = 60.0) -> tuple[int, dict | str]:
+    """POST raw JSON bytes. Returns (status_code, parsed-or-text body).
 
     Isolated so tests can monkeypatch the single network call.
     """
     req = urllib.request.Request(
         url, data=payload, method="POST",
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {api_key}",
+                 **auth_headers,
                  "User-Agent": "prb-submit"},
     )
     try:
@@ -147,7 +158,8 @@ def _maybe_json(text: str):
         return text
 
 
-def submit(path: Path, url: str, api_key: str, *, dry_run: bool = False,
+def submit(path: Path, url: str | None, api_key: str | None = None, *,
+           access_token: str | None = None, dry_run: bool = False,
            timeout: float = 60.0, mark_test: bool = False) -> dict:
     """Validate and (unless dry_run) upload a submission. Returns a result dict.
 
@@ -169,15 +181,22 @@ def submit(path: Path, url: str, api_key: str, *, dry_run: bool = False,
 
     if not url:
         raise ValueError("no endpoint URL — set PRB_SUBMIT_URL or pass --url")
-    if not api_key:
-        raise ValueError("no API key — set PRB_API_KEY or pass --api-key")
+    auth_headers = _auth_headers(api_key, access_token)
+    if not auth_headers:
+        raise ValueError("no intake credential — set PRB_ACCESS_TOKEN (preferred) or "
+                         "PRB_API_KEY (legacy)")
 
     payload = json.dumps(sub).encode("utf-8")
-    status, body = _post(url, api_key, payload, timeout=timeout)
+    status, body = _post(url, payload, auth_headers, timeout=timeout)
     if not (200 <= status < 300):
         reason = body.get("error") if isinstance(body, dict) else body
         raise ValueError(f"endpoint returned HTTP {status}: {reason}")
-    return body if isinstance(body, dict) else {"status": "accepted", "response": body}
+    if not isinstance(body, dict):
+        raise ValueError("endpoint returned a non-JSON response; Cloudflare Access login "
+                         "may be required")
+    if not body.get("submission_id"):
+        raise ValueError("endpoint accepted the request but returned no submission_id")
+    return body
 
 
 def main() -> None:
@@ -188,7 +207,7 @@ def main() -> None:
     parser.add_argument("--url", default=os.environ.get("PRB_SUBMIT_URL"),
                         help="Intake endpoint URL (env PRB_SUBMIT_URL)")
     parser.add_argument("--api-key", default=os.environ.get("PRB_API_KEY"),
-                        help="Bearer token for the endpoint (env PRB_API_KEY)")
+                        help="Legacy bearer token (env PRB_API_KEY); prefer PRB_ACCESS_TOKEN")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate the file locally and report what would be sent; no upload")
     parser.add_argument("--test", action="store_true",
@@ -202,7 +221,8 @@ def main() -> None:
         parser.error(f"no such file: {path}")
 
     try:
-        result = submit(path, args.url, args.api_key, dry_run=args.dry_run,
+        result = submit(path, args.url, args.api_key,
+                        access_token=os.environ.get("PRB_ACCESS_TOKEN"), dry_run=args.dry_run,
                         timeout=args.timeout, mark_test=args.test)
     except (ValueError, json.JSONDecodeError, OSError) as e:
         print(f"✗ {e}", file=sys.stderr)

@@ -81,9 +81,28 @@ class TestSubmit:
 
     def test_success_returns_body(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post",
-                            lambda url, key, payload, timeout=60.0: (201, {"submission_id": "abc", "status": "accepted"}))
+                            lambda url, payload, headers, timeout=60.0: (
+                                201, {"submission_id": "abc", "status": "accepted"}))
         out = sub.submit(_valid(tmp_path), "https://x/submit", "k")
         assert out["submission_id"] == "abc"
+
+    def test_access_token_is_preferred_over_legacy_key(self, tmp_path, monkeypatch):
+        def post(url, payload, headers, timeout=60.0):
+            assert headers == {"Cf-Access-Token": "access-jwt"}
+            return 201, {"submission_id": "abc", "status": "accepted"}
+
+        monkeypatch.setattr(sub, "_post", post)
+        out = sub.submit(_valid(tmp_path), "https://x/submit", "legacy-key",
+                         access_token="access-jwt")
+        assert out["submission_id"] == "abc"
+
+    def test_legacy_key_uses_authorization_header(self, tmp_path, monkeypatch):
+        def post(url, payload, headers, timeout=60.0):
+            assert headers == {"Authorization": "Bearer legacy-key"}
+            return 201, {"submission_id": "abc", "status": "accepted"}
+
+        monkeypatch.setattr(sub, "_post", post)
+        sub.submit(_valid(tmp_path), "https://x/submit", "legacy-key")
 
     def test_non_2xx_raises(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sub, "_post",
@@ -94,5 +113,15 @@ class TestSubmit:
     def test_missing_url_or_key_raises(self, tmp_path):
         with pytest.raises(ValueError, match="URL"):
             sub.submit(_valid(tmp_path), "", "k")
-        with pytest.raises(ValueError, match="API key"):
+        with pytest.raises(ValueError, match="intake credential"):
             sub.submit(_valid(tmp_path), "https://x/submit", "")
+
+    def test_non_json_success_is_not_reported_as_accepted(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sub, "_post", lambda *a, **k: (200, "Access login page"))
+        with pytest.raises(ValueError, match="non-JSON.*Access login"):
+            sub.submit(_valid(tmp_path), "https://x/submit", access_token="access-jwt")
+
+    def test_success_without_submission_id_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sub, "_post", lambda *a, **k: (201, {"status": "accepted"}))
+        with pytest.raises(ValueError, match="no submission_id"):
+            sub.submit(_valid(tmp_path), "https://x/submit", access_token="access-jwt")
