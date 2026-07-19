@@ -105,13 +105,12 @@ class TestSubmitSkill:
         t = _text(SUBMIT_SKILL)
         assert "python3 -m benchmark.submit" in t
         assert "--dry-run" in t
-        assert "--test" in t
         assert "explicit confirmation" in t
 
-    def test_submit_skill_does_not_offer_test_mode_to_submitters(self):
+    def test_submit_skill_has_no_intake_test_mode(self):
         t = _text(SUBMIT_SKILL)
-        assert "test upload" not in t
-        assert "only when the user explicitly asks" in t
+        assert "--test" not in t
+        assert "smoke test" not in t
 
     def test_submit_skill_uses_access_without_github_credentials(self):
         t = _text(SUBMIT_SKILL)
