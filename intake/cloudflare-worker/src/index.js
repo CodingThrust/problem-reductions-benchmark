@@ -18,14 +18,15 @@ export default {
     if (request.method !== "POST") return json({ error: "POST only" }, 405);
     if (new URL(request.url).pathname !== "/submit") return json({ error: "not found" }, 404);
 
-    const authentication = await authenticate(request, env);
-    if (authentication.response) return authentication.response;
-    const identity = authentication.identity;
-
     const declaredBytes = Number(request.headers.get("content-length"));
     if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BYTES) {
       return json({ error: "submission too large" }, 413);
     }
+
+    const authentication = await authenticate(request, env);
+    if (authentication.response) return authentication.response;
+    const identity = authentication.identity;
+
     const bodyBytes = await request.arrayBuffer();
     if (bodyBytes.byteLength > MAX_BYTES) return json({ error: "submission too large" }, 413);
     const body = new TextDecoder().decode(bodyBytes);
@@ -45,7 +46,6 @@ export default {
       customMetadata: {
         model: String(sub.model).slice(0, 128),
         submitted_by: String(sub.submitted_by || "").slice(0, 128),
-        auth_method: identity.method,
         authenticated_subject: identity.subject,
         authenticated_email: identity.email,
       },
@@ -67,7 +67,6 @@ export async function authenticate(request, env) {
       const payload = await verifyAccessAssertion(assertion, env);
       return {
         identity: {
-          method: "cloudflare-access",
           subject: String(payload.sub || "").slice(0, 128),
           email: String(payload.email || "").slice(0, 128),
         },

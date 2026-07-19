@@ -7,8 +7,8 @@ submission body carries the answer key (certificates + submit ledger), so it nev
 public repo — it travels over HTTPS through GitHub-backed Cloudflare Access.
 
     export PRB_SUBMIT_URL=https://<your-worker>/submit
-    export PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close https://<your-worker>)"
-    python -m benchmark.submit --predictions out/submission.json
+    PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close https://<your-worker>)" \
+      python -m benchmark.submit --predictions out/submission.json
     # → prints the submission id returned by the endpoint
 
 The client validates the file locally FIRST (valid JSON, required envelope fields, and —
@@ -120,11 +120,6 @@ def validate_submission(sub: dict) -> list[str]:
     return problems
 
 
-def _auth_headers(access_token: str | None) -> dict[str, str]:
-    """Build the Cloudflare Access authentication header."""
-    return {"Cf-Access-Token": access_token} if access_token else {}
-
-
 def _post(url: str, payload: bytes, auth_headers: dict[str, str],
           timeout: float = 60.0) -> tuple[int, dict | str]:
     """POST raw JSON bytes. Returns (status_code, parsed-or-text body).
@@ -176,12 +171,12 @@ def submit(path: Path, url: str | None, *, access_token: str | None = None,
 
     if not url:
         raise ValueError("no endpoint URL — set PRB_SUBMIT_URL or pass --url")
-    auth_headers = _auth_headers(access_token)
-    if not auth_headers:
+    if not access_token:
         raise ValueError("no intake credential — set PRB_ACCESS_TOKEN")
 
     payload = json.dumps(sub).encode("utf-8")
-    status, body = _post(url, payload, auth_headers, timeout=timeout)
+    status, body = _post(
+        url, payload, {"Cf-Access-Token": access_token}, timeout=timeout)
     if not (200 <= status < 300):
         reason = body.get("error") if isinstance(body, dict) else body
         raise ValueError(f"endpoint returned HTTP {status}: {reason}")

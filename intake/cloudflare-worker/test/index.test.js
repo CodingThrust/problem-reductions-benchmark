@@ -73,7 +73,6 @@ test("accepts a valid Access assertion and records the authenticated identity", 
   assert.deepEqual(writes[0].options.customMetadata, {
     model: "test/model",
     submitted_by: "claimed",
-    auth_method: "cloudflare-access",
     authenticated_subject: "access-user-id",
     authenticated_email: "submitter@example.com",
   });
@@ -115,6 +114,18 @@ test("rejects bearer authorization without an Access assertion", async () => {
     submissionRequest({ authorization: "Bearer obsolete-secret" }), env);
 
   assert.equal(response.status, 401);
+  assert.equal(writes.length, 0);
+});
+
+test("rejects a declared oversized body before Access verification", async () => {
+  const { env, writes } = environment();
+
+  const response = await worker.fetch(submissionRequest({
+    "cf-access-jwt-assertion": "not-a-jwt",
+    "content-length": String(25 * 1024 * 1024 + 1),
+  }), env);
+
+  assert.equal(response.status, 413);
   assert.equal(writes.length, 0);
 });
 
