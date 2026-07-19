@@ -105,15 +105,47 @@ class TestSubmitSkill:
         t = _text(SUBMIT_SKILL)
         assert "python3 -m benchmark.submit" in t
         assert "--dry-run" in t
-        assert "--test" in t
         assert "explicit confirmation" in t
 
-    def test_submit_skill_keeps_github_credentials_out_of_intake(self):
+    def test_submit_skill_has_no_intake_test_mode(self):
         t = _text(SUBMIT_SKILL)
-        assert "github-backed cloudflare access" in t
+        assert "--test" not in t
+        assert "smoke test" not in t
+
+    def test_submit_skill_uses_access_without_github_credentials(self):
+        t = _text(SUBMIT_SKILL)
+        assert "cloudflared access login" in t
+        assert "prb_access_token" in t
+        assert 'test -n "$prb_access_token"' in t
+        assert "unset prb_access_token" in t
         assert "gh auth token" in t
-        assert "personal access token" in t
-        assert "cloudflare access is not deployed" in t
+        assert "github pat" in t
+
+    def test_submit_skill_prepares_cloudflared(self):
+        t = _text(SUBMIT_SKILL)
+        assert "command -v cloudflared" in t
+        assert "cloudflared --version" in t
+        assert "brew install cloudflared" in t
+        assert "obtain confirmation before running an installer" in t
+
+    def test_submit_skill_explains_access_denial(self):
+        t = _text(SUBMIT_SKILL)
+        assert "http 403" in t
+        assert "github primary email" in t
+        assert "authorization list by a maintainer" in t
+
+    def test_submit_skill_triggers_scoring_without_reset(self):
+        t = _text(SUBMIT_SKILL)
+        assert "gh workflow run score-from-r2.yml" in t
+        assert "--repo codingthrust/problem-reductions-benchmark" in t
+        assert "reset_results" not in t
+        assert "actions write permission" in t
+        assert 'run_id="${run_url##*/}"' in t
+        assert "gh run watch" in t
+        assert 'short_id="${submission_id:0:8}"' in t
+        assert "--json headrefname,url" in t
+        assert "return the matching pr url" in t
+        assert "do not return an unrelated latest pr" in t
 
     @pytest.mark.parametrize(
         "path", [GUIDE, SUBMIT_SKILL, SUBMISSIONS_README, SITE_INDEX, INTAKE_README])
@@ -125,3 +157,6 @@ class TestScorerWorkflow:
     def test_empty_r2_queue_is_valid(self):
         text = SCORER_WORKFLOW.read_text(encoding="utf-8")
         assert "jq -r '.[]? | select(endswith(\".json\"))'" in text
+
+    def test_workflow_exposes_no_result_reset(self):
+        assert "reset_results" not in _text(SCORER_WORKFLOW)

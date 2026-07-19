@@ -1,101 +1,136 @@
 ---
 name: submit-benchmark-result
-description: Validate and upload an existing problem-reductions benchmark submission through the private intake. Use when a user wants to submit, upload, publish, dry-run, or test a submission.json they already produced, especially when the user is not a repository maintainer. Handles local validation, test-versus-official intent, intake authentication, upload confirmation, and submission ID reporting; routes missing results to run-benchmark instead of running a model itself.
+description: Validate and officially upload an existing problem-reductions benchmark submission. Use when the user wants to submit a submission.json. If no result exists yet, route the request to $run-benchmark.
 ---
 
 # Submit a benchmark result
 
-Submit an existing `submission.json` without requiring GitHub repository, R2, Worker, or
-Actions access. Treat the file as confidential because it contains certificates and the
-submit ledger.
+Follow this workflow for an existing `submission.json`. Do not run a model or create a
+submission in this skill.
 
-## 1. Locate the authoritative result
+## 1. Find and validate the file
 
-Ask for the submission path only when it was not supplied. Accept the authoritative output
-from either benchmark backend; do not reconstruct it from logs or edit its metrics,
-certificates, `library_commit`, or ledger.
+Ask for the path only if the user did not provide it. If no result exists, use
+`$run-benchmark` instead.
 
-If no result exists and the user wants to run the benchmark, invoke `$run-benchmark`. Do not
-choose a model/backend or start a paid run inside this skill.
+Treat the file as confidential. Do not print certificates, trajectories, source instances,
+submit-log contents, or credentials. Do not edit the submission.
 
-Read the current round from `README.md` and the current structure from
-`benchmark/submission.schema.json`. Inspect only summary fields; never print certificates,
-source instances, submit-log contents, trajectories, or credentials. Report:
-
-- model and `library_commit`;
-- claimed bugs, token total, and submit-attempt count;
-- `run_error`, when present;
-- absolute submission path.
-
-Run the repository client as a local courtesy check:
+Run:
 
 ```bash
 python3 -m benchmark.submit --predictions <submission.json> --dry-run
 ```
 
-Stop on failure. Do not repair an invalid result by hand; send it back to the producing run.
+Stop if validation fails. Otherwise report only:
 
-## 2. Choose the outcome
+- absolute path;
+- `model` and `library_commit`;
+- claimed bugs, `total_tokens_k`, and number of submit attempts;
+- `run_error`, if present.
 
-Ask only when the user has not already chosen:
+Do not submit a result containing `run_error`. Report the error and stop.
 
-> What should happen to this result?
->
-> 1. Keep it local after validation.
-> 2. Upload an intake test that is scored privately and never reaches the leaderboard.
-> 3. Upload an official submission.
+## 2. Confirm the upload
 
-For option 1, report validation and stop. For option 2, use `--test`. For option 3, never
-use `--test`. A non-test result carrying `run_error` is not a clean official submission;
-offer local-only or test upload instead.
+Immediately before uploading, show:
 
-## 3. Authenticate without exposing credentials
+- endpoint hostname;
+- absolute file path;
+- model and claimed bug count;
 
-Require `PRB_SUBMIT_URL` from the repository documentation or maintainer. Never ask the user
-to paste any token into chat, print an environment variable, or commit credentials.
+State that this is an official submission and that the private file will leave the machine,
+then obtain explicit confirmation.
 
-Use GitHub-backed Cloudflare Access through `PRB_ACCESS_TOKEN`:
+## 3. Prepare authentication
 
-1. Require `cloudflared` locally.
-2. For a new session, obtain the application-scoped token only inside the confirmed upload
-   command: `PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close <application-url>)" <submit-command>`.
-   `cloudflared` opens the configured GitHub login.
-3. A later upload may use `cloudflared access token -app=<application-url>` inside the same
-   command substitution while the local Access session remains valid.
-4. Never run either token-producing command standalone. Pass its stdout directly through
-   the client-supported environment variable; do not display it, save it yourself, or put it
-   in a command-line flag.
-
-Do not substitute `gh auth token`, a GitHub personal access token, or `GITHUB_TOKEN`; the
-intake must never receive the user's general GitHub credential.
-
-If Cloudflare Access is not deployed or the user is not allowed by its policy, stop and ask
-the maintainer to fix the Access application. There is no shared-key fallback. Never request
-an intake key in chat.
-
-## 4. Confirm and upload once
-
-Before the external write, show the endpoint hostname, absolute file path, model, claimed
-bug count, and test/official mode. State that the private certificate payload will leave the
-machine, then obtain explicit confirmation.
-
-Use the repository client so validation and test marking stay consistent:
+Check whether the Cloudflare Access client is already available:
 
 ```bash
-python3 -m benchmark.submit --predictions <submission.json> --test  # private test
-python3 -m benchmark.submit --predictions <submission.json>         # official
+command -v cloudflared >/dev/null && cloudflared --version
 ```
 
-Do not retry an ambiguous timeout automatically: the first request may already have reached
-R2 and a retry can create a duplicate. On HTTP 401/403, re-authenticate or report the missing
-Access deployment. On HTTP 413, do not trim the evidence; report the size limit. On HTTP 429,
-stop and report the rate limit.
+If it is missing, identify the operating system and tell the user that `cloudflared` must
+be installed before submission. Give the installation step from Cloudflare's official
+[downloads page](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)
+for that system. Obtain confirmation before running an installer or package-manager
+command. On macOS with Homebrew, the official command is:
 
-## 5. Report the handoff
+```bash
+brew install cloudflared
+```
 
-On success, report the returned `submission_id`, model, mode, and endpoint hostname. Make it
-clear that `accepted` means privately queued, not scored or published. The submitter does not
-trigger Actions, inspect R2, or open the leaderboard PR; those are maintainer responsibilities.
+Do not improvise a download URL, use `sudo`, or change the system without confirmation.
+After installation, run `cloudflared --version`. If installation cannot be completed,
+report the prerequisite and stop before uploading.
 
-Never claim a score until the maintainer confirms the private scorer finished. Preserve the
-local submission and logs until that confirmation.
+## 4. Log in and upload once
+
+Use the official intake:
+
+```bash
+export PRB_SUBMIT_URL=https://intake.prb-bench.workers.dev/submit
+PRB_ACCESS_APP="${PRB_SUBMIT_URL%/submit}"
+PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACCESS_APP")"
+test -n "$PRB_ACCESS_TOKEN"
+PRB_ACCESS_TOKEN="$PRB_ACCESS_TOKEN" \
+  python3 -m benchmark.submit --predictions <submission.json>
+unset PRB_ACCESS_TOKEN
+```
+
+The login opens GitHub in the user's browser. If no browser opens, give the user the login
+URL printed by `cloudflared` and wait for them to finish. Keep token acquisition inside
+command substitution. Stop if login fails or returns an empty token; do not run the upload
+command. Never print or ask for the token. Do not substitute a GitHub PAT, `gh auth token`,
+or `GITHUB_TOKEN`.
+
+Upload only once. Do not retry a timeout because the first request may already be queued.
+For HTTP 401, re-authenticate. If the login page says access is denied or the upload returns
+HTTP 403, explain that the GitHub account is not authorized. Tell the user to ensure their
+GitHub primary email has been added to the intake authorization list by a maintainer, then
+stop. For 413 or 429, stop and report the error.
+
+## 5. Report the result
+
+On success, report the `submission_id`, model, and endpoint. Say that `accepted` means
+queued privately, not scored or published. Keep the local submission until scoring is
+confirmed.
+
+## 6. Trigger scoring
+
+After reporting an accepted submission, trigger the scoring workflow once. If GitHub CLI
+is installed and authenticated, run:
+
+```bash
+SUBMISSION_ID="<submission_id returned by the upload>"
+RUN_URL="$(gh workflow run score-from-r2.yml \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --ref main)"
+RUN_ID="${RUN_URL##*/}"
+gh run watch "$RUN_ID" \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --exit-status --compact
+
+SHORT_ID="${SUBMISSION_ID:0:8}"
+gh pr list \
+  --repo CodingThrust/problem-reductions-benchmark \
+  --state all --limit 100 \
+  --json headRefName,url \
+  --jq ".[] | select(.headRefName | endswith(\"--${SHORT_ID}\")) | .url"
+```
+
+If `gh` is unavailable, give the user the
+[workflow page](https://github.com/CodingThrust/problem-reductions-benchmark/actions/workflows/score-from-r2.yml)
+and ask them to select **Run workflow** on `main`.
+
+The intake authorization list and GitHub Actions permissions are separate. If GitHub hides
+the **Run workflow** button or returns 403, explain that a repository maintainer or a
+collaborator with Actions write permission must trigger it. Do not upload again: the
+accepted submission remains privately queued and the daily scheduled workflow will process
+it if nobody triggers a run manually.
+
+When the triggered run succeeds, return the matching PR URL. Match it using the first eight
+characters of this upload's `submission_id`, which appear at the end of the leaderboard
+branch name; do not return an unrelated latest PR. If the run fails, return its URL and the
+failure. If it succeeds but no matching PR exists, return the run URL and explain that no PR
+was created instead of guessing a link.
