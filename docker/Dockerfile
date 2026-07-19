@@ -124,7 +124,7 @@ ENV REPO_DIR=/app/pr-src \
     OUTPUT=/out/submission.json
 VOLUME ["/out"]
 # Build-time sanity that the assembled runner imports and runs (no API/pred calls).
-RUN python -m benchmark.run_submission --fake --model fake/check \
+RUN python -m benchmark.run_top50 --fake --model fake/check \
     --output /tmp/buildcheck.json && rm -f /tmp/buildcheck.json
-ENTRYPOINT ["python", "-m", "benchmark.run_submission"]
+ENTRYPOINT ["python", "-m", "benchmark.run_top50"]
 CMD []

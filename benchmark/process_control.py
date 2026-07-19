@@ -132,6 +132,11 @@ def run_capped_process(
             timed_out = True
             terminate_process_group(process)
             process.wait()
+        else:
+            # A successful shell leader may leave background children behind. Kill the
+            # entire private process group before reading pipes to completion so no process
+            # can survive into a later rule episode or keep a pipe open indefinitely.
+            terminate_process_group(process)
         for reader in readers:
             reader.join()
         stdout, stderr = capture.result()

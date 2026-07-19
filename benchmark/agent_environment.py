@@ -6,6 +6,17 @@ import subprocess
 
 from benchmark.process_control import ProcessLimits, run_capped_process
 
+_SAFE_ENV_KEYS = {"PATH", "PYTHONPATH", "LANG", "LC_ALL", "PAGER", "MANPAGER", "LESS",
+                  "PRB_PRED_DIR", "PRB_SUBMIT_DIR", "PRB_ARTIFACT_DIR",
+                  "PRB_PRED_TIMEOUT", "PRB_SUBMIT_TIMEOUT"}
+
+
+def sanitized_agent_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the small non-secret environment visible to model-authored commands."""
+    merged = dict(os.environ)
+    merged.update(extra or {})
+    return {key: value for key, value in merged.items() if key in _SAFE_ENV_KEYS}
+
 
 def run_as_agent(
     command: str,
@@ -64,7 +75,7 @@ def make_agent_environment(session, *, uid: int, gid: int,
                 result = run_as_agent(
                     command,
                     cwd=action_cwd,
-                    env=os.environ | self.config.env,
+                    env=sanitized_agent_env(self.config.env),
                     timeout=timeout or self.config.timeout,
                     uid=uid,
                     gid=gid,
