@@ -11,10 +11,12 @@
 #
 # Model/auth configuration lives in submission.env (see submission.env.example). Local
 # repository, submission, and log locations are intentionally explicit Make variables.
-# PR_REF = the problem-reductions version this benchmark round targets (tag or commit).
-# It drives BOTH the build arg and the image tag, so bumping the round is one place:
+# BENCHMARK_VERSION is the version of this benchmark contract. PR_REF is the
+# problem-reductions version this round targets; by policy they are synchronized unless a
+# local/debug run explicitly overrides PR_REF. They drive both the build arg and image tag:
 #   make runner-build PR_REF=v0.7.0   →   builds + tags problem-reductions-runner:v0.7.0
-PR_REF   ?= v0.6.0
+BENCHMARK_VERSION := $(strip $(shell cat VERSION))
+PR_REF   ?= $(BENCHMARK_VERSION)
 IMAGE    ?= problem-reductions-runner:$(PR_REF)
 GHCR_IMAGE ?= ghcr.io/codingthrust/problem-reductions-runner
 JOBS     ?= 1
@@ -29,7 +31,15 @@ LOCAL_LOG_DIR ?=
 REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
 LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help runner-build runner-pull preflight run run-local score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help print-benchmark-version print-pr-ref runner-build runner-pull preflight run run-local score-local board publish-local serve
+
+## Print this checkout's benchmark contract version.
+print-benchmark-version:
+	@echo "$(BENCHMARK_VERSION)"
+
+## Print the current benchmark round's problem-reductions ref for tools and skills.
+print-pr-ref:
+	@echo "$(PR_REF)"
 
 ## Run the full test suite (unit + integration tests that need real repo).
 test:

@@ -25,6 +25,7 @@ SCORER_WORKFLOW = REPO_ROOT / ".github/workflows/score-from-r2.yml"
 SUBMISSIONS_README = REPO_ROOT / "submissions/README.md"
 SITE_INDEX = REPO_ROOT / "site/index.html"
 INTAKE_README = REPO_ROOT / "intake/cloudflare-worker/README.md"
+VERSION_FILE = REPO_ROOT / "VERSION"
 
 
 def _text(path: Path) -> str:
@@ -76,6 +77,9 @@ class TestReadme:
 
     def test_readme_lists_current_round_contract(self):
         text = README.read_text(encoding="utf-8")
+        benchmark_version = VERSION_FILE.read_text(encoding="utf-8").strip()
+        assert f"badge/benchmark-{benchmark_version}-blue" in text
+        assert f"[`{benchmark_version}`](VERSION)" in text
         assert PINNED_COMMIT in text
         assert f"`{PINNED_PRED_VERSION}`" in text
         assert "no schema-version field" in text.lower()
@@ -113,15 +117,52 @@ class TestBackendRouteSeparation:
         assert "or start docker/podman" in t
 
     @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
-    def test_each_skill_exposes_three_submission_goals(self, skill):
+    def test_each_skill_exposes_only_local_and_official_goals(self, skill):
         t = _text(skill)
         assert "keep and validate" in t
-        assert "intake test" in t
         assert "official submission" in t
+        assert "intake test" not in t
 
     @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
     def test_run_skills_delegate_upload(self, skill):
-        assert "$submit-benchmark-result" in _text(skill)
+        t = _text(skill)
+        assert "$submit-benchmark-result" in t
+        assert "that skill owns validation" in t
+
+    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    def test_run_skills_confirm_the_benchmark_version(self, skill):
+        t = _text(skill)
+        assert "make -s print-benchmark-version" in t
+        assert "make -s print-pr-ref" in t
+        assert "v0.6.0" not in t
+        assert "problem-reductions-benchmark/blob/main/version" in t
+        assert "benchmark version:" in t
+        assert "wait for confirmation" in t
+        assert "checkout is outdated" in t
+
+    def test_version_has_one_source_of_truth(self):
+        version = VERSION_FILE.read_text(encoding="utf-8").strip()
+        assert version.startswith("v")
+        for target in ("print-benchmark-version", "print-pr-ref"):
+            result = subprocess.run(
+                ["make", "-s", target], cwd=REPO_ROOT,
+                text=True, capture_output=True, check=True)
+            assert result.stdout.strip() == version
+
+    @pytest.mark.parametrize("workflow", [
+        REPO_ROOT / ".github/workflows/ci.yml",
+        REPO_ROOT / ".github/workflows/score-from-r2.yml",
+        REPO_ROOT / ".github/workflows/runner-image.yml",
+    ])
+    def test_workflows_read_version_file(self, workflow):
+        text = workflow.read_text(encoding="utf-8")
+        assert "cat VERSION" in text
+        assert "PR_REF: v" not in text
+
+    def test_router_sends_existing_results_to_submit_skill(self):
+        t = _text(REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md")
+        assert "already has a `submission.json`" in t
+        assert "$submit-benchmark-result" in t
 
 
 class TestSubmitSkill:

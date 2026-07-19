@@ -1,5 +1,7 @@
 # Problem-Reductions Bug-Finding Benchmark
 
+[![Benchmark version](https://img.shields.io/badge/benchmark-v0.6.0-blue)](VERSION)
+
 A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
 
 The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a private store; the maintainer re-verifies it with `pred` and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
@@ -8,6 +10,7 @@ The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submit
 
 | Contract | Current value | Ownership |
 |---|---|---|
+| Benchmark version | [`v0.6.0`](VERSION) | `VERSION` is the source of truth used by local commands and production workflows. |
 | Submission format | [`benchmark/submission.schema.json`](benchmark/submission.schema.json) | The runner writes the current structure and the scorer parses that structure directly. The payload has no schema-version field. |
 | `problem-reductions` target | [`v0.6.0` / `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8) | Every official result is verified against this exact commit. |
 | `pred` | `0.6.0` | The runner/scorer image supplies and verifies the matching binary. |

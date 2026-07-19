@@ -5,6 +5,10 @@ description: Route a request to run, reproduce, smoke-test, or generate a submis
 
 # Route a benchmark run
 
+If the caller already has a `submission.json` and wants to validate or submit it, invoke
+`$submit-benchmark-result` and stop. Do not ask how to run a model when the result already
+exists.
+
 Choose exactly one execution route before asking about models, credentials, paths, or
 submission settings.
 

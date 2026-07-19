@@ -52,14 +52,27 @@ numbered stage at a time when its answer controls the next branch.
    > What should happen after the run?
    >
    > 1. Keep and validate the result locally without uploading.
-   > 2. Upload an intake test that is scored privately but excluded from the leaderboard.
-   > 3. Upload an official submission.
+   > 2. Upload an official submission.
 
-   The `$submit-benchmark-result` skill owns intake authentication and upload.
+   The `$submit-benchmark-result` skill owns submission validation, authentication, and
+   upload.
 
-5. Resolve `PR_REF` (default `v0.6.0`), `SUBMIT_LIMIT` (default 100), and three separate,
-   explicit paths: clone destination, authoritative submission JSON, and log directory.
-   Offer concrete defaults and ask whether to accept them.
+5. Read this checkout's benchmark version with `make -s print-benchmark-version`. Read the
+   latest version from the official repository's
+   [`main/VERSION`](https://github.com/CodingThrust/problem-reductions-benchmark/blob/main/VERSION);
+   do not use the `problem-reductions` version or guess. Show this in the caller's language
+   and wait for confirmation:
+
+   > Benchmark version: `<checkout version>` (latest version: `<main/VERSION>`)
+
+   If the versions differ, explain that the checkout is outdated and ask the caller to
+   update it before an official run. If the latest-version lookup fails, show `unknown`
+   rather than substituting the pinned `problem-reductions` version.
+
+6. Resolve the internal problem-reductions pin with `make -s print-pr-ref`, plus
+   `SUBMIT_LIMIT` (default 100) and three separate, explicit paths: clone destination,
+   authoritative submission JSON, and log directory. Offer concrete defaults and ask
+   whether to accept them.
 
 ## Verify the selected harness
 
@@ -84,10 +97,10 @@ Before the first real model call, show:
 - CLI human name and backend ID;
 - resolved CLI path/version and authentication status;
 - exact model;
-- target `PR_REF` and resolved commit;
+- confirmed benchmark version and resolved commit;
 - submit limit;
 - clone destination, authoritative output path, and log path;
-- local/test versus official-upload goal.
+- local versus official-upload goal.
 
 State that the run can consume substantial time or credits, then get explicit confirmation.
 
@@ -100,10 +113,10 @@ Run through `make run-local` with the selected backend. If invoking
 example:
 
 ```bash
+PR_REF="$(make -s print-pr-ref)"
 make run-local \
-  PR_REF=v0.6.0 \
   LOCAL_BACKEND=codex \
-  LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
+  LOCAL_REPO_DIR="../runs/problem-reductions-${PR_REF}" \
   LOCAL_OUTPUT=../runs/results/submission.json \
   LOCAL_LOG_DIR=../runs/logs
 ```
@@ -114,7 +127,7 @@ attempt reaches the service, require `run_error` and inspect
 
 ## Validate and hand off
 
-Always validate the authoritative file:
+For option 1, validate the authoritative file locally:
 
 ```bash
 python -m benchmark.submit --predictions <submission.json> --dry-run
@@ -123,6 +136,6 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, CLI warnings, and
 absolute output/log paths. Preserve partial results and logs on failure.
 
-For option 2 or 3, invoke `$submit-benchmark-result` with the authoritative path and the
-already-selected test/official mode. That skill owns authentication, final confirmation,
-upload, and submission-ID reporting. Never upload merely because the run completed.
+For option 2, invoke `$submit-benchmark-result` with the authoritative path. Do not validate
+it first: that skill owns validation, authentication, final confirmation, upload, scoring,
+and PR reporting. Never upload merely because the run completed.

@@ -23,9 +23,6 @@ permissions:
   contents: write        # push the aggregate to a bot branch
   pull-requests: write   # open the PR that updates the public leaderboard
 
-env:
-  PR_REF: v0.6.0
-
 concurrency:
   group: score-from-r2
   cancel-in-progress: false
@@ -36,6 +33,10 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+
+      - name: Read benchmark version
+        id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
       # buildx with the docker-container driver — required for the type=gha build cache
       # below (the default docker driver can't export cache).
@@ -48,7 +49,7 @@ jobs:
           context: .
           file: docker/Dockerfile
           target: runtime
-          build-args: PR_REF=${{ env.PR_REF }}
+          build-args: PR_REF=${{ steps.version.outputs.value }}
           load: true
           tags: prb-scoring:latest
           cache-from: type=gha
