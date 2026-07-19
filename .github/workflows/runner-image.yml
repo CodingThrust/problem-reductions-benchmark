@@ -2,7 +2,7 @@ name: Runner image (GHCR)
 
 # Builds the bug-finding runner image (mini-swe/LiteLLM agent + pinned pred) and pushes it
 # to GHCR, so `make run` can start with `make runner-pull` instead of a ~30–60 min local
-# Rust build. Tag = PR_REF from the Makefile (e.g. v0.6.0) + latest.
+# Rust build. Tag = the benchmark version from VERSION (also the default PR_REF) + latest.
 #
 # One-time setup: after the first push, mark the package public
 # (Packages → problem-reductions-runner → Package settings) so anyone can pull it.
@@ -14,7 +14,8 @@ on:
       - docker/Dockerfile
       - benchmark/requirements.txt
       - .github/workflows/runner-image.yml
-      - Makefile            # PR_REF pin lives here
+      - Makefile
+      - VERSION
   workflow_dispatch: {}
 
 permissions:
@@ -27,9 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Read PR_REF from the Makefile
+      - name: Read benchmark version
         id: pins
-        run: echo "pr_ref=$(grep -E '^PR_REF[[:space:]]*\?=' Makefile | sed -E 's/.*=[[:space:]]*//')" >> "$GITHUB_OUTPUT"
+        run: echo "pr_ref=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
       # Docker repository names must be lowercase — the org login (CodingThrust) is not.
       - name: Lowercase GHCR image namespace

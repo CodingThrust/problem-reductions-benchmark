@@ -8,6 +8,7 @@ The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submit
 
 | Contract | Current value | Ownership |
 |---|---|---|
+| Benchmark version | [`v0.6.0`](VERSION) | `VERSION` is the source of truth used by local commands and production workflows. |
 | Submission format | [`benchmark/submission.schema.json`](benchmark/submission.schema.json) | The runner writes the current structure and the scorer parses that structure directly. The payload has no schema-version field. |
 | `problem-reductions` target | [`v0.6.0` / `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8) | Every official result is verified against this exact commit. |
 | `pred` | `0.6.0` | The runner/scorer image supplies and verifies the matching binary. |

@@ -57,10 +57,22 @@ numbered stage at a time when its answer controls the next branch.
    The `$submit-benchmark-result` skill owns submission validation, authentication, and
    upload.
 
-5. Read the current benchmark round with `make -s print-pr-ref`; use that `PR_REF` unless the
-   caller explicitly requested an override. Resolve `SUBMIT_LIMIT` (default 100) and three
-   separate, explicit paths: clone destination, authoritative submission JSON, and log
-   directory. Offer concrete defaults and ask whether to accept them.
+5. Read this checkout's benchmark version with `make -s print-benchmark-version`. Read the
+   latest version from the official repository's
+   [`main/VERSION`](https://github.com/CodingThrust/problem-reductions-benchmark/blob/main/VERSION);
+   do not use the `problem-reductions` version or guess. Show this in the caller's language
+   and wait for confirmation:
+
+   > Benchmark version: `<checkout version>` (latest version: `<main/VERSION>`)
+
+   If the versions differ, explain that the checkout is outdated and ask the caller to
+   update it before an official run. If the latest-version lookup fails, show `unknown`
+   rather than substituting the pinned `problem-reductions` version.
+
+6. Resolve the internal problem-reductions pin with `make -s print-pr-ref`, plus
+   `SUBMIT_LIMIT` (default 100) and three separate, explicit paths: clone destination,
+   authoritative submission JSON, and log directory. Offer concrete defaults and ask
+   whether to accept them.
 
 ## Verify the selected harness
 
@@ -85,7 +97,7 @@ Before the first real model call, show:
 - CLI human name and backend ID;
 - resolved CLI path/version and authentication status;
 - exact model;
-- target `PR_REF` and resolved commit;
+- confirmed benchmark version and resolved commit;
 - submit limit;
 - clone destination, authoritative output path, and log path;
 - local versus official-upload goal.

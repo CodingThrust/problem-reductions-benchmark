@@ -43,11 +43,22 @@ Do not dump every configuration question into one message.
    Default to local-only only when the caller explicitly delegates the choice. The
    `$submit-benchmark-result` skill owns submission validation, authentication, and upload.
 
-4. Read the current benchmark round with `make -s print-pr-ref`; use that `PR_REF` unless the
-   caller explicitly requested an override. Resolve `SUBMIT_LIMIT` (default 100) and `STAMP`
-   (default: the Makefile timestamp). Show the derived authoritative path
-   `out/<stamp>/submission.json`; the trajectory is written alongside it. Do not ask for
-   arbitrary host output or log paths when using `make run`.
+4. Read this checkout's benchmark version with `make -s print-benchmark-version`. Read the
+   latest version from the official repository's
+   [`main/VERSION`](https://github.com/CodingThrust/problem-reductions-benchmark/blob/main/VERSION);
+   do not use the `problem-reductions` version or guess. Show this in the caller's language
+   and wait for confirmation:
+
+   > Benchmark version: `<checkout version>` (latest version: `<main/VERSION>`)
+
+   If the versions differ, explain that the checkout is outdated and ask the caller to
+   update it before an official run. If the latest-version lookup fails, show `unknown`
+   rather than substituting the pinned `problem-reductions` version.
+
+5. Resolve the internal problem-reductions pin with `make -s print-pr-ref`, plus
+   `SUBMIT_LIMIT` (default 100) and `STAMP` (default: the Makefile timestamp). Show the
+   derived authoritative path `out/<stamp>/submission.json`; the trajectory is written
+   alongside it. Do not ask for arbitrary host output or log paths when using `make run`.
 
 ## Configure safely
 
@@ -81,8 +92,8 @@ Do not expose secret values in command output or the final response. Do not add 
    caller explicitly wants a local build. For Podman, use the equivalent command from
    `references/engines.md`.
 3. Before the preflight's real API call, show the resolved model, backend `mini-swe`, API
-   endpoint with secrets redacted, `PR_REF`, submit limit, `STAMP`, derived submission path,
-   and upload goal. Ask for explicit confirmation.
+   endpoint with secrets redacted, confirmed benchmark version, submit limit, `STAMP`,
+   derived submission path, and upload goal. Ask for explicit confirmation.
 4. Run `make preflight`. It checks `pred`, rule sources, and one tiny LiteLLM call. Stop on
    any failure; never proceed to a full run after a failed preflight.
 
