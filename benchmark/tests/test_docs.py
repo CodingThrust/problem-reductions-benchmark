@@ -108,6 +108,11 @@ class TestSubmitSkill:
         assert "--test" in t
         assert "explicit confirmation" in t
 
+    def test_submit_skill_does_not_offer_test_mode_to_submitters(self):
+        t = _text(SUBMIT_SKILL)
+        assert "test upload" not in t
+        assert "only when the user explicitly asks" in t
+
     def test_submit_skill_uses_access_without_github_credentials(self):
         t = _text(SUBMIT_SKILL)
         assert "cloudflared access login" in t
