@@ -138,8 +138,7 @@ class TestSubmitSkill:
         t = _text(SUBMIT_SKILL)
         assert "gh workflow run score-from-r2.yml" in t
         assert "--repo codingthrust/problem-reductions-benchmark" in t
-        assert "-f reset_results=false" in t
-        assert "never set `reset_results=true`" in t
+        assert "reset_results" not in t
         assert "actions write permission" in t
         assert 'run_id="${run_url##*/}"' in t
         assert "gh run watch" in t
@@ -158,3 +157,6 @@ class TestScorerWorkflow:
     def test_empty_r2_queue_is_valid(self):
         text = SCORER_WORKFLOW.read_text(encoding="utf-8")
         assert "jq -r '.[]? | select(endswith(\".json\"))'" in text
+
+    def test_workflow_exposes_no_result_reset(self):
+        assert "reset_results" not in _text(SCORER_WORKFLOW)

@@ -16,11 +16,6 @@ name: Score submissions from R2 (private → aggregate)
 
 on:
   workflow_dispatch:          # manual trigger (maintainer)
-    inputs:
-      reset_results:
-        description: "Wipe R2 results/ before scoring (clear stale scored files)"
-        type: boolean
-        default: false
   schedule:
     - cron: "0 16 * * *"      # daily sweep of R2 for new submissions (16:00 UTC).
 
@@ -69,12 +64,6 @@ jobs:
           AWS_DEFAULT_REGION: auto
         run: |
           mkdir -p incoming results/scored
-          # reset_results (manual): wipe prior scored detail so the board is rebuilt from
-          # scratch — clears stale/test entries that predate a rule change.
-          if [ "${{ github.event.inputs.reset_results }}" = "true" ]; then
-            echo "reset_results: wiping s3://$BUCKET/results"
-            aws s3 rm "s3://$BUCKET/results" --recursive --endpoint-url "$R2_ENDPOINT" || true
-          fi
           # Snapshot the exact queue keys before downloading. Only this immutable manifest
           # may be archived later; an object arriving while scoring remains in incoming/.
           aws s3api list-objects-v2 --bucket "$BUCKET" --prefix incoming/ \

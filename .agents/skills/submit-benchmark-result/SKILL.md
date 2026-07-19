@@ -105,8 +105,7 @@ is installed and authenticated, run:
 SUBMISSION_ID="<submission_id returned by the upload>"
 RUN_URL="$(gh workflow run score-from-r2.yml \
   --repo CodingThrust/problem-reductions-benchmark \
-  --ref main \
-  -f reset_results=false)"
+  --ref main)"
 RUN_ID="${RUN_URL##*/}"
 gh run watch "$RUN_ID" \
   --repo CodingThrust/problem-reductions-benchmark \
@@ -120,9 +119,9 @@ gh pr list \
   --jq ".[] | select(.headRefName | endswith(\"--${SHORT_ID}\")) | .url"
 ```
 
-Never set `reset_results=true` for a submission. If `gh` is unavailable, give the user the
+If `gh` is unavailable, give the user the
 [workflow page](https://github.com/CodingThrust/problem-reductions-benchmark/actions/workflows/score-from-r2.yml)
-and ask them to select **Run workflow** on `main` without enabling `reset_results`.
+and ask them to select **Run workflow** on `main`.
 
 The intake authorization list and GitHub Actions permissions are separate. If GitHub hides
 the **Run workflow** button or returns 403, explain that a repository maintainer or a
