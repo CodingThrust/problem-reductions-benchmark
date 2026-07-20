@@ -102,6 +102,15 @@ def test_middle_diagnostic_survives_when_long_head_and_tail_exceed_preview(tmp_p
     assert "middle context after" in packaged.preview
 
 
+def test_successful_test_summary_survives_many_error_named_tests(tmp_path):
+    text = "".join(f"test_error_case_{index} PASSED\n" for index in range(500))
+    text += "500 passed, 3 deselected in 12.34s\n"
+    _, packaged = _package(tmp_path, text, returncode=0)
+
+    assert len(packaged.preview) <= 10_000
+    assert "500 passed, 3 deselected" in packaged.preview
+
+
 def test_valid_json_is_minified_without_losing_values(tmp_path):
     text = '{\n  "type": "MaximumIndependentSet",\n  "weights": [1, 2, 3]\n}\n'
     _, packaged = _package(tmp_path, text, returncode=0)

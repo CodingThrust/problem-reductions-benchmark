@@ -26,7 +26,7 @@ def _fake_pred(tmp_path: Path) -> Path:
         "  --help) echo 'help'; exit 0 ;;\n"
         "  list) echo '[\"r1\",\"r2\"]'; exit 0 ;;\n"
         "  fail) echo 'bad args' >&2; exit 7 ;;\n"
-        "  sleep) sleep 2; exit 0 ;;\n"
+        "  sleep) sleep 10; exit 0 ;;\n"
         "  spam) python3 -c 'print(\"x\" * 5000)'; exit 0 ;;\n"
         "  *) echo \"ran:$*\"; exit 0 ;;\n"
         "esac\n",
@@ -36,7 +36,7 @@ def _fake_pred(tmp_path: Path) -> Path:
     return script
 
 
-def _budget(*, pred=4, solve=1, timeout=1) -> EvidenceBudget:
+def _budget(*, pred=4, solve=1, timeout=3) -> EvidenceBudget:
     return EvidenceBudget(
         model_generations=10,
         shell_actions=10,
@@ -107,14 +107,16 @@ def test_global_output_option_cannot_bypass_solve_budget(tmp_path):
 
 def test_concurrent_pred_clients_cannot_overspend(tmp_path):
     with EvidenceBudgetSession(
-        rule="r1", budget=_budget(pred=4, solve=0), pred_binary=_fake_pred(tmp_path),
+        rule="r1", budget=_budget(pred=4, solve=0, timeout=5),
+        pred_binary=_fake_pred(tmp_path),
         verifier=lambda cert: Verdict(False, "no bug"),
     ) as session:
         with ThreadPoolExecutor(max_workers=20) as pool:
             results = list(pool.map(
                 lambda _: _run("pred", "create", "X", cwd=session.workdir), range(20)))
 
-        assert sum(result.returncode == 0 for result in results) == 4
+        assert sum(result.returncode == 0 for result in results) == 4, [
+            (result.returncode, result.stderr) for result in results]
         assert sum(result.returncode == 75 for result in results) == 16
         assert session.status()["pred_calls"] == {"used": 4, "limit": 4, "remaining": 0}
         observed = [record for record in session.pred.ledger if "observation" in record]
@@ -126,7 +128,8 @@ def test_concurrent_pred_clients_cannot_overspend(tmp_path):
 
 def test_free_commands_are_cached_and_do_not_charge(tmp_path):
     with EvidenceBudgetSession(
-        rule="r1", budget=_budget(pred=1, solve=0), pred_binary=_fake_pred(tmp_path),
+        rule="r1", budget=_budget(pred=1, solve=0, timeout=5),
+        pred_binary=_fake_pred(tmp_path),
         verifier=lambda cert: Verdict(False, "no bug"),
     ) as session:
         assert _run("pred", "--budget-status", cwd=session.workdir).returncode == 0
@@ -142,7 +145,8 @@ def test_free_commands_are_cached_and_do_not_charge(tmp_path):
 
 def test_nonzero_exit_and_timeout_consume_pred_budget(tmp_path):
     with EvidenceBudgetSession(
-        rule="r1", budget=_budget(pred=2, solve=0), pred_binary=_fake_pred(tmp_path),
+        rule="r1", budget=_budget(pred=2, solve=0),
+        pred_binary=_fake_pred(tmp_path),
         verifier=lambda cert: Verdict(False, "no bug"),
     ) as session:
         failed = _run("pred", "fail", cwd=session.workdir)
@@ -174,7 +178,8 @@ def test_gateway_infrastructure_failure_releases_reservation(tmp_path):
 def test_pred_output_is_drained_but_observation_is_capped(tmp_path):
     raw_log = None
     with EvidenceBudgetSession(
-        rule="r1", budget=_budget(pred=1, solve=0), pred_binary=_fake_pred(tmp_path),
+        rule="r1", budget=_budget(pred=1, solve=0, timeout=5),
+        pred_binary=_fake_pred(tmp_path),
         verifier=lambda cert: Verdict(False, "no bug"),
     ) as session:
         result = _run("pred", "spam", cwd=session.workdir)

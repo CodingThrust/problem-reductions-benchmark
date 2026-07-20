@@ -16,7 +16,8 @@ _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DIAGNOSTIC = re.compile(
     r"(?i)(error|fail(?:ed|ure)?|panic|assert(?:ion)?|traceback|exception|timeout|timed out|"
-    r"sentinel|left\s*[:=]|right\s*[:=]|\b\d+\s+failed\b|test result:)")
+    r"sentinel|left\s*[:=]|right\s*[:=]|"
+    r"\b\d+\s+(?:failed|passed|skipped|deselected)\b|test result:)")
 
 
 @dataclass(frozen=True)
