@@ -194,7 +194,7 @@ def test_triage_builtin_and_error_results_use_observation_policy(tmp_path):
         ]
 
         assert [output["returncode"] for output in outputs] == [0, 2, 2, 75]
-        assert all("policy=terminal-diagnostics/v1" in output["output"]
+        assert all("[observation shell-" in output["output"]
                    and "[raw log:" in output["output"] for output in outputs)
         ledger = session.ledger()
         shell_events = [event for event in ledger["events"]
@@ -215,13 +215,13 @@ def test_only_standard_factory_can_mark_a_run_rankable(tmp_path, monkeypatch):
 
     monkeypatch.setattr(top50.os, "geteuid", lambda: 0)
     runner = build_rankable_runner(
-        contract=_contract(), pred_binary=_fake_pred(tmp_path),
+        pred_binary=_fake_pred(tmp_path),
         agent_uid=10001, agent_gid=10001, oracle_uid=10002, oracle_gid=10002,
         evidence_gid=10003)
     assert runner._rankable_contract is True
     with pytest.raises(ValueError, match="distinct"):
         build_rankable_runner(
-            contract=_contract(), pred_binary=_fake_pred(tmp_path),
+            pred_binary=_fake_pred(tmp_path),
             agent_uid=10001, agent_gid=10001, oracle_uid=10001, oracle_gid=10002,
             evidence_gid=10003)
 

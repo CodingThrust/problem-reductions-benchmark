@@ -23,7 +23,15 @@ from benchmark.run_mini import (
     _message_text,
     _session_usage,
 )
-from benchmark.top50_budget import FROZEN_CONTRACT
+from benchmark.top50_budget import (
+    EPISODE_BUDGET,
+    HYPOTHESIS_CHARS,
+    INFERENCE_PARAMETERS,
+    OBSERVATION_LIMITS,
+    SAFETY_CONTROLS,
+    SHORTLIST_SIZE,
+    TRIAGE_BUDGET,
+)
 from benchmark.usage import Usage, usage_as_dict
 from benchmark.verify import Verdict, verify
 
@@ -56,13 +64,24 @@ class Top50Contract:
 
     def __post_init__(self) -> None:
         if self.shortlist_size != TOP50_SIZE:
-            raise ValueError("the rankable contract requires exactly 50 rules")
+            raise ValueError("the Top50 benchmark requires exactly 50 rules")
         if self.hypothesis_chars <= 0:
             raise ValueError("hypothesis_chars must be positive")
         caps = {self.triage.max_output_chars, self.episode.max_output_chars,
                 self.observation.preview_chars}
         if len(caps) != 1:
             raise ValueError("triage, episode, and observation preview caps must match")
+
+
+def benchmark_limits() -> Top50Contract:
+    """Return the benchmark's single built-in set of logical limits."""
+    return Top50Contract(
+        triage=TriageBudget(**TRIAGE_BUDGET),
+        episode=EvidenceBudget(**EPISODE_BUDGET),
+        observation=ObservationConfig(**OBSERVATION_LIMITS),
+        shortlist_size=SHORTLIST_SIZE,
+        hypothesis_chars=HYPOTHESIS_CHARS,
+    )
 
 
 @dataclass(frozen=True)
@@ -204,7 +223,6 @@ class TriageSession:
     def ledger(self) -> dict:
         with self._lock:
             return {"budget": asdict(self.budget), "status": self.status(),
-                    "observation_policy": asdict(self.observation_config),
                     "observations": copy.deepcopy(self._observations),
                     "events": copy.deepcopy(self._events),
                     "shortlist": ([asdict(entry) for entry in self._shortlist]
@@ -359,11 +377,6 @@ class Top50Runner:
             "status": "run_error" if run_error else "completed",
             "rankable": (self._rankable_contract and run_error is None
                          and len(episodes) == self.contract.shortlist_size),
-            "contract": {"triage": asdict(self.contract.triage),
-                         "episode": asdict(self.contract.episode),
-                         "observation": asdict(self.contract.observation),
-                         "shortlist_size": self.contract.shortlist_size,
-                         "hypothesis_chars": self.contract.hypothesis_chars},
             "shortlist": ([asdict(entry) for entry in shortlist] if shortlist else None),
             "triage": {"ledger": triage, "messages": copy.deepcopy(triage_result.messages),
                        "tokens_k": triage_result.tokens_k,
@@ -377,7 +390,7 @@ class Top50Runner:
 
 
 def build_rankable_runner(
-    *, contract: Top50Contract, pred_binary: str | Path,
+    *, pred_binary: str | Path,
     agent_uid: int, agent_gid: int, oracle_uid: int, oracle_gid: int, evidence_gid: int,
     api_base: str | None = None, api_key: str | None = None,
     verifier: Callable[[dict], Verdict] = verify,
@@ -387,15 +400,16 @@ def build_rankable_runner(
         raise RuntimeError("rankable Top50 runs require the root runner privilege boundary")
     if len({agent_uid, oracle_uid}) != 2:
         raise ValueError("agent and oracle must use distinct identities")
-    inference = FROZEN_CONTRACT["inference_parameters"]
-    safety = FROZEN_CONTRACT["safety_controls"]
+    inference = INFERENCE_PARAMETERS
+    safety = SAFETY_CONTROLS
     executor = MiniSwePhaseExecutor(
         api_base=api_base, api_key=api_key, max_tokens=inference["max_tokens"],
         model_timeout_seconds=safety["model_timeout_seconds"],
         model_retries=safety["model_retries"], model_kwargs=None,
         agent_uid=agent_uid, agent_gid=agent_gid, evidence_gid=evidence_gid)
     return Top50Runner(
-        executor=executor, contract=contract, pred_binary=pred_binary, verifier=verifier,
+        executor=executor, contract=benchmark_limits(), pred_binary=pred_binary,
+        verifier=verifier,
         agent_uid=agent_uid, agent_gid=agent_gid, oracle_uid=oracle_uid,
         oracle_gid=oracle_gid, evidence_gid=evidence_gid,
         _rankable_token=_RANKABLE_TOKEN)

@@ -10,36 +10,24 @@ import os
 from pathlib import Path
 
 from benchmark.env_setup import find_pred_binary, pinned_commit, verify_pred_version
-from benchmark.evidence_budget import EvidenceBudget
-from benchmark.observation_policy import ObservationConfig
 from benchmark.run_mini import list_rules
 from benchmark.top50_runner import (
     PhaseResult,
-    Top50Contract,
     Top50Runner,
-    TriageBudget,
+    benchmark_limits,
     build_rankable_runner,
 )
 from benchmark.top50_contract import (
     AGENT_MODE,
-    CONTRACT_ID,
     RUNNER_VERSION,
-    EXPECTED_EPISODE_BUDGET,
-    EXPECTED_OBSERVATION,
     EXPECTED_INFERENCE_PARAMETERS,
     EXPECTED_SAFETY_CONTROLS,
-    EXPECTED_HYPOTHESIS_CHARS,
-    EXPECTED_SHORTLIST_SIZE,
-    EXPECTED_TRIAGE_BUDGET,
     expected_prompt_id,
 )
 
 
 FORBIDDEN_RANKABLE_ENV = (
     "AGENT_BACKEND", "AGENT_CONFIG", "AGENT_STRATEGY_FILE", "SUBMIT_LIMIT",
-    "PRB_TRIAGE_GENERATIONS", "PRB_TRIAGE_ACTIONS", "PRB_EPISODE_GENERATIONS",
-    "PRB_EPISODE_ACTIONS", "PRB_PRED_CALLS", "PRB_SOLVE_CALLS",
-    "PRB_MAX_OUTPUT_CHARS", "PRB_PRED_TIMEOUT_SECONDS",
     "EXPECTED_PRED_COMMIT", "EXPECTED_PRED_VERSION",
 )
 TRUSTED_PRED_PATH = Path("/usr/local/libexec/prb/pred")
@@ -81,17 +69,6 @@ def verify_rankable_pred_path(binary: Path) -> None:
         raise ValueError(f"rankable runs require the image-owned pred at {TRUSTED_PRED_PATH}")
 
 
-def frozen_contract() -> Top50Contract:
-    """Return the immutable logical budget for the released rankable track."""
-    return Top50Contract(
-        triage=TriageBudget(**EXPECTED_TRIAGE_BUDGET),
-        episode=EvidenceBudget(**EXPECTED_EPISODE_BUDGET),
-        observation=ObservationConfig(**EXPECTED_OBSERVATION),
-        shortlist_size=EXPECTED_SHORTLIST_SIZE,
-        hypothesis_chars=EXPECTED_HYPOTHESIS_CHARS,
-    )
-
-
 def validate_rankable_settings(*, model_kwargs: dict | None = None) -> None:
     """Reject every knob that could change the frozen rankable execution path."""
     present = [name for name in FORBIDDEN_RANKABLE_ENV if name in os.environ]
@@ -127,13 +104,13 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
     if not fake:
         verify_rankable_pred_path(pred_binary)
     pred_version = verify_pred_version(pred_binary)
-    contract = frozen_contract()
+    contract = benchmark_limits()
     if fake:
         runner = Top50Runner(
             executor=_FakeExecutor(), contract=contract, pred_binary=pred_binary)
     else:
         runner = build_rankable_runner(
-            contract=contract, pred_binary=pred_binary,
+            pred_binary=pred_binary,
             agent_uid=int(os.environ["PRB_AGENT_UID"]),
             agent_gid=int(os.environ["PRB_AGENT_GID"]),
             oracle_uid=int(os.environ["PRB_ORACLE_UID"]),
@@ -141,17 +118,14 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
             evidence_gid=int(os.environ["PRB_EVIDENCE_GID"]),
             api_base=api_base, api_key=api_key)
     metadata = {
-        "benchmark_contract": CONTRACT_ID,
         "library_commit": actual_commit,
         "runner_version": RUNNER_VERSION,
         "pred_version": pred_version,
         "agent_mode": AGENT_MODE,
         "prompt_id": expected_prompt_id(),
-        "budget_contract_status": "frozen",
         "safety_controls": EXPECTED_SAFETY_CONTROLS,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "inference_parameters": EXPECTED_INFERENCE_PARAMETERS,
-        "observation_policy": EXPECTED_OBSERVATION,
     }
     return runner.run(model=model, repo_path=repo, inventory=inventory,
                       output=output, metadata=metadata)

@@ -6,7 +6,7 @@ description: Configure and run this problem-reductions benchmark through an inst
 # Reproduce the historical CLI benchmark
 
 This route is permanently **non-ranking** and exists only to reproduce `legacy-whole-repo`
-artifacts. Tell the caller that coding-agent results cannot enter `top50-evidence/v2` and
+artifacts. Tell the caller that coding-agent results cannot enter the standardized Top50 table and
 get confirmation before spending time or credits. Do not describe it as a System Track.
 
 Run one whole-repository coding-agent session with the shared benchmark prompt, verifier,

@@ -55,7 +55,7 @@ class EvidenceBudget:
         if self.solve_calls > self.pred_calls:
             raise ValueError("solve_calls must be <= pred_calls")
         if self.submit_attempts != 2:
-            raise ValueError("submit_attempts must be exactly 2 for the Top50 contract")
+            raise ValueError("submit_attempts must be exactly 2 for the Top50 benchmark")
         if self.max_output_chars == 0:
             raise ValueError("max_output_chars must be > 0")
         if self.pred_timeout_seconds == 0:
@@ -662,7 +662,6 @@ class EvidenceBudgetSession:
         return {
             "rule": self.rule,
             "budget": asdict(self.budget),
-            "observation_policy": asdict(self.observation_config),
             "status": self.status(),
             "pred": pred_ledger,
             "submit": self.submit.attempts,

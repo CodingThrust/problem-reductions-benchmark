@@ -1,4 +1,4 @@
-"""Offline validation and rendering for the frozen Top50 budget evidence."""
+"""Offline validation and rendering for the Top50 budget-selection evidence."""
 from __future__ import annotations
 
 import argparse
@@ -6,11 +6,10 @@ import hashlib
 import json
 from pathlib import Path
 
-from benchmark.top50_budget import FROZEN_CONTRACT
+from benchmark.top50_budget import benchmark_parameters
 from benchmark.usage import usage_from_dict
 
 ROOT = Path(__file__).resolve().parent
-CONTRACT_PATH = ROOT / "top50_budget.json"
 REPORT_PATH = ROOT / "docs" / "budget-calibration.md"
 REQUIRED_OBSERVATION_FIELDS = {
     "candidate", "model", "target", "verified_bugs", "cap_hits", "usage",
@@ -32,8 +31,8 @@ def validate_evidence(evidence: dict, contract: dict) -> list[str]:
         errors.append("schema_version must be 1")
     if evidence.get("ranking_status") != "non-ranking-development":
         errors.append("calibration evidence must be explicitly non-ranking")
-    if evidence.get("selected_contract") != contract:
-        errors.append("selected_contract does not exactly match top50_budget.json")
+    if evidence.get("selected_parameters") != contract:
+        errors.append("selected_parameters do not exactly match the built-in benchmark limits")
     sources = evidence.get("sources")
     source_index: dict[tuple[str, str], str] = {}
     if not isinstance(sources, list) or not sources:
@@ -127,20 +126,18 @@ def validate_evidence(evidence: dict, contract: dict) -> list[str]:
 
 
 def render_report(evidence: dict) -> str:
-    contract = evidence["selected_contract"]
+    contract = evidence["selected_parameters"]
     episode = contract["episode"]
     safety = contract["safety_controls"]
     lines = [
         "# Top50 budget calibration",
-        "",
-        f"Contract: `{contract['contract_id']}` (`{contract['status']}`)",
         "",
         "This is a human-reviewed, non-ranking bounded-prefix replay record from internally "
         "retained pilot trajectories. Raw trajectories remain private; this offline checker "
         "validates the checked-in record and release consistency, not the raw replay. It is not "
         "a public score, a multi-seed experiment, or a claim that elapsed time is model ability.",
         "",
-        "## Selected contract",
+        "## Selected benchmark parameters",
         "",
         f"The release freezes M={episode['model_generations']} model generations, "
         f"P={episode['pred_calls']} total `pred` calls, "
@@ -150,8 +147,8 @@ def render_report(evidence: dict) -> str:
         f"T={contract['triage']['model_generations']} generations and "
         f"E_t={contract['triage']['shell_actions']} source-only actions.",
         "",
-        f"Terminal output uses `{contract['observation']['policy_id']}` with a "
-        f"{contract['observation']['preview_chars']}-character automatic preview and a bounded "
+        f"Terminal output has a {contract['observation']['preview_chars']}-character automatic "
+        "preview and a bounded "
         f"{contract['observation']['archive_chars']}-character raw archive per command.",
         "",
         f"Model calls have a fixed {safety['model_timeout_seconds']}-second watchdog and "
@@ -185,7 +182,7 @@ def render_report(evidence: dict) -> str:
         "",
         evidence["selection_rationale"],
         "",
-        "The public comparison is therefore one run at this single contract, ranked only by "
+        "The public comparison therefore uses these built-in parameters and is ranked only by "
         "verified distinct-rule bugs. Fixed Top50, multiple seeds, a System Track, and a public "
         "budget grid remain out of scope.",
         "",
@@ -205,7 +202,7 @@ def observation_from_artifact(path: str | Path) -> dict:
     artifact = json.loads(raw)
     if not isinstance(artifact, dict):
         raise ValueError(f"{path} must contain a JSON object")
-    episode_budget = artifact.get("contract", {}).get("episode", {})
+    episode_budget = artifact.get("calibration_parameters", {}).get("episode", {})
     episodes = artifact.get("episodes")
     if (artifact.get("calibration_status") != "non-ranking-development"
             or not isinstance(episodes, list)
@@ -249,27 +246,15 @@ def observation_from_artifact(path: str | Path) -> dict:
 
 def check(path: str | Path) -> list[str]:
     evidence = load_json(path)
-    contract = FROZEN_CONTRACT
+    contract = benchmark_parameters()
     errors = validate_evidence(evidence, contract)
-    for schema_name in ("top50_submission.schema.json", "top50_results.schema.json"):
-        schema = load_json(ROOT / schema_name)
-        schema_contract = schema.get("properties", {}).get("benchmark_contract", {}).get("const")
-        if schema_contract != contract["contract_id"]:
-            errors.append(f"{schema_name} does not name the frozen contract")
     submission_schema = load_json(ROOT / "top50_submission.schema.json")
     properties = submission_schema.get("properties", {})
-    expected_artifact_contract = {key: contract[key] for key in
-                                  ("triage", "episode", "observation", "shortlist_size",
-                                   "hypothesis_chars")}
-    if properties.get("contract", {}).get("const") != expected_artifact_contract:
-        errors.append("top50_submission.schema.json has stale logical limits")
     if properties.get("safety_controls", {}).get("const") != contract["safety_controls"]:
         errors.append("top50_submission.schema.json has stale safety controls")
     if properties.get("inference_parameters", {}).get("const") != contract[
             "inference_parameters"]:
         errors.append("top50_submission.schema.json has stale inference parameters")
-    if properties.get("observation_policy", {}).get("const") != contract["observation"]:
-        errors.append("top50_submission.schema.json has stale observation policy")
     if not errors and REPORT_PATH.read_text(encoding="utf-8") != render_report(evidence):
         errors.append("budget-calibration.md does not match the machine-readable evidence")
     return errors
@@ -289,7 +274,7 @@ def main(argv: list[str] | None = None) -> None:
         for error in errors:
             print(f"FAIL: {error}")
         raise SystemExit(1)
-    print(f"PASS: calibration evidence matches {FROZEN_CONTRACT['contract_id']}")
+    print("PASS: calibration evidence matches the built-in benchmark limits")
 
 
 if __name__ == "__main__":

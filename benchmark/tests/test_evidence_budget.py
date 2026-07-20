@@ -187,7 +187,6 @@ def test_pred_output_is_drained_but_observation_is_capped(tmp_path):
         assert len(result.stdout) <= 1024
         assert "chars omitted" in result.stdout
         observation = session.pred.ledger[0]["observation"]
-        assert observation["policy_id"] == "terminal-diagnostics/v1"
         assert observation["original_chars"] == 5001
         assert observation["preview_chars"] <= 1024
         raw_log = (session.workdir / observation["raw_log"]).resolve()

@@ -29,8 +29,9 @@ def test_fake_entrypoint_uses_50_isolated_episodes(tmp_path, monkeypatch):
     assert len(result["episodes"]) == 50
     assert result["rankable"] is False
     artifact = json.loads(output.read_text())
-    assert artifact["budget_contract_status"] == "frozen"
-    assert artifact["benchmark_contract"] == "top50-evidence/v2"
+    assert "budget_contract_status" not in artifact
+    assert "benchmark_contract" not in artifact
+    assert "contract" not in artifact
 
 
 @pytest.mark.parametrize("forbidden", ["--backend", "--config", "--strategy-file"])
@@ -46,9 +47,9 @@ def test_rankable_preflight_rejects_custom_execution_before_model_call(name, mon
         run_top50.validate_rankable_settings()
 
 
-def test_rankable_contract_cannot_be_changed_by_budget_environment(monkeypatch):
+def test_benchmark_limits_are_code_defined_and_ignore_legacy_budget_environment(monkeypatch):
     monkeypatch.setenv("PRB_PRED_CALLS", "999")
-    assert run_top50.frozen_contract().episode.pred_calls == 24
+    assert run_top50.benchmark_limits().episode.pred_calls == 24
 
 
 def test_even_empty_custom_model_kwargs_are_rejected(monkeypatch):

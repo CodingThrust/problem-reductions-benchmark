@@ -3,9 +3,7 @@
   "generated_at": "2026-07-20T00:00:00Z",
   "ranking_status": "non-ranking-development",
   "method": "Human-reviewed bounded-prefix replay record from internally retained whole-repository pilot trajectories. Raw trajectories remain private; the offline checker validates this record and release consistency, not the raw replay. These statistics are not Top50 scores.",
-  "selected_contract": {
-    "contract_id": "top50-evidence/v2",
-    "status": "frozen",
+  "selected_parameters": {
     "shortlist_size": 50,
     "hypothesis_chars": 500,
     "safety_controls": {
@@ -18,7 +16,6 @@
       "num_retries": 2
     },
     "observation": {
-      "policy_id": "terminal-diagnostics/v1",
       "preview_chars": 10000,
       "archive_chars": 1048576
     },

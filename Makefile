@@ -157,7 +157,7 @@ help:
 	@echo "  test                Run full pytest suite"
 	@echo "  test-unit           Run unit tests only (no real repo needed)"
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
-	@echo "  verify-budget       Check frozen Top50 calibration evidence offline"
+	@echo "  verify-budget       Check Top50 calibration evidence offline"
 	@echo "  runner-build        Build the dockerized submission runner image"
 	@echo "  runner-pull         Pull the prebuilt runner image from GHCR (fast runner-build alternative)"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"

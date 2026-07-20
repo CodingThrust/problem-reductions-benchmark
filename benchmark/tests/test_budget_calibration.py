@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 from benchmark import calibrate_budget
 from benchmark import run_top50
+from benchmark.top50_budget import benchmark_parameters
 
 
 def _evidence() -> dict:
@@ -15,7 +16,7 @@ def _evidence() -> dict:
 
 
 def _contract() -> dict:
-    return calibrate_budget.load_json(calibrate_budget.CONTRACT_PATH)
+    return benchmark_parameters()
 
 
 def test_checked_in_calibration_is_self_consistent():
@@ -25,8 +26,8 @@ def test_checked_in_calibration_is_self_consistent():
 
 def test_changed_selected_limit_is_rejected():
     evidence = _evidence()
-    evidence["selected_contract"]["episode"]["pred_calls"] = 25
-    assert "does not exactly match" in " ".join(
+    evidence["selected_parameters"]["episode"]["pred_calls"] = 25
+    assert "do not exactly match" in " ".join(
         calibrate_budget.validate_evidence(evidence, _contract()))
 
 
@@ -70,7 +71,8 @@ def test_development_artifact_observation_is_derived_offline(tmp_path):
     artifact = {
         "calibration_status": "non-ranking-development",
         "model": "internal/model", "library_commit": "abc",
-        "contract": {"episode": {"model_generations": 6, "pred_calls": 12}},
+        "calibration_parameters": {
+            "episode": {"model_generations": 6, "pred_calls": 12}},
         "episodes": [{
             "status": "bug_found",
             "usage": {"input": 10, "output": 2, "cache_read": 3, "cache_write": 1},
@@ -90,20 +92,16 @@ def test_development_artifact_observation_is_derived_offline(tmp_path):
     assert observation["retries"] is None
 
 
-def test_frozen_contract_is_referenced_across_release_surfaces():
+def test_code_defined_limits_match_calibration_and_version_ids_are_absent():
     contract = _contract()
-    runtime = asdict(run_top50.frozen_contract())
+    runtime = asdict(run_top50.benchmark_limits())
     assert runtime == {key: contract[key] for key in
                        ("triage", "episode", "observation", "shortlist_size",
                         "hypothesis_chars")}
     root = calibrate_budget.ROOT.parent
-    for relative in (
-        "README.md", "CONTRIBUTING.md", "benchmark/top50_config.yaml",
-        "benchmark/top50_submission.schema.json", "benchmark/top50_results.schema.json",
-        "docker/Dockerfile", "site/index.html", ".github/workflows/ci.yml",
-    ):
-        text = (root / relative).read_text(encoding="utf-8")
-        if relative.endswith("ci.yml"):
-            assert "benchmark.calibrate_budget" in text
-        else:
-            assert contract["contract_id"] in text
+    prompt = (root / "benchmark/top50_config.yaml").read_text(encoding="utf-8")
+    assert "problem-reductions Rust library" in prompt
+    assert "top50-evidence/" not in prompt
+    assert "terminal-diagnostics/" not in prompt
+    assert "benchmark.calibrate_budget" in (
+        root / ".github/workflows/ci.yml").read_text(encoding="utf-8")

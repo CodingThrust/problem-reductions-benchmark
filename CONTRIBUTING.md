@@ -1,6 +1,6 @@
 # Submitting a model run
 
-The current public comparison accepts one execution protocol: **Standardized Model API / Self-selected Top50** under frozen contract `top50-evidence/v2`.
+The current public comparison accepts one execution protocol: **Standardized Model API / Self-selected Top50**. Its limits are built into the benchmark code and are not configurable.
 
 ```text
 source-only triage → frozen Top50 → 50 isolated rule episodes → private submission
@@ -46,7 +46,7 @@ python -m benchmark.submit --predictions out/<timestamp>/submission.json
 
 The intake check is only a courtesy check. The private backend independently validates:
 
-- contract ID, prompt hash, runner mode, target commit, and `pred` version;
+- prompt hash, runner mode, target commit, and `pred` version;
 - the canonical 50-rule inventory and frozen order;
 - triage and per-rule event/usage ledgers;
 - exactly two submit opportunities per rule, including malformed or rejected calls;
@@ -64,7 +64,7 @@ The score should be read as joint **prioritization + bounded diagnosis + certifi
 
 ## Release checks
 
-Before changing the frozen contract or target version, add a new versioned contract and a new non-ranking calibration. Do not silently edit `top50-evidence/v2`.
+Before changing benchmark limits or the target version, update the non-ranking calibration evidence and documentation in the same change. The repository commit identifies the resulting benchmark definition.
 
 ```bash
 pytest -v -m "not integration"
@@ -72,7 +72,7 @@ python -m benchmark.calibrate_budget --check benchmark/docs/budget-calibration.j
 python -m benchmark.verify --calibrate
 ```
 
-The calibration checker proves that the selected limits match the runtime contract, every model covers the full candidate grid, smaller and larger `M`/`P` candidates surround the selection, and the Markdown report matches the machine-readable evidence.
+The calibration checker proves that the selected limits match the built-in runtime values, every model covers the full candidate grid, smaller and larger `M`/`P` candidates surround the selection, and the Markdown report matches the machine-readable evidence.
 
 ## Historical tooling
 

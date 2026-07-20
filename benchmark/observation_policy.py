@@ -8,7 +8,6 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-POLICY_ID = "terminal-diagnostics/v1"
 DEFAULT_PREVIEW_CHARS = 10_000
 DEFAULT_ARCHIVE_CHARS = 1_048_576
 _CONTEXT_LINES = 2
@@ -22,13 +21,10 @@ _DIAGNOSTIC = re.compile(
 
 @dataclass(frozen=True)
 class ObservationConfig:
-    policy_id: str = POLICY_ID
     preview_chars: int = DEFAULT_PREVIEW_CHARS
     archive_chars: int = DEFAULT_ARCHIVE_CHARS
 
     def __post_init__(self) -> None:
-        if self.policy_id != POLICY_ID:
-            raise ValueError(f"unsupported observation policy: {self.policy_id}")
         if self.preview_chars < 256 or self.archive_chars < self.preview_chars:
             raise ValueError("archive_chars must be >= preview_chars >= 256")
 
@@ -94,8 +90,8 @@ class ObservationStore:
 
         relative = os.path.relpath(path, self.relative_from)
         header = (
-            f"[observation {observation_id}] policy={self.config.policy_id} "
-            f"returncode={returncode} timed_out={str(timed_out).lower()}\n"
+            f"[observation {observation_id}] returncode={returncode} "
+            f"timed_out={str(timed_out).lower()}\n"
             f"[raw log: {relative}; original={original_chars} chars/{original_lines} lines; "
             f"archive={'truncated' if archive_truncated else 'complete'}]\n"
         )
@@ -106,7 +102,6 @@ class ObservationStore:
             "observation_id": observation_id,
             "kind": kind,
             "command": command,
-            "policy_id": self.config.policy_id,
             "raw_log": relative,
             "returncode": returncode,
             "timed_out": timed_out,

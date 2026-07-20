@@ -1,4 +1,4 @@
-"""Versioned private Top50 artifact validation, scoring, and public projection."""
+"""Private Top50 artifact validation, scoring, and public projection."""
 from __future__ import annotations
 
 import copy
@@ -12,27 +12,33 @@ from collections import Counter
 from pathlib import Path
 from typing import Callable
 
-from benchmark.top50_budget import FROZEN_CONTRACT
+from benchmark.top50_budget import (
+    EPISODE_BUDGET,
+    HYPOTHESIS_CHARS,
+    INFERENCE_PARAMETERS,
+    OBSERVATION_LIMITS,
+    SAFETY_CONTROLS,
+    SHORTLIST_SIZE,
+    TRIAGE_BUDGET,
+)
 from benchmark.usage import Usage, usage_as_dict, usage_from_dict
 from benchmark.verify import Verdict, verify
 
-CONTRACT_ID = FROZEN_CONTRACT["contract_id"]
 AGENT_MODE = "standardized-model-api"
 RUNNER_VERSION = "0.10.0"
-EXPECTED_TRIAGE_BUDGET = FROZEN_CONTRACT["triage"]
-EXPECTED_EPISODE_BUDGET = FROZEN_CONTRACT["episode"]
-EXPECTED_SAFETY_CONTROLS = FROZEN_CONTRACT["safety_controls"]
-EXPECTED_INFERENCE_PARAMETERS = FROZEN_CONTRACT["inference_parameters"]
-EXPECTED_OBSERVATION = FROZEN_CONTRACT["observation"]
-EXPECTED_SHORTLIST_SIZE = FROZEN_CONTRACT["shortlist_size"]
-EXPECTED_HYPOTHESIS_CHARS = FROZEN_CONTRACT["hypothesis_chars"]
+EXPECTED_TRIAGE_BUDGET = TRIAGE_BUDGET
+EXPECTED_EPISODE_BUDGET = EPISODE_BUDGET
+EXPECTED_SAFETY_CONTROLS = SAFETY_CONTROLS
+EXPECTED_INFERENCE_PARAMETERS = INFERENCE_PARAMETERS
+EXPECTED_OBSERVATION = OBSERVATION_LIMITS
+EXPECTED_SHORTLIST_SIZE = SHORTLIST_SIZE
+EXPECTED_HYPOTHESIS_CHARS = HYPOTHESIS_CHARS
 _REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 _COUNTERS = ("model_generations", "shell_actions", "pred_calls", "solve_calls")
 
 
 def is_top50_submission(submission: object) -> bool:
-    return isinstance(submission, dict) and str(
-        submission.get("benchmark_contract", "")).startswith("top50-evidence/")
+    return isinstance(submission, dict) and submission.get("agent_mode") == AGENT_MODE
 
 
 def expected_prompt_id() -> str:
@@ -46,22 +52,21 @@ def validate_top50_submission(
     if not isinstance(submission, dict):
         return ["submission is not a JSON object"]
     problems: list[str] = []
-    for field in ("benchmark_contract", "model", "library_commit", "runner_version",
-                  "pred_version", "agent_mode", "prompt_id", "contract", "shortlist",
-                  "triage", "episodes", "status", "budget_contract_status",
-                  "safety_controls", "inference_parameters", "observation_policy"):
+    for field in ("model", "library_commit", "runner_version", "pred_version", "agent_mode",
+                  "prompt_id", "shortlist", "triage", "episodes", "status",
+                  "safety_controls", "inference_parameters"):
         if field not in submission:
             problems.append(f"missing required field: {field}")
     if problems:
         return problems
-    if submission["benchmark_contract"] != CONTRACT_ID:
-        problems.append(f"unsupported benchmark_contract: {submission['benchmark_contract']!r}")
+    for obsolete in ("benchmark_contract", "budget_contract_status", "contract",
+                     "observation_policy"):
+        if obsolete in submission:
+            problems.append(f"obsolete self-declared field is not allowed: {obsolete}")
     if submission["agent_mode"] != AGENT_MODE:
         problems.append(f"agent_mode must be {AGENT_MODE!r}")
     if submission["runner_version"] != RUNNER_VERSION:
         problems.append(f"runner_version must be {RUNNER_VERSION!r}")
-    if submission.get("budget_contract_status") != "frozen":
-        problems.append("budget_contract_status must be 'frozen'")
     if submission.get("safety_controls") != EXPECTED_SAFETY_CONTROLS:
         problems.append("safety_controls differ from the released watchdog settings")
     if submission.get("status") != "completed" or submission.get("run_error"):
@@ -77,43 +82,14 @@ def validate_top50_submission(
         problems.append("submitted_by is not a bounded safe identifier")
     if submission.get("inference_parameters") != EXPECTED_INFERENCE_PARAMETERS:
         problems.append("inference_parameters differ from the standardized model settings")
-    if submission.get("observation_policy") != EXPECTED_OBSERVATION:
-        problems.append("observation_policy differs from the versioned contract")
     if submission.get("prompt_id") != expected_prompt_id():
         problems.append("prompt_id does not match the frozen Top50 prompt")
     if "submit_limit" in submission or "submit_log" in submission:
         problems.append("Top50 artifacts cannot use a shared run-wide submit pool")
 
-    contract = submission.get("contract")
-    if not isinstance(contract, dict):
-        return problems + ["contract must be an object"]
-    triage_budget = contract.get("triage")
-    episode_budget = contract.get("episode")
-    observation_contract = contract.get("observation")
-    if not isinstance(triage_budget, dict) or not isinstance(episode_budget, dict):
-        return problems + ["contract triage and episode budgets must be objects"]
-    if triage_budget != EXPECTED_TRIAGE_BUDGET:
-        problems.append("triage budget differs from the versioned contract")
-    if episode_budget != EXPECTED_EPISODE_BUDGET:
-        problems.append("episode budget differs from the versioned contract")
-    if observation_contract != EXPECTED_OBSERVATION:
-        problems.append("observation contract differs from the versioned contract")
-    if contract.get("shortlist_size") != EXPECTED_SHORTLIST_SIZE:
-        problems.append(f"contract shortlist_size must be {EXPECTED_SHORTLIST_SIZE}")
-    hypothesis_limit = contract.get("hypothesis_chars")
-    if not _nonnegative_int(hypothesis_limit):
-        problems.append("contract hypothesis_chars must be a non-negative integer")
-        hypothesis_limit = -1
-    elif hypothesis_limit != EXPECTED_HYPOTHESIS_CHARS:
-        problems.append("contract hypothesis_chars differs from the versioned contract")
-    if episode_budget.get("submit_attempts") != 2:
-        problems.append("episode submit_attempts must be exactly 2")
-    pred_limit = episode_budget.get("pred_calls")
-    solve_limit = episode_budget.get("solve_calls")
-    if not _nonnegative_int(pred_limit) or not _nonnegative_int(solve_limit):
-        problems.append("pred_calls and solve_calls limits must be non-negative integers")
-    elif solve_limit > pred_limit:
-        problems.append("solve_calls limit exceeds pred_calls")
+    triage_budget = EXPECTED_TRIAGE_BUDGET
+    episode_budget = EXPECTED_EPISODE_BUDGET
+    hypothesis_limit = EXPECTED_HYPOTHESIS_CHARS
 
     shortlist = submission.get("shortlist")
     if not isinstance(shortlist, list) or len(shortlist) != EXPECTED_SHORTLIST_SIZE:
@@ -142,7 +118,7 @@ def validate_top50_submission(
         problems.append("triage.ledger must be an object")
     else:
         if triage_ledger.get("budget") != triage_budget:
-            problems.append("triage ledger budget differs from contract")
+            problems.append("triage ledger budget differs from built-in benchmark limits")
         _validate_observation_ledger(triage_ledger, "triage", problems)
         frozen = triage_ledger.get("shortlist")
         if frozen != shortlist:
@@ -173,7 +149,7 @@ def validate_top50_submission(
             problems.append(f"{label}.ledger must be an object")
             continue
         if ledger.get("rule") != expected_rule or ledger.get("budget") != episode_budget:
-            problems.append(f"{label} rule or budget differs from contract")
+            problems.append(f"{label} rule or budget differs from built-in benchmark limits")
         messages = episode.get("messages")
         if not isinstance(messages, list) or len(messages) > 3 * episode_budget.get(
                 "model_generations", 0) + 4:
@@ -238,7 +214,6 @@ def score_top50_submission(
     bugs = len(distinct_positions)
     usage = _aggregate_usage(submission)
     scored = {
-        "benchmark_contract": submission.get("benchmark_contract"),
         "model": submission.get("model", "unknown"),
         "library_commit": submission.get("library_commit", "unknown"),
         "runner_version": submission.get("runner_version"),
@@ -270,7 +245,6 @@ def score_top50_submission(
 def top50_public_entry(submission: dict, scored: dict) -> dict:
     """Project private scoring data to aggregate-only public fields."""
     return {
-        "benchmark_contract": scored["benchmark_contract"],
         "model": scored["model"],
         "library_commit": scored["library_commit"],
         "runner_version": scored.get("runner_version"),
@@ -304,7 +278,7 @@ def _validate_status(status, budget, label, problems, counters=_COUNTERS) -> Non
             problems.append(f"{label} {counter} limit is not a non-negative integer")
             continue
         if not isinstance(item, dict) or item.get("limit") != limit:
-            problems.append(f"{label} {counter} limit differs from contract")
+            problems.append(f"{label} {counter} limit differs from built-in benchmark limits")
             continue
         used, remaining = item.get("used"), item.get("remaining")
         if (not _nonnegative_int(used) or used > limit
@@ -398,8 +372,6 @@ def _validate_episode_events(ledger, label, problems) -> None:
 
 
 def _validate_observation_ledger(ledger: dict, label: str, problems: list[str]) -> None:
-    if ledger.get("observation_policy") != EXPECTED_OBSERVATION:
-        problems.append(f"{label} observation policy differs from contract")
     records = ledger.get("observations")
     if not isinstance(records, list):
         problems.append(f"{label} observations must be a list")
@@ -415,7 +387,7 @@ def _validate_observation_ledger(ledger: dict, label: str, problems: list[str]) 
     seen: set[str] = set()
     record_by_id: dict[str, dict] = {}
     required = {
-        "observation_id", "kind", "command", "policy_id", "raw_log", "returncode",
+        "observation_id", "kind", "command", "raw_log", "returncode",
         "timed_out", "original_chars", "original_lines", "preview_chars", "archive_chars",
         "preview_compacted", "archive_truncated",
     }
@@ -433,14 +405,12 @@ def _validate_observation_ledger(ledger: dict, label: str, problems: list[str]) 
             continue
         seen.add(observation_id)
         record_by_id[observation_id] = record
-        if record["policy_id"] != EXPECTED_OBSERVATION["policy_id"]:
-            problems.append(f"{label} observation policy id is inconsistent")
         if (not _nonnegative_int(record["preview_chars"])
                 or record["preview_chars"] > EXPECTED_OBSERVATION["preview_chars"]):
-            problems.append(f"{label} observation preview exceeds contract")
+            problems.append(f"{label} observation preview exceeds benchmark limit")
         if (not _nonnegative_int(record["archive_chars"])
                 or record["archive_chars"] > EXPECTED_OBSERVATION["archive_chars"]):
-            problems.append(f"{label} observation archive exceeds contract")
+            problems.append(f"{label} observation archive exceeds benchmark limit")
         if not _nonnegative_int(record["original_chars"]):
             problems.append(f"{label} observation original size is invalid")
         if not _nonnegative_int(record["original_lines"]):

@@ -53,8 +53,7 @@ ARG PR_REF
 LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
       org.opencontainers.image.description="pred (problem-reductions ${PR_REF}) + zero-trust certificate verifier" \
       org.opencontainers.image.licenses="MIT" \
-      problem_reductions_ref="${PR_REF}" \
-      benchmark_contract="top50-evidence/v2"
+      problem_reductions_ref="${PR_REF}"
 
 RUN groupadd --gid 10003 prb-evidence \
     && groupadd --gid 10001 prb-agent \

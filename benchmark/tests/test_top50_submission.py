@@ -12,7 +12,6 @@ from benchmark.backend_score import _dedup_best, aggregate_leaderboard, score_on
 from benchmark.submit import validate_submission
 from benchmark.top50_contract import (
     AGENT_MODE,
-    CONTRACT_ID,
     RUNNER_VERSION,
     expected_prompt_id,
     score_top50_submission,
@@ -27,11 +26,9 @@ def _status(limit: int, used: int = 0) -> dict:
 
 
 def _artifact(accepted_positions=(7, 18, 41)) -> dict:
-    observation = {"policy_id": "terminal-diagnostics/v1", "preview_chars": 10_000,
-                   "archive_chars": 1_048_576}
     triage_observation = {
         "observation_id": "shell-0001", "kind": "shell",
-        "command": "commit-top50 shortlist.json", "policy_id": observation["policy_id"],
+        "command": "commit-top50 shortlist.json",
         "raw_log": "../observations/shell-0001.log", "returncode": 0,
         "timed_out": False, "original_chars": 16, "original_lines": 1,
         "preview_chars": 200, "archive_chars": 16, "preview_compacted": False,
@@ -54,7 +51,6 @@ def _artifact(accepted_positions=(7, 18, 41)) -> dict:
     triage = {
         "ledger": {
             "budget": triage_budget,
-            "observation_policy": copy.deepcopy(observation),
             "observations": [triage_observation],
             "status": triage_status,
             "events": [
@@ -98,7 +94,6 @@ def _artifact(accepted_positions=(7, 18, 41)) -> dict:
             "index": position, "rule": entry["rule"], "hypothesis": entry["hypothesis"],
             "status": status, "accepted_submit_attempt": 1 if attempts else None,
             "ledger": {"rule": entry["rule"], "budget": copy.deepcopy(episode_budget),
-                       "observation_policy": copy.deepcopy(observation),
                        "observations": [],
                        "status": ledger_status, "pred": [], "submit": attempts,
                        "model_generations": [], "shell_actions": []},
@@ -106,22 +101,16 @@ def _artifact(accepted_positions=(7, 18, 41)) -> dict:
             "usage": {"input": 10, "output": 1, "cache_read": 0, "cache_write": 0},
         })
     return {
-        "benchmark_contract": CONTRACT_ID,
         "model": "provider/model",
         "library_commit": "a" * 40,
         "runner_version": RUNNER_VERSION,
         "pred_version": "0.6.0",
         "agent_mode": AGENT_MODE,
         "prompt_id": expected_prompt_id(),
-        "budget_contract_status": "frozen",
         "safety_controls": {"model_timeout_seconds": 300, "model_retries": 2},
-        "observation_policy": copy.deepcopy(observation),
         "status": "completed",
         "rankable": True,
         "inference_parameters": {"max_tokens": 8192, "timeout": 300, "num_retries": 2},
-        "contract": {"triage": triage_budget, "episode": episode_budget,
-                     "observation": copy.deepcopy(observation),
-                     "shortlist_size": 50, "hypothesis_chars": 500},
         "shortlist": shortlist,
         "triage": triage,
         "episodes": episodes,
@@ -187,7 +176,7 @@ def test_pred_observation_command_and_outcome_are_derived_from_action_record():
     request_id = "f" * 32
     observation = {
         "observation_id": f"pred-{request_id}", "kind": "pred",
-        "command": "pred create X", "policy_id": "terminal-diagnostics/v1",
+        "command": "pred create X",
         "raw_log": f"../observations/pred-{request_id}.log", "returncode": 0,
         "timed_out": False, "original_chars": 10, "original_lines": 1,
         "preview_chars": 200, "archive_chars": 10, "preview_compacted": False,
@@ -225,13 +214,11 @@ def test_pred_observation_command_and_outcome_are_derived_from_action_record():
      "usage is inconsistent"),
     (lambda sub: sub["episodes"][0]["ledger"]["budget"].update(pred_calls=23),
      "budget differs"),
-    (lambda sub: sub["contract"]["episode"].update(pred_calls=1000000),
-     "versioned contract"),
     (lambda sub: sub.update(agent_mode="codex"), "agent_mode"),
     (lambda sub: sub.update(prompt_id="custom"), "prompt_id"),
     (lambda sub: sub.pop("inference_parameters"), "inference_parameters"),
-    (lambda sub: sub["observation_policy"].update(policy_id="custom"),
-     "observation_policy"),
+    (lambda sub: sub.update(contract={}), "obsolete self-declared field"),
+    (lambda sub: sub.update(observation_policy={}), "obsolete self-declared field"),
     (lambda sub: sub.update(status="run_error", run_error="provider failed"), "incomplete"),
 ])
 def test_rankability_negative_controls(mutate, expected):
@@ -295,15 +282,15 @@ def test_public_projection_contains_no_answer_key_material():
 
 def test_top50_ties_ignore_tokens_and_efficiency_and_legacy_is_separate():
     entries = [
-        {"benchmark_contract": CONTRACT_ID, "model": "a", "bugs_found": 2,
+        {"agent_mode": AGENT_MODE, "model": "a", "bugs_found": 2,
          "total_tokens_k": 1, "efficiency_bugs_per_ktok": 999},
-        {"benchmark_contract": CONTRACT_ID, "model": "b", "bugs_found": 2,
+        {"agent_mode": AGENT_MODE, "model": "b", "bugs_found": 2,
          "total_tokens_k": 1000, "efficiency_bugs_per_ktok": 0.001},
         {"model": "a", "bugs_found": 9, "efficiency_bugs_per_ktok": 9},
     ]
     board = _dedup_best(entries)
     assert len(board) == 3
-    top50 = [entry for entry in board if entry.get("benchmark_contract") == CONTRACT_ID]
+    top50 = [entry for entry in board if entry.get("agent_mode") == AGENT_MODE]
     assert [entry["model"] for entry in top50] == ["a", "b"]
 
 
@@ -325,7 +312,7 @@ def test_backend_official_path_keeps_private_detail_and_publishes_aggregate(tmp_
     private = json.loads((results / "submission.json").read_text())
 
     assert private["artifact_sha256"] and "episodes" not in private
-    assert public["benchmark_contract"] == CONTRACT_ID
+    assert public["agent_mode"] == AGENT_MODE
     assert board == [public]
     assert "episodes" not in public and "shortlist" not in public
     guard = runpy.run_path(str(
@@ -335,8 +322,8 @@ def test_backend_official_path_keeps_private_detail_and_publishes_aggregate(tmp_
     assert guard(public_file) == []
 
 
-def test_site_keeps_contracts_separate_and_top50_ties_ignore_efficiency():
+def test_site_keeps_tracks_separate_and_top50_ties_ignore_efficiency():
     site = (Path(__file__).parents[2] / "site" / "index.html").read_text()
     assert 'id="lb-track"' in site
-    assert 'top50=track.startsWith("top50-evidence/")' in site
+    assert 'top50=track==="standardized-model-api"' in site
     assert "top50?String(a.model).localeCompare" in site

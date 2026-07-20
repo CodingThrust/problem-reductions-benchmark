@@ -250,10 +250,11 @@ def _dedup_best(entries: list[dict]) -> list[dict]:
     best: dict[tuple[str, str], dict] = {}
     for e in entries:
         m = e["model"]
-        contract = e.get("benchmark_contract", "legacy-whole-repo")
-        group = (contract, m)
+        top50 = e.get("agent_mode") == "standardized-model-api"
+        track = "top50" if top50 else "legacy-whole-repo"
+        group = (track, m)
         cur = best.get(group)
-        if contract.startswith("top50-evidence/"):
+        if top50:
             better = cur is None or e.get("bugs_found", 0) > cur.get("bugs_found", 0)
         else:
             key = (e.get("bugs_found", 0), e.get("efficiency_bugs_per_ktok", 0.0))
@@ -264,9 +265,9 @@ def _dedup_best(entries: list[dict]) -> list[dict]:
     return sorted(
         best.values(),
         key=lambda e: (
-            e.get("benchmark_contract", "legacy-whole-repo"),
+            0 if e.get("agent_mode") == "standardized-model-api" else 1,
             -e.get("bugs_found", 0),
-            (0 if str(e.get("benchmark_contract", "")).startswith("top50-evidence/")
+            (0 if e.get("agent_mode") == "standardized-model-api"
              else -e.get("efficiency_bugs_per_ktok", 0.0)),
             e.get("model", ""),
         ))

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.observation_policy import ObservationConfig, ObservationStore, POLICY_ID
+from benchmark.observation_policy import ObservationConfig, ObservationStore
 
 
 def _fixture() -> str:
@@ -65,7 +65,6 @@ def test_known_terminal_stream_retains_tail_diagnostics_and_exact_metadata(tmp_p
         "observation_id": "shell-0001",
         "kind": "shell",
         "command": "pytest -q",
-        "policy_id": POLICY_ID,
         "raw_log": "../observations/shell-0001.log",
         "returncode": 1,
         "timed_out": False,

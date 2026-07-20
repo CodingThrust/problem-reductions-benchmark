@@ -3,11 +3,10 @@
   "$id": "top50_submission.schema.json",
   "title": "Top50EvidenceSubmission",
   "type": "object",
-  "required": ["benchmark_contract", "model", "library_commit", "runner_version",
-    "pred_version", "agent_mode", "prompt_id", "status", "budget_contract_status", "safety_controls", "observation_policy", "contract", "shortlist",
+  "required": ["model", "library_commit", "runner_version",
+    "pred_version", "agent_mode", "prompt_id", "status", "safety_controls", "shortlist",
     "triage", "episodes", "inference_parameters"],
   "properties": {
-    "benchmark_contract": {"const": "top50-evidence/v2"},
     "model": {"type": "string", "minLength": 1},
     "library_commit": {"type": "string", "minLength": 1},
     "runner_version": {"const": "0.10.0"},
@@ -15,23 +14,18 @@
     "agent_mode": {"const": "standardized-model-api"},
     "prompt_id": {"type": "string", "minLength": 64, "maxLength": 64},
     "status": {"enum": ["completed", "run_error"]},
-    "budget_contract_status": {"const": "frozen"},
     "safety_controls": {"const": {"model_timeout_seconds": 300, "model_retries": 2}},
-    "observation_policy": {"const": {"policy_id": "terminal-diagnostics/v1", "preview_chars": 10000, "archive_chars": 1048576}},
     "rankable": {"type": "boolean"},
-    "contract": {
-      "const": {
-        "triage": {"model_generations": 8, "shell_actions": 12, "max_output_chars": 10000, "command_timeout_seconds": 300},
-        "episode": {"model_generations": 10, "shell_actions": 12, "pred_calls": 24, "solve_calls": 10, "submit_attempts": 2, "max_output_chars": 10000, "pred_timeout_seconds": 300},
-        "observation": {"policy_id": "terminal-diagnostics/v1", "preview_chars": 10000, "archive_chars": 1048576},
-        "shortlist_size": 50,
-        "hypothesis_chars": 500
-      }
-    },
     "shortlist": {"type": "array", "minItems": 50, "maxItems": 50},
     "triage": {"type": "object"},
     "episodes": {"type": "array", "minItems": 50, "maxItems": 50},
     "inference_parameters": {"const": {"max_tokens": 8192, "timeout": 300, "num_retries": 2}},
     "run_error": {"type": "string"}
-  }
+  },
+  "not": {"anyOf": [
+    {"required": ["benchmark_contract"]},
+    {"required": ["budget_contract_status"]},
+    {"required": ["contract"]},
+    {"required": ["observation_policy"]}
+  ]}
 }
