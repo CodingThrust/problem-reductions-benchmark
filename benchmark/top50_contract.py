@@ -24,8 +24,7 @@ from benchmark.top50_budget import (
 from benchmark.usage import Usage, usage_as_dict, usage_from_dict
 from benchmark.verify import Verdict, verify
 
-AGENT_MODE = "standardized-model-api"
-RUNNER_VERSION = "0.10.0"
+RUNNER_VERSION = "0.11.0"
 EXPECTED_TRIAGE_BUDGET = TRIAGE_BUDGET
 EXPECTED_EPISODE_BUDGET = EPISODE_BUDGET
 EXPECTED_SAFETY_CONTROLS = SAFETY_CONTROLS
@@ -35,14 +34,15 @@ EXPECTED_SHORTLIST_SIZE = SHORTLIST_SIZE
 EXPECTED_HYPOTHESIS_CHARS = HYPOTHESIS_CHARS
 _REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 _COUNTERS = ("model_generations", "shell_actions", "pred_calls", "solve_calls")
-
-
-def is_top50_submission(submission: object) -> bool:
-    return isinstance(submission, dict) and submission.get("agent_mode") == AGENT_MODE
+_TOP_LEVEL_FIELDS = {
+    "model", "library_commit", "runner_version", "pred_version", "prompt_id",
+    "status", "rankable", "safety_controls", "shortlist", "triage", "episodes",
+    "inference_parameters", "created_at", "submitted_by", "test", "run_error",
+}
 
 
 def expected_prompt_id() -> str:
-    return hashlib.sha256(Path(__file__).with_name("top50_config.yaml").read_bytes()).hexdigest()
+    return hashlib.sha256(Path(__file__).with_name("agent_config.yaml").read_bytes()).hexdigest()
 
 
 def validate_top50_submission(
@@ -52,19 +52,16 @@ def validate_top50_submission(
     if not isinstance(submission, dict):
         return ["submission is not a JSON object"]
     problems: list[str] = []
-    for field in ("model", "library_commit", "runner_version", "pred_version", "agent_mode",
+    for field in ("model", "library_commit", "runner_version", "pred_version",
                   "prompt_id", "shortlist", "triage", "episodes", "status",
                   "safety_controls", "inference_parameters"):
         if field not in submission:
             problems.append(f"missing required field: {field}")
     if problems:
         return problems
-    for obsolete in ("benchmark_contract", "budget_contract_status", "contract",
-                     "observation_policy"):
-        if obsolete in submission:
-            problems.append(f"obsolete self-declared field is not allowed: {obsolete}")
-    if submission["agent_mode"] != AGENT_MODE:
-        problems.append(f"agent_mode must be {AGENT_MODE!r}")
+    extra = sorted(set(submission) - _TOP_LEVEL_FIELDS)
+    if extra:
+        problems.append(f"unsupported top-level field(s): {extra}")
     if submission["runner_version"] != RUNNER_VERSION:
         problems.append(f"runner_version must be {RUNNER_VERSION!r}")
     if submission.get("safety_controls") != EXPECTED_SAFETY_CONTROLS:
@@ -84,9 +81,6 @@ def validate_top50_submission(
         problems.append("inference_parameters differ from the standardized model settings")
     if submission.get("prompt_id") != expected_prompt_id():
         problems.append("prompt_id does not match the frozen Top50 prompt")
-    if "submit_limit" in submission or "submit_log" in submission:
-        problems.append("Top50 artifacts cannot use a shared run-wide submit pool")
-
     triage_budget = EXPECTED_TRIAGE_BUDGET
     episode_budget = EXPECTED_EPISODE_BUDGET
     hypothesis_limit = EXPECTED_HYPOTHESIS_CHARS
@@ -218,7 +212,6 @@ def score_top50_submission(
         "library_commit": submission.get("library_commit", "unknown"),
         "runner_version": submission.get("runner_version"),
         "pred_version": submission.get("pred_version"),
-        "agent_mode": submission.get("agent_mode"),
         "rankable": not problems,
         "rankability_errors": problems,
         "verified_bugs": bugs,
@@ -249,7 +242,6 @@ def top50_public_entry(submission: dict, scored: dict) -> dict:
         "library_commit": scored["library_commit"],
         "runner_version": scored.get("runner_version"),
         "pred_version": scored.get("pred_version"),
-        "agent_mode": scored.get("agent_mode"),
         "rankable": scored["rankable"],
         "bugs_found": scored["verified_bugs"],
         "rules_tested": 50,
@@ -518,7 +510,7 @@ def load_canonical_inventory(repo_dir: str | None) -> set[str]:
     candidate = Path(repo_dir or os.environ.get("REPO_DIR", "/app/pr-src"))
     if not (candidate / "src" / "rules").is_dir():
         raise RuntimeError(f"pinned canonical rule inventory is unavailable under {candidate}")
-    from benchmark.run_mini import list_rules
+    from benchmark.model_api import list_rules
     return set(list_rules(candidate))
 
 

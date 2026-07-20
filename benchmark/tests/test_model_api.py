@@ -1,5 +1,5 @@
 """
-Tests for benchmark/run_mini.py model construction.
+Tests for benchmark/model_api.py model construction.
 
 The real minisweagent is stubbed via sys.modules so these run anywhere.
 """
@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-from benchmark.run_mini import _build_model
+from benchmark.model_api import build_model
 
 
 class _FakeLitellmModel:
@@ -27,18 +27,13 @@ def _fake_litellm(monkeypatch):
 
 class TestBuildModel:
     def test_defaults_timeout_and_retries(self, _fake_litellm):
-        """A hung API call must fail fast, not freeze the whole-repo session."""
-        model = _build_model("openai/x", None, 8192)
+        """A hung API call must fail fast instead of freezing the benchmark."""
+        model = build_model("openai/x", None, 8192)
         assert model.model_kwargs["timeout"] == 300
         assert model.model_kwargs["num_retries"] == 2
 
-    def test_user_kwargs_override_defaults(self, _fake_litellm):
-        model = _build_model("openai/x", None, 8192, model_kwargs={"timeout": 60})
-        assert model.model_kwargs["timeout"] == 60
-        assert model.model_kwargs["num_retries"] == 2
-
     def test_endpoint_config_passthrough(self, _fake_litellm):
-        model = _build_model("openai/x", "https://api.example/v1", 4096, api_key="k")
+        model = build_model("openai/x", "https://api.example/v1", 4096, api_key="k")
         assert model.model_kwargs["api_base"] == "https://api.example/v1"
         assert model.model_kwargs["api_key"] == "k"
         assert model.model_kwargs["max_tokens"] == 4096

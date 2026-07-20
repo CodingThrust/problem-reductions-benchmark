@@ -11,7 +11,6 @@ import pytest
 from benchmark.backend_score import _dedup_best, aggregate_leaderboard, score_one
 from benchmark.submit import validate_submission
 from benchmark.top50_contract import (
-    AGENT_MODE,
     RUNNER_VERSION,
     expected_prompt_id,
     score_top50_submission,
@@ -105,7 +104,6 @@ def _artifact(accepted_positions=(7, 18, 41)) -> dict:
         "library_commit": "a" * 40,
         "runner_version": RUNNER_VERSION,
         "pred_version": "0.6.0",
-        "agent_mode": AGENT_MODE,
         "prompt_id": expected_prompt_id(),
         "safety_controls": {"model_timeout_seconds": 300, "model_retries": 2},
         "status": "completed",
@@ -114,7 +112,6 @@ def _artifact(accepted_positions=(7, 18, 41)) -> dict:
         "shortlist": shortlist,
         "triage": triage,
         "episodes": episodes,
-        "bugs_found": 999,
     }
 
 
@@ -136,7 +133,6 @@ def test_valid_artifact_recomputes_score_and_prefix_metrics():
     assert scored["bugs_at_50"] == 3
     assert scored["first_attempt_accepts"] == 3
     assert len(report) == 3
-    assert submission["bugs_found"] == 999
     assert validate_submission(submission) == []
 
 
@@ -206,7 +202,6 @@ def test_pred_observation_command_and_outcome_are_derived_from_action_record():
 
 
 @pytest.mark.parametrize("mutate, expected", [
-    (lambda sub: sub.update(submit_limit=100), "shared run-wide submit pool"),
     (lambda sub: sub["episodes"].pop(), "exactly 50"),
     (lambda sub: sub["episodes"].__setitem__(1, copy.deepcopy(sub["episodes"][0])),
      "order/rule"),
@@ -214,11 +209,9 @@ def test_pred_observation_command_and_outcome_are_derived_from_action_record():
      "usage is inconsistent"),
     (lambda sub: sub["episodes"][0]["ledger"]["budget"].update(pred_calls=23),
      "budget differs"),
-    (lambda sub: sub.update(agent_mode="codex"), "agent_mode"),
     (lambda sub: sub.update(prompt_id="custom"), "prompt_id"),
     (lambda sub: sub.pop("inference_parameters"), "inference_parameters"),
-    (lambda sub: sub.update(contract={}), "obsolete self-declared field"),
-    (lambda sub: sub.update(observation_policy={}), "obsolete self-declared field"),
+    (lambda sub: sub.update(unexpected={}), "unsupported top-level field"),
     (lambda sub: sub.update(status="run_error", run_error="provider failed"), "incomplete"),
 ])
 def test_rankability_negative_controls(mutate, expected):
@@ -280,18 +273,17 @@ def test_public_projection_contains_no_answer_key_material():
     assert callable(guard)
 
 
-def test_top50_ties_ignore_tokens_and_efficiency_and_legacy_is_separate():
+def test_ties_ignore_tokens_and_efficiency_and_each_model_has_one_best_run():
     entries = [
-        {"agent_mode": AGENT_MODE, "model": "a", "bugs_found": 2,
+        {"model": "a", "bugs_found": 2,
          "total_tokens_k": 1, "efficiency_bugs_per_ktok": 999},
-        {"agent_mode": AGENT_MODE, "model": "b", "bugs_found": 2,
+        {"model": "b", "bugs_found": 2,
          "total_tokens_k": 1000, "efficiency_bugs_per_ktok": 0.001},
         {"model": "a", "bugs_found": 9, "efficiency_bugs_per_ktok": 9},
     ]
     board = _dedup_best(entries)
-    assert len(board) == 3
-    top50 = [entry for entry in board if entry.get("agent_mode") == AGENT_MODE]
-    assert [entry["model"] for entry in top50] == ["a", "b"]
+    assert [(entry["model"], entry["bugs_found"]) for entry in board] == [
+        ("a", 9), ("b", 2)]
 
 
 def test_backend_official_path_keeps_private_detail_and_publishes_aggregate(tmp_path):
@@ -312,7 +304,7 @@ def test_backend_official_path_keeps_private_detail_and_publishes_aggregate(tmp_
     private = json.loads((results / "submission.json").read_text())
 
     assert private["artifact_sha256"] and "episodes" not in private
-    assert public["agent_mode"] == AGENT_MODE
+    assert "agent_mode" not in public
     assert board == [public]
     assert "episodes" not in public and "shortlist" not in public
     guard = runpy.run_path(str(
@@ -322,8 +314,7 @@ def test_backend_official_path_keeps_private_detail_and_publishes_aggregate(tmp_
     assert guard(public_file) == []
 
 
-def test_site_keeps_tracks_separate_and_top50_ties_ignore_efficiency():
+def test_site_has_one_protocol_and_no_mode_selector():
     site = (Path(__file__).parents[2] / "site" / "index.html").read_text()
-    assert 'id="lb-track"' in site
-    assert 'top50=track==="standardized-model-api"' in site
-    assert "top50?String(a.model).localeCompare" in site
+    assert 'id="lb-track"' not in site
+    assert "String(a.model).localeCompare" in site

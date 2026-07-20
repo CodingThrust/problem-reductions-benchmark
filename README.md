@@ -4,7 +4,7 @@ This benchmark measures how well a model can prioritize likely-buggy reduction r
 
 ## Current benchmark
 
-The primary track is **Standardized Model API / Self-selected Top50**. The target is `problem-reductions` [`v0.6.0`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8), and the bundled `pred` version is `0.6.0`. The logical limits are part of the benchmark code, not a user-selectable configuration.
+The benchmark protocol is **Standardized Model API / Self-selected Top50**. The target is `problem-reductions` [`v0.6.0`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8), and the bundled `pred` version is `0.6.0`. The logical limits are part of the benchmark code, not a user-selectable configuration.
 
 Each run has two phases:
 
@@ -43,11 +43,11 @@ This score reflects a combined ability:
 - allocate bounded model, shell, and `pred` calls within each rule;
 - construct a valid counterexample within two submission opportunities.
 
-It does not claim to measure host speed, network quality, willingness to run longer, coding-agent tooling, repeated-seed stability, or performance on a fixed organizer-selected Top50. Fixed Top50 diagnostics, multiple seeds, and a System Track are intentionally deferred or dropped.
+It does not claim to measure host speed, network quality, willingness to run longer, repeated-seed stability, or performance on a fixed organizer-selected Top50.
 
 A certificate is never trusted directly. The private scorer re-derives and replays it with pinned `pred`; only reproducible round-trip failures count.
 
-## Run the rankable track
+## Run the benchmark
 
 Install Docker, then:
 
@@ -59,7 +59,7 @@ make run                                   # writes out/<timestamp>/submission.j
 python -m benchmark.submit --predictions out/<timestamp>/submission.json
 ```
 
-The rankable path is deliberately narrow. It exposes no logical-budget configuration and rejects custom prompts or strategies, custom model kwargs, and coding-agent backends before a scored generation. Model and `pred` watchdogs are safety controls and are not user-selectable score dimensions.
+The runner exposes only model identity, credentials, and endpoint configuration. Logical budgets, prompts, inference settings, and the execution harness are built into the benchmark. Model and `pred` watchdogs are safety controls and are not user-selectable score dimensions.
 
 Useful local checks:
 
@@ -69,10 +69,4 @@ make verify-budget
 make verify-calibration
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for artifact fields, submission, and historical-result handling.
-
-## Historical results
-
-Whole-repository results remain visible under `legacy-whole-repo`. They use a different execution protocol and efficiency tie-break, so the site keeps them in a separate selectable table. They cannot be deduplicated, sorted, or compared with the standardized Top50 results.
-
-The old host coding-agent and whole-repository runners remain in the repository only to reproduce those historical artifacts. They are not a public System Track and cannot produce rankable Top50 submissions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for artifact fields and submission handling.

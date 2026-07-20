@@ -3,7 +3,7 @@
 
 Requests cross the agent sandbox through an atomic file spool rooted in the agent's
 scratch workspace.  This deliberately avoids Unix sockets and localhost networking,
-which are blocked by common headless-agent sandboxes.
+which are blocked by the benchmark agent sandbox.
 """
 from __future__ import annotations
 

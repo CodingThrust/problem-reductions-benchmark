@@ -99,7 +99,7 @@ def test_code_defined_limits_match_calibration_and_version_ids_are_absent():
                        ("triage", "episode", "observation", "shortlist_size",
                         "hypothesis_chars")}
     root = calibrate_budget.ROOT.parent
-    prompt = (root / "benchmark/top50_config.yaml").read_text(encoding="utf-8")
+    prompt = (root / "benchmark/agent_config.yaml").read_text(encoding="utf-8")
     assert "problem-reductions Rust library" in prompt
     assert "top50-evidence/" not in prompt
     assert "terminal-diagnostics/" not in prompt

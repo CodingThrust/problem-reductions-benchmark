@@ -1,4 +1,4 @@
-"""Entrypoint wiring tests for the standardized Top50 track."""
+"""Entrypoint wiring tests for the standardized Top50 benchmark."""
 from __future__ import annotations
 
 import json
@@ -29,15 +29,8 @@ def test_fake_entrypoint_uses_50_isolated_episodes(tmp_path, monkeypatch):
     assert len(result["episodes"]) == 50
     assert result["rankable"] is False
     artifact = json.loads(output.read_text())
-    assert "budget_contract_status" not in artifact
-    assert "benchmark_contract" not in artifact
-    assert "contract" not in artifact
-
-
-@pytest.mark.parametrize("forbidden", ["--backend", "--config", "--strategy-file"])
-def test_standard_entrypoint_rejects_custom_harness_options(forbidden):
-    with pytest.raises(SystemExit):
-        run_top50.main(["--model", "fake/model", "--fake", forbidden, "custom"])
+    assert artifact["model"] == "fake/model"
+    assert artifact["status"] == "completed"
 
 
 @pytest.mark.parametrize("name", run_top50.FORBIDDEN_RANKABLE_ENV)
@@ -47,16 +40,8 @@ def test_rankable_preflight_rejects_custom_execution_before_model_call(name, mon
         run_top50.validate_rankable_settings()
 
 
-def test_benchmark_limits_are_code_defined_and_ignore_legacy_budget_environment(monkeypatch):
-    monkeypatch.setenv("PRB_PRED_CALLS", "999")
+def test_benchmark_limits_are_code_defined():
     assert run_top50.benchmark_limits().episode.pred_calls == 24
-
-
-def test_even_empty_custom_model_kwargs_are_rejected(monkeypatch):
-    for name in run_top50.FORBIDDEN_RANKABLE_ENV:
-        monkeypatch.delenv(name, raising=False)
-    with pytest.raises(ValueError, match="custom model kwargs"):
-        run_top50.validate_rankable_settings(model_kwargs={})
 
 
 def test_top50_executor_keeps_finite_agent_step_guard():

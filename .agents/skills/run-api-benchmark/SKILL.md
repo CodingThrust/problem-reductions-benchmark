@@ -5,7 +5,7 @@ description: Configure and run the rankable problem-reductions Self-selected Top
 
 # Run the rankable Top50 benchmark
 
-Use only the standardized Top50 path: source-only triage freezes 50 rules, followed by 50 fresh sequential episodes. Each rule receives M=10 model generations, E=12 shell actions, P=24 `pred` calls, P_solve=10 solve calls, O=10000 observed characters, and exactly S=2 submit attempts. These limits are part of the benchmark code; never add or accept custom prompts, strategies, model kwargs, or coding-agent backends.
+The benchmark uses source-only triage to freeze 50 rules, followed by 50 fresh sequential episodes. Each rule receives M=10 model generations, E=12 shell actions, P=24 `pred` calls, P_solve=10 solve calls, O=10000 observed characters, and exactly S=2 submit attempts. These limits, prompts, inference settings, and the harness are part of the benchmark code.
 
 Read [references/provider-config.md](references/provider-config.md) for endpoint setup and `scripts/detect-engine.sh` before preparing the image.
 
@@ -19,11 +19,11 @@ Read [references/provider-config.md](references/provider-config.md) for endpoint
 
 ## Configure and preflight
 
-Create `submission.env` from the example when absent. Configure `MODEL_NAME`, a provider key or `API_KEY`, and `API_BASE` only when needed. An existing `MODEL_KWARGS`, `AGENT_BACKEND`, `AGENT_CONFIG`, `AGENT_STRATEGY_FILE`, `SUBMIT_LIMIT`, or `PRB_*` budget override must be removed before a rankable run.
+Create `submission.env` from the example when absent. Configure `MODEL_NAME`, a provider key or `API_KEY`, and `API_BASE` only when needed. Do not add other execution settings.
 
-Detect the container engine. Prefer `make runner-pull`; use `make runner-build` only when necessary. Before the first real API call, show the redacted model/endpoint, frozen contract ID and counters, target ref, output path, and upload goal, then ask for confirmation.
+Detect the container engine. Prefer `make runner-pull`; use `make runner-build` only when necessary. Before the first real API call, show the redacted model/endpoint, built-in counters, target ref, output path, and upload goal, then ask for confirmation.
 
-Run `make preflight`. It must reject custom execution knobs before its tiny model call, then verify `pred`, source inventory, endpoint, and credentials. Never continue after a failed preflight.
+Run `make preflight`. It verifies the frozen source and `pred`, then checks the endpoint and credentials with a tiny model call. Never continue after a failed preflight.
 
 ## Run and validate
 

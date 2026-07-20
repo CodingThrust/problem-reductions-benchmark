@@ -43,7 +43,7 @@ def _patch(monkeypatch, *, ver="0.6.0", rules=("a", "b"), model=None, build_exc=
         if build_exc is not None:
             raise build_exc
         return model if model is not None else _FakeModel()
-    monkeypatch.setattr(pf, "_build_model", _build)
+    monkeypatch.setattr(pf, "build_model", _build)
 
 
 class TestRunChecks:

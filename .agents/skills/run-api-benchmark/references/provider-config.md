@@ -3,8 +3,7 @@
 Use `submission.env.example` as the source of truth. Keep secrets in the gitignored
 `submission.env`; never ask the caller to paste them into chat.
 
-This configuration is only for the containerized `mini-swe` API route. Do not select Codex,
-Claude Code, or another host CLI with `AGENT_BACKEND`.
+This configuration is for the containerized model API runner.
 
 ## Variables
 
@@ -13,14 +12,9 @@ Claude Code, or another host CLI with `AGENT_BACKEND`.
 | `MODEL_NAME` | LiteLLM-routable provider/model identity |
 | provider key or `API_KEY` | authentication |
 | `API_BASE` | custom gateway or OpenAI-compatible endpoint |
-| `MODEL_KWARGS` | JSON object for provider-specific LiteLLM arguments |
-| `MAX_TOKENS` | per-response output ceiling, not a run/turn limit |
-| `SUBMIT_LIMIT` | run-wide certificate attempts |
-| `AGENT_CONFIG` | full prompt override |
-| `AGENT_STRATEGY_FILE` | extra strategy injected into the shared prompt |
 | `SUBMITTED_BY` | optional submitter metadata |
 
-Do not use removed `AGENT_MODE`, `MAX_RULES`, or max-turn variables.
+Prompts, inference settings, the execution harness, and logical budgets are benchmark-owned.
 
 ## Standard provider
 
@@ -33,7 +27,6 @@ Set `MODEL_NAME` and the provider's documented key variable, for example
 MODEL_NAME=openai/my-model
 API_BASE=https://my-gateway.example/v1
 API_KEY=...
-MODEL_KWARGS={"custom_llm_provider":"openai"}
 ```
 
 ## Failure decoding
@@ -41,7 +34,6 @@ MODEL_KWARGS={"custom_llm_provider":"openai"}
 | Symptom | Action |
 |---|---|
 | `pred binary` or rule-source preflight fails | rebuild the image at the intended `PR_REF` |
-| tiny model call fails | correct model routing, endpoint, key variable, or kwargs |
+| tiny model call fails | correct model routing, endpoint, or key variable |
 | build exits 137 | provision at least about 8 GB for the engine VM/host |
-| `run_error` | preserve the partial submission and logs; do not call it a clean zero |
-| submit channel not probed | treat as runner infrastructure failure |
+| `run_error` | preserve the partial submission; do not call it a clean zero |

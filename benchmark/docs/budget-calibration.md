@@ -39,7 +39,7 @@ Token, cost, and elapsed-time fields are diagnostic references only. Missing pro
 
 M=10 and P=24 are the smallest tested values at which the replayed stronger pilot retains its verified find. Moving down to M=6 or P=12 loses that find and shows materially higher cap pressure; moving up to M=14 or P=36 adds usage without another verified bug. E=12 and P_solve=10 cover the observed command mix without exposing an unlimited path. S=2 follows the fixed per-rule retry policy. T=8 and E_t=12 bound source-only shortlist formation. Output and watchdog ceilings are safety controls selected above observed pilot maxima and do not affect ranking.
 
-The public comparison therefore uses these built-in parameters and is ranked only by verified distinct-rule bugs. Fixed Top50, multiple seeds, a System Track, and a public budget grid remain out of scope.
+The public comparison therefore uses these built-in parameters and is ranked only by verified distinct-rule bugs. Fixed Top50, multiple seeds, and a public budget grid remain out of scope.
 
 ## Provenance
 

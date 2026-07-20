@@ -7,7 +7,6 @@
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   preflight            Validate submission.env with one tiny real call before a full run
 #   run                  Run the benchmark via Docker → out/<stamp>/submission.json (does NOT upload)
-#   run-local            Reproduce a historical non-ranking CLI artifact
 #
 # Model/auth configuration lives in submission.env (see submission.env.example). Local
 # repository, submission, and log locations are intentionally explicit Make variables.
@@ -24,14 +23,9 @@ SUBS_DIR ?= submissions
 SCORED   ?= results/scored
 ENV_FILE ?= submission.env
 STAMP    ?= $(shell date +%Y%m%d-%H%M%S)
-LOCAL_BACKEND ?= codex
 LOCAL_REPO_DIR ?=
-LOCAL_OUTPUT ?=
-LOCAL_LOG_DIR ?=
-REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
-LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-budget verify-judgment audit install-deps help print-benchmark-version print-pr-ref runner-build runner-pull preflight run run-local score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-budget verify-judgment audit install-deps help print-benchmark-version print-pr-ref runner-build runner-pull preflight run score-local board publish-local serve
 
 ## Print this checkout's benchmark contract version.
 print-benchmark-version:
@@ -49,7 +43,7 @@ test:
 test-unit:
 	pytest -v -m "not integration"
 
-## Pred-free sanity tests (docs, CI workflow, trajectory).
+## Pred-free sanity tests (docs and CI workflow).
 verify-judgment:
 	pytest -v -m "judgment"
 
@@ -96,24 +90,6 @@ run:
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -e OUTPUT=/out/$(STAMP)/submission.json -v "$(PWD)/out:/out" $(IMAGE)
 	@echo "Wrote out/$(STAMP)/submission.json — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
-
-## Historical non-ranking host run through an installed headless agent CLI. It cannot enter
-## the Top50 leaderboard. The checkout is cloned at
-## PR_REF when LOCAL_REPO_DIR is absent; an existing checkout must already match exactly.
-## Requires explicit repo/output/log paths, local Python deps, pred, and CLI authentication.
-run-local:
-	@if [ ! -f "$(ENV_FILE)" ]; then \
-	  echo "No $(ENV_FILE) — copy submission.env.example and set MODEL_NAME first"; exit 1; fi
-	@if [ -z "$(LOCAL_REPO_DIR)" ] || [ -z "$(LOCAL_OUTPUT)" ] || [ -z "$(LOCAL_LOG_DIR)" ]; then \
-	  echo "Set LOCAL_REPO_DIR, LOCAL_OUTPUT, and LOCAL_LOG_DIR explicitly"; exit 1; fi
-	python3 -m benchmark.run_submission \
-	  --env-file "$(ENV_FILE)" \
-	  --repo-dir "$(abspath $(LOCAL_REPO_DIR))" \
-	  --repo-ref "$(PR_REF)" \
-	  --repo-url "$(REPO_URL)" \
-	  --output "$(abspath $(LOCAL_OUTPUT))" \
-	  --trajectory-dir "$(abspath $(LOCAL_LOG_DIR))" --host-cli $(LOCAL_ARGS)
-	@echo "Wrote $(LOCAL_OUTPUT); logs are in $(LOCAL_LOG_DIR)."
 
 ## Score all submissions in SUBS_DIR with the zero-trust backend (needs pred). Writes scored
 ## results + leaderboard.json into SCORED, and one public entry per submission into SCORED/board.
@@ -162,7 +138,6 @@ help:
 	@echo "  runner-pull         Pull the prebuilt runner image from GHCR (fast runner-build alternative)"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the API backend via Docker → out/<stamp>/submission.json (not upload)"
-	@echo "  run-local           Reproduce a historical non-ranking CLI artifact"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  board               Build site/results.json from site/results/*.json (aggregate)"
 	@echo "  publish-local       Score + stage per-submission entries + rebuild board (SUBS_DIR stays local)"
@@ -172,7 +147,4 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  ENV_FILE=$(ENV_FILE)  (model/key for preflight + submission)"
-	@echo "  LOCAL_BACKEND=$(LOCAL_BACKEND)  (codex default; set claude-code if desired)"
-	@echo "  LOCAL_REPO_DIR=$(LOCAL_REPO_DIR)  (required for run-local/audit)"
-	@echo "  LOCAL_OUTPUT=$(LOCAL_OUTPUT)  (required for run-local)"
-	@echo "  LOCAL_LOG_DIR=$(LOCAL_LOG_DIR)  (required for run-local)"
+	@echo "  LOCAL_REPO_DIR=$(LOCAL_REPO_DIR)  (required for audit)"

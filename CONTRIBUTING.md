@@ -1,6 +1,6 @@
 # Submitting a model run
 
-The current public comparison accepts one execution protocol: **Standardized Model API / Self-selected Top50**. Its limits are built into the benchmark code and are not configurable.
+The benchmark uses one execution protocol: **Standardized Model API / Self-selected Top50**. Its limits are built into the benchmark code and are not configurable.
 
 ```text
 source-only triage → frozen Top50 → 50 isolated rule episodes → private submission
@@ -16,7 +16,7 @@ Copy the internal template and set the model plus its provider credential:
 cp submission.env.example submission.env
 ```
 
-`MODEL_NAME`, `API_BASE`, and `API_KEY` identify the endpoint. The official path does not accept prompt files, strategy files, coding-agent backends, model kwargs, submit pools, or budget variables. This is intentional: two entries are comparable only if model access is the remaining meaningful variable.
+`MODEL_NAME`, `API_BASE`, and `API_KEY` identify the endpoint. They are the only execution settings supplied by a participant; prompts, limits, inference settings, and the harness are benchmark-owned. This keeps model access as the remaining meaningful variable.
 
 ## 2. Preflight and run
 
@@ -46,7 +46,7 @@ python -m benchmark.submit --predictions out/<timestamp>/submission.json
 
 The intake check is only a courtesy check. The private backend independently validates:
 
-- prompt hash, runner mode, target commit, and `pred` version;
+- prompt hash, runner version, target commit, and `pred` version;
 - the canonical 50-rule inventory and frozen order;
 - triage and per-rule event/usage ledgers;
 - exactly two submit opportunities per rule, including malformed or rejected calls;
@@ -73,9 +73,5 @@ python -m benchmark.verify --calibrate
 ```
 
 The calibration checker proves that the selected limits match the built-in runtime values, every model covers the full candidate grid, smaller and larger `M`/`P` candidates surround the selection, and the Markdown report matches the machine-readable evidence.
-
-## Historical tooling
-
-`benchmark.run_submission`, `make run-local`, `benchmark/config.yaml`, and the coding-agent adapters reproduce the old `legacy-whole-repo` protocol only. Historical aggregates remain visible in their own site selector. They cannot be submitted or sorted into the Top50 table, and they are not a maintained System Track.
 
 Repository policy also applies: never merge a PR until required CI is green and the user explicitly approves the merge.

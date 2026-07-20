@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production entrypoint for the standardized self-selected Top50 model track."""
+"""Production entrypoint for the standardized self-selected Top50 benchmark."""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from benchmark.env_setup import find_pred_binary, pinned_commit, verify_pred_version
-from benchmark.run_mini import list_rules
+from benchmark.model_api import list_rules
 from benchmark.top50_runner import (
     PhaseResult,
     Top50Runner,
@@ -18,7 +18,6 @@ from benchmark.top50_runner import (
     build_rankable_runner,
 )
 from benchmark.top50_contract import (
-    AGENT_MODE,
     RUNNER_VERSION,
     EXPECTED_INFERENCE_PARAMETERS,
     EXPECTED_SAFETY_CONTROLS,
@@ -27,7 +26,6 @@ from benchmark.top50_contract import (
 
 
 FORBIDDEN_RANKABLE_ENV = (
-    "AGENT_BACKEND", "AGENT_CONFIG", "AGENT_STRATEGY_FILE", "SUBMIT_LIMIT",
     "EXPECTED_PRED_COMMIT", "EXPECTED_PRED_VERSION",
 )
 TRUSTED_PRED_PATH = Path("/usr/local/libexec/prb/pred")
@@ -69,13 +67,11 @@ def verify_rankable_pred_path(binary: Path) -> None:
         raise ValueError(f"rankable runs require the image-owned pred at {TRUSTED_PRED_PATH}")
 
 
-def validate_rankable_settings(*, model_kwargs: dict | None = None) -> None:
+def validate_rankable_settings() -> None:
     """Reject every knob that could change the frozen rankable execution path."""
     present = [name for name in FORBIDDEN_RANKABLE_ENV if name in os.environ]
     if present:
         raise ValueError(f"rankable Top50 runs reject custom setting(s): {', '.join(present)}")
-    if model_kwargs is not None:
-        raise ValueError("rankable Top50 runs do not accept custom model kwargs")
 
 
 class _FakeExecutor:
@@ -90,10 +86,10 @@ class _FakeExecutor:
 
 
 def run(*, model: str, repo_dir: str | Path, output: str | Path,
-        fake: bool = False, api_base: str | None = None, api_key: str | None = None,
-        model_kwargs: dict | None = None) -> dict:
+        fake: bool = False, api_base: str | None = None,
+        api_key: str | None = None) -> dict:
     if not fake:
-        validate_rankable_settings(model_kwargs=model_kwargs)
+        validate_rankable_settings()
     repo = Path(repo_dir).resolve()
     expected_commit = pinned_commit()
     actual_commit = expected_commit if fake else verify_rankable_source(repo, expected_commit)
@@ -121,7 +117,6 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
         "library_commit": actual_commit,
         "runner_version": RUNNER_VERSION,
         "pred_version": pred_version,
-        "agent_mode": AGENT_MODE,
         "prompt_id": expected_prompt_id(),
         "safety_controls": EXPECTED_SAFETY_CONTROLS,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -138,19 +133,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", default=os.environ.get("OUTPUT", "/out/submission.json"))
     parser.add_argument("--api-base", default=os.environ.get("API_BASE"))
     parser.add_argument("--api-key", default=os.environ.get("API_KEY"))
-    parser.add_argument("--model-kwargs", default=os.environ.get("MODEL_KWARGS"))
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--fake", action="store_true", default=bool(os.environ.get("FAKE")))
     args = parser.parse_args(argv)
     if not args.model:
         parser.error("--model (or MODEL_NAME) is required")
-    kwargs = json.loads(args.model_kwargs) if args.model_kwargs else None
-    if kwargs is not None and not isinstance(kwargs, dict):
-        parser.error("--model-kwargs must be a JSON object")
     if args.preflight:
         from benchmark.preflight import format_report, run_checks
         try:
-            validate_rankable_settings(model_kwargs=kwargs)
+            validate_rankable_settings()
         except ValueError as error:
             parser.error(str(error))
         try:
@@ -159,11 +150,10 @@ def main(argv: list[str] | None = None) -> None:
         except (OSError, ValueError, RuntimeError) as error:
             parser.error(str(error))
         checks = run_checks(args.model, repo_dir=args.repo_dir, api_base=args.api_base,
-                            api_key=args.api_key, model_kwargs=None)
+                            api_key=args.api_key)
         raise SystemExit(0 if format_report(checks) else 1)
     result = run(model=args.model, repo_dir=args.repo_dir, output=args.output,
-                 fake=args.fake, api_base=args.api_base, api_key=args.api_key,
-                 model_kwargs=kwargs)
+                 fake=args.fake, api_base=args.api_base, api_key=args.api_key)
     print(f"Top50 {result['status']} ({len(result['episodes'])}/50 episodes) → {args.output}")
 
 

@@ -18,7 +18,6 @@ README = REPO_ROOT / "README.md"
 GUIDE = REPO_ROOT / "CONTRIBUTING.md"
 ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
 API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
-CLI_SKILL = REPO_ROOT / ".agents/skills/run-cli-benchmark/SKILL.md"
 SUBMIT_SKILL = REPO_ROOT / ".agents/skills/submit-benchmark-result/SKILL.md"
 TRIGGER_SCORING = SUBMIT_SKILL.parent / "scripts/trigger-scoring.sh"
 SCORER_WORKFLOW = REPO_ROOT / ".github/workflows/score-from-r2.yml"
@@ -98,22 +97,15 @@ class TestGuide:
         assert "benchmark.submit" in t and "aggregate leaderboard" in t
 
 
-class TestBackendRouteSeparation:
-    def test_env_template_does_not_select_cli_with_agent_backend(self):
+class TestSingleProtocol:
+    def test_env_template_exposes_only_model_api_configuration(self):
         t = _text(ENV_EXAMPLE)
-        assert "agent_backend=" not in t
-        assert "model api only" in t
-        assert "coding-agent" in t and "cannot enter the top50 table" in t
+        assert "model api in docker" in t
+        assert "whole-repository" not in t and "local_backend" not in t
 
-    def test_api_skill_is_container_only(self):
+    def test_run_skill_uses_the_containerized_protocol(self):
         t = _text(API_SKILL)
         assert "standardized" in t and "runner-pull" in t
-        assert "coding-agent backends" in t
-
-    def test_cli_skill_is_host_only(self):
-        t = _text(CLI_SKILL)
-        assert "make run-local" in t and "local_backend" in t
-        assert "legacy-whole-repo" in t and "non-ranking" in t
 
     @pytest.mark.parametrize("skill", [API_SKILL])
     def test_each_skill_exposes_only_local_and_official_goals(self, skill):
@@ -128,7 +120,7 @@ class TestBackendRouteSeparation:
         assert "$submit-benchmark-result" in t
         assert "owns upload" in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    @pytest.mark.parametrize("skill", [API_SKILL])
     def test_run_skills_confirm_the_benchmark_version(self, skill):
         t = _text(skill)
         assert "make -s print-benchmark-version" in t
@@ -162,7 +154,6 @@ class TestBackendRouteSeparation:
         t = _text(REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md")
         assert "already has a `submission.json`" in t
         assert "$submit-benchmark-result" in t
-
 
 class TestSubmitSkill:
     def test_submit_skill_exists(self):

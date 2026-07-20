@@ -1,9 +1,8 @@
 """Evaluation-owned counterexample submission budget.
 
 The agent-facing ``submit`` process is deliberately only a thin client. Requests use an
-atomic file spool inside the agent scratch workspace so sandboxed Codex, Claude, mini-swe,
-and container backends share one transport. The budget, verification, and accepted-certificate
-ledger remain authoritative in runner memory; editing spool files
+atomic file spool inside the agent scratch workspace. The budget, verification, and
+accepted-certificate ledger remain authoritative in runner memory; editing spool files
 cannot reset the budget or forge a scored result.
 """
 from __future__ import annotations
@@ -27,18 +26,14 @@ MAX_REQUEST_BYTES = 2 * 1024 * 1024
 
 
 class SubmissionSession:
-    """Own one submit budget and its append-only in-memory ledger.
+    """Own one rule episode's submit budget and append-only in-memory ledger."""
 
-    Historical callers may still use a run-wide limit. Evidence-budget episodes pass an
-    ``expected_rule`` and create one independent two-attempt session per rule.
-    """
-
-    def __init__(self, limit: int = 100, verifier: Callable[[dict], Verdict] = verify,
-                 expected_rule: str | None = None):
+    def __init__(self, expected_rule: str, limit: int = 2,
+                 verifier: Callable[[dict], Verdict] = verify):
         if limit < 0:
             raise ValueError("submit limit must be >= 0")
-        if expected_rule is not None and not expected_rule:
-            raise ValueError("expected_rule must be non-empty when provided")
+        if not expected_rule:
+            raise ValueError("expected_rule must be non-empty")
         self.limit = limit
         self._verifier = verifier
         self.expected_rule = expected_rule
@@ -49,16 +44,13 @@ class SubmissionSession:
         self._thread: threading.Thread | None = None
         self._tmpdir: Path | None = None
         self._workdir: Path | None = None
-        self._workdir_fd: int | None = None
         self._inbox_fd: int | None = None
         self._processing_fd: int | None = None
         self._outbox_fd: int | None = None
-        self._artifact_fd: int | None = None
         self._old_channel_env: str | None = None
         self._old_artifact_env: str | None = None
         self._old_path: str | None = None
         self._stopping = threading.Event()
-        self._status_checks = 0
 
     @property
     def used(self) -> int:
@@ -83,16 +75,10 @@ class SubmissionSession:
 
     @property
     def workdir(self) -> Path:
-        """Writable scratch root shared with sandboxed headless agents."""
+        """Writable scratch root shared with the sandboxed benchmark agent."""
         if self._workdir is None:
             raise RuntimeError("submission session is not active")
         return self._workdir
-
-    @property
-    def reachable(self) -> bool:
-        """Whether any status or submit request reached the authoritative service."""
-        with self._lock:
-            return self._status_checks > 0 or bool(self._attempts)
 
     def __enter__(self) -> "SubmissionSession":
         self._tmpdir = Path(tempfile.mkdtemp(prefix="prb-agent-", dir="/tmp"))
@@ -106,11 +92,9 @@ class SubmissionSession:
         for directory in (bin_dir, inbox_dir, processing_dir, outbox_dir, artifact_dir):
             directory.mkdir(parents=True, exist_ok=True)
         directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        self._workdir_fd = os.open(self._workdir, directory_flags)
         self._inbox_fd = os.open(inbox_dir, directory_flags)
         self._processing_fd = os.open(processing_dir, directory_flags)
         self._outbox_fd = os.open(outbox_dir, directory_flags)
-        self._artifact_fd = os.open(artifact_dir, directory_flags)
 
         shim = bin_dir / "submit"
         package_root = Path(__file__).resolve().parent.parent
@@ -149,46 +133,11 @@ class SubmissionSession:
         self._stopping.set()
         if self._thread is not None:
             self._thread.join()
-        for fd in (self._workdir_fd, self._inbox_fd, self._processing_fd,
-                   self._outbox_fd, self._artifact_fd):
+        for fd in (self._inbox_fd, self._processing_fd, self._outbox_fd):
             if fd is not None:
                 os.close(fd)
         if self._tmpdir is not None:
             shutil.rmtree(self._tmpdir, ignore_errors=True)
-
-    def preserve_artifacts(self, destination: str | Path) -> list[Path]:
-        """Copy small certificate artifacts out of the disposable agent workspace."""
-        destination = Path(destination)
-        copied: list[Path] = []
-        sources = ((self._artifact_fd, "artifacts", False),
-                   (self._workdir_fd, "workspace", True))
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        for directory_fd, label, certificate_names_only in sources:
-            if directory_fd is None:
-                continue
-            for name in os.listdir(directory_fd):
-                if certificate_names_only and ("cert" not in name.lower()
-                                               or not name.lower().endswith(".json")):
-                    continue
-                try:
-                    source_fd = os.open(name, flags, dir_fd=directory_fd)
-                except OSError:
-                    continue
-                try:
-                    info = os.fstat(source_fd)
-                    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_REQUEST_BYTES:
-                        continue
-                    with os.fdopen(source_fd, "rb", closefd=False) as source_file:
-                        payload = source_file.read(MAX_REQUEST_BYTES + 1)
-                finally:
-                    os.close(source_fd)
-                if len(payload) > MAX_REQUEST_BYTES:
-                    continue
-                target = destination / label / Path(name).name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(payload)
-                copied.append(target)
-        return copied
 
     def prepare_agent_access(self, uid: int, gid: int) -> None:
         """Give a non-root agent access to its request queues and artifact directory."""
@@ -204,26 +153,6 @@ class SubmissionSession:
         for path in paths:
             os.chown(path, uid, gid)
             path.chmod(0o700)
-
-    def result_rows(self) -> list[dict]:
-        """Collapse attempts to one authoritative result per named rule.
-
-        An accepted attempt wins over rejected attempts for the same rule.  Parse failures
-        remain in ``submit_log`` for auditing but cannot form schema-valid result rows.
-        """
-        with self._lock:
-            by_rule: dict[str, dict] = {}
-            for attempt in self._attempts:
-                rule = attempt.get("rule")
-                cert = attempt.get("certificate")
-                if (not isinstance(rule, str) or not isinstance(cert, dict)
-                        or not isinstance(cert.get("rule"), str)
-                        or not isinstance(cert.get("source"), dict)):
-                    continue
-                old = by_rule.get(rule)
-                if old is None or (attempt.get("accepted") and not old.get("accepted")):
-                    by_rule[rule] = attempt
-            return [_attempt_to_row(attempt) for attempt in by_rule.values()]
 
     def _serve(self) -> None:
         assert self._inbox_fd is not None
@@ -330,8 +259,6 @@ class SubmissionSession:
 
     def _handle(self, request: dict, *, request_id: str | None = None) -> dict:
         if request.get("op") == "status":
-            with self._lock:
-                self._status_checks += 1
             return {"status": "ok", "used": self.used, "limit": self.limit,
                     "remaining": self.remaining, "closed": self.closed,
                     "expected_rule": self.expected_rule}
@@ -367,8 +294,7 @@ class SubmissionSession:
                 else:
                     if not isinstance(cert, dict):
                         reason = "certificate must be a JSON object"
-                    elif (self.expected_rule is not None
-                          and cert.get("rule") != self.expected_rule):
+                    elif cert.get("rule") != self.expected_rule:
                         reason = (f"certificate rule {cert.get('rule')!r} does not match "
                                   f"this episode's rule {self.expected_rule!r}")
                     else:
@@ -416,24 +342,8 @@ class SubmissionSession:
         if details is not None:
             record["verify_details"] = details
         self._attempts.append(record)
-        if accepted and self.expected_rule is not None:
+        if accepted:
             self._closed = True
         return {**record, "used": attempt_no, "limit": self.limit,
                 "remaining": 0 if self._closed else self.limit - attempt_no,
                 "closed": self._closed}
-
-
-def _attempt_to_row(attempt: dict) -> dict:
-    row = {
-        "rule": attempt["rule"],
-        "result": "bug_found" if attempt.get("accepted") else "rejected",
-        "tokens_k": 0.0,
-        "certificate": copy.deepcopy(attempt["certificate"]),
-        "submit_attempt": attempt["attempt"],
-    }
-    if attempt.get("accepted"):
-        if attempt.get("verify_details") is not None:
-            row["verify_details"] = copy.deepcopy(attempt["verify_details"])
-    else:
-        row["reject_reason"] = attempt.get("reason", "rejected")
-    return row

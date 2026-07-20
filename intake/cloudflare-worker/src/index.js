@@ -34,8 +34,9 @@ export default {
     // Light shape check — the backend re-verifies every certificate with pred regardless.
     let sub;
     try { sub = JSON.parse(body); } catch { return json({ error: "invalid JSON" }, 400); }
-    if (!sub || typeof sub !== "object" || !sub.model || !Array.isArray(sub.results)) {
-      return json({ error: "not a submission (need model + results[])" }, 400);
+    if (!sub || typeof sub !== "object" || !sub.model ||
+        !Array.isArray(sub.shortlist) || !sub.triage || !Array.isArray(sub.episodes)) {
+      return json({ error: "not a submission (need model, shortlist, triage, and episodes)" }, 400);
     }
 
     // Deposit the raw submission (answer key) privately in R2, pending scoring.

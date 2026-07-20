@@ -183,8 +183,8 @@ def render_report(evidence: dict) -> str:
         evidence["selection_rationale"],
         "",
         "The public comparison therefore uses these built-in parameters and is ranked only by "
-        "verified distinct-rule bugs. Fixed Top50, multiple seeds, a System Track, and a public "
-        "budget grid remain out of scope.",
+        "verified distinct-rule bugs. Fixed Top50, multiple seeds, and a public budget grid "
+        "remain out of scope.",
         "",
         "## Provenance",
         "",
@@ -248,13 +248,13 @@ def check(path: str | Path) -> list[str]:
     evidence = load_json(path)
     contract = benchmark_parameters()
     errors = validate_evidence(evidence, contract)
-    submission_schema = load_json(ROOT / "top50_submission.schema.json")
+    submission_schema = load_json(ROOT / "submission.schema.json")
     properties = submission_schema.get("properties", {})
     if properties.get("safety_controls", {}).get("const") != contract["safety_controls"]:
-        errors.append("top50_submission.schema.json has stale safety controls")
+        errors.append("submission.schema.json has stale safety controls")
     if properties.get("inference_parameters", {}).get("const") != contract[
             "inference_parameters"]:
-        errors.append("top50_submission.schema.json has stale inference parameters")
+        errors.append("submission.schema.json has stale inference parameters")
     if not errors and REPORT_PATH.read_text(encoding="utf-8") != render_report(evidence):
         errors.append("budget-calibration.md does not match the machine-readable evidence")
     return errors

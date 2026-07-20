@@ -2,7 +2,7 @@
 """
 Backend scoring queue — the worker that turns PENDING submissions into ranked results.
 
-The scoring is our zero-trust re-verification (benchmark/verify_submission.py → pred):
+The scoring is our zero-trust contract validation and `pred` re-verification:
 
   * --local <subs_dir> <results_dir>
         Scan subs_dir/*.json, score each unprocessed submission, write the scored
@@ -23,10 +23,7 @@ import sys
 from pathlib import Path
 
 from benchmark.env_setup import pinned_commit
-from benchmark.submit import validate_submission
-from benchmark.submit_ledger import has_submit_ledger
-from benchmark.top50_contract import is_top50_submission
-from benchmark.verify_submission import leaderboard_entry, score_submission
+from benchmark.top50_contract import score_top50_submission, top50_public_entry
 
 STATUS_SUFFIX = ".status.json"
 
@@ -71,9 +68,8 @@ def board_slug(scored: dict, stem: str) -> str:
 
 def board_entry(scored: dict, stem: str) -> dict:
     """The public per-submission leaderboard entry, tagged with its time + id."""
-    # leaderboard_entry reads only ``submitted_by`` from its first arg; the scored file
-    # carries it when present, so it doubles as the submission view.
-    entry = leaderboard_entry(scored, scored)
+    # The scored file carries the submitter metadata needed by the public projection.
+    entry = top50_public_entry(scored, scored)
     entry["timestamp"] = _submission_ts(scored, stem)
     entry["submission_id"] = _submission_id(stem)
     return entry
@@ -94,10 +90,9 @@ def write_board_entries(results_dir: Path, board_dir: Path) -> list[str]:
             scored = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if (("results" not in scored and not is_top50_submission(scored))
-                or "model" not in scored or scored.get("test")):
+        if "model" not in scored or scored.get("test"):
             continue
-        if is_top50_submission(scored) and not scored.get("rankable"):
+        if not scored.get("rankable"):
             continue
         slug = board_slug(scored, p.stem)
         (board_dir / f"{slug}.json").write_text(
@@ -179,40 +174,6 @@ def _pending_submissions(subs_dir: Path) -> list[Path]:
 
 # ── scoring one submission ────────────────────────────────────────────────────
 
-def _validate_for_scoring(submission: object, *, official: bool,
-                          expected_commit: str | None) -> dict:
-    """Validate the durable queue envelope before invoking ``pred``.
-
-    Basic validation applies to local and production scoring so malformed input is a
-    permanent per-object failure instead of an exception that jams the whole queue.  The
-    official gate additionally requires the current ledger-backed structure and target
-    commit, and rejects partial runs from the public leaderboard. Test submissions may be
-    partial because they never publish.
-    """
-    if not isinstance(submission, dict):
-        raise PermanentSubmissionError("submission is not a JSON object")
-
-    problems = validate_submission(submission)
-
-    if official:
-        if not is_top50_submission(submission) and not has_submit_ledger(submission):
-            problems.append("official submissions require submit_limit and submit_log")
-        target_commit = expected_commit or pinned_commit()
-        if submission.get("library_commit") != target_commit:
-            problems.append(
-                "library_commit does not match this benchmark round "
-                f"(expected {target_commit})")
-        if submission.get("run_error") and not submission.get("test"):
-            problems.append(
-                "partial run has run_error; resubmit a clean run or upload it with --test")
-
-    if problems:
-        # Preserve order while removing duplicate messages emitted by overlapping checks.
-        unique = list(dict.fromkeys(problems))
-        raise PermanentSubmissionError("; ".join(unique))
-    return submission
-
-
 def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None, *,
               official: bool = False, expected_commit: str | None = None) -> dict:
     """Score a single submission file. Returns its leaderboard entry.
@@ -227,10 +188,20 @@ def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None, *,
             raw_submission = json.loads(sub_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeError) as e:
             raise PermanentSubmissionError(f"invalid submission JSON: {e}") from e
-        submission = _validate_for_scoring(
-            raw_submission, official=official, expected_commit=expected_commit)
-        scored, report = score_submission(submission, repo_dir)
-        entry = leaderboard_entry(submission, scored)
+        if not isinstance(raw_submission, dict):
+            raise PermanentSubmissionError("submission is not a JSON object")
+        submission = raw_submission
+        scored, report = score_top50_submission(submission, repo_dir)
+        problems = list(scored.get("rankability_errors", []))
+        if official:
+            target_commit = expected_commit or pinned_commit()
+            if submission.get("library_commit") != target_commit:
+                problems.append(
+                    "library_commit does not match this benchmark round "
+                    f"(expected {target_commit})")
+        if problems:
+            raise PermanentSubmissionError("; ".join(dict.fromkeys(problems)))
+        entry = top50_public_entry(submission, scored)
         (results_dir / f"{sub_path.stem}.json").write_text(
             json.dumps(scored, indent=2), encoding="utf-8")
         _write_status(sub_path, "FINISHED",
@@ -246,31 +217,16 @@ def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None, *,
 # ── leaderboard aggregation ───────────────────────────────────────────────────
 
 def _dedup_best(entries: list[dict]) -> list[dict]:
-    """Keep the best entry per model (max bugs, tie-break efficiency), ranked desc."""
-    best: dict[tuple[str, str], dict] = {}
+    """Keep each model's highest verified-bug count and rank by that count only."""
+    best: dict[str, dict] = {}
     for e in entries:
         m = e["model"]
-        top50 = e.get("agent_mode") == "standardized-model-api"
-        track = "top50" if top50 else "legacy-whole-repo"
-        group = (track, m)
-        cur = best.get(group)
-        if top50:
-            better = cur is None or e.get("bugs_found", 0) > cur.get("bugs_found", 0)
-        else:
-            key = (e.get("bugs_found", 0), e.get("efficiency_bugs_per_ktok", 0.0))
-            better = cur is None or key > (
-                cur.get("bugs_found", 0), cur.get("efficiency_bugs_per_ktok", 0.0))
-        if better:
-            best[group] = e
+        cur = best.get(m)
+        if cur is None or e.get("bugs_found", 0) > cur.get("bugs_found", 0):
+            best[m] = e
     return sorted(
         best.values(),
-        key=lambda e: (
-            0 if e.get("agent_mode") == "standardized-model-api" else 1,
-            -e.get("bugs_found", 0),
-            (0 if e.get("agent_mode") == "standardized-model-api"
-             else -e.get("efficiency_bugs_per_ktok", 0.0)),
-            e.get("model", ""),
-        ))
+        key=lambda e: (-e.get("bugs_found", 0), e.get("model", "")))
 
 
 def aggregate_leaderboard(results_dir: Path) -> list[dict]:
@@ -284,17 +240,15 @@ def aggregate_leaderboard(results_dir: Path) -> list[dict]:
             scored = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if ("results" not in scored and not is_top50_submission(scored)) or "model" not in scored:
+        if "model" not in scored:
             continue
-        if is_top50_submission(scored) and not scored.get("rankable"):
+        if not scored.get("rankable"):
             continue
         # Test submissions are scored + kept privately, but never published to the public
         # leaderboard — skip them here so an end-to-end test can't pollute production.
         if scored.get("test"):
             continue
-        # leaderboard_entry reads only ``submitted_by`` from its first arg, which the
-        # scored file carries when present — it doubles as the submission view.
-        entries.append(leaderboard_entry(scored, scored))
+        entries.append(top50_public_entry(scored, scored))
     ranked = _dedup_best(entries)
     (results_dir / "leaderboard.json").write_text(json.dumps(ranked, indent=2), encoding="utf-8")
     return ranked
