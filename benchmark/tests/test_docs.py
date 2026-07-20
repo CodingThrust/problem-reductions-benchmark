@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 README = REPO_ROOT / "README.md"
 GUIDE = REPO_ROOT / "CONTRIBUTING.md"
 ENV_EXAMPLE = REPO_ROOT / "submission.env.example"
-API_SKILL = REPO_ROOT / ".agents/skills/run-api-benchmark/SKILL.md"
+RUN_SKILL = REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md"
 SUBMIT_SKILL = REPO_ROOT / ".agents/skills/submit-benchmark-result/SKILL.md"
 TRIGGER_SCORING = SUBMIT_SKILL.parent / "scripts/trigger-scoring.sh"
 SCORER_WORKFLOW = REPO_ROOT / ".github/workflows/score-from-r2.yml"
@@ -104,23 +104,23 @@ class TestSingleProtocol:
         assert "whole-repository" not in t and "local_backend" not in t
 
     def test_run_skill_uses_the_containerized_protocol(self):
-        t = _text(API_SKILL)
+        t = _text(RUN_SKILL)
         assert "standardized" in t and "runner-pull" in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL])
+    @pytest.mark.parametrize("skill", [RUN_SKILL])
     def test_each_skill_exposes_only_local_and_official_goals(self, skill):
         t = _text(skill)
         assert "local" in t
         assert "official" in t
         assert "intake test" not in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL])
+    @pytest.mark.parametrize("skill", [RUN_SKILL])
     def test_run_skills_delegate_upload(self, skill):
         t = _text(skill)
         assert "$submit-benchmark-result" in t
         assert "owns upload" in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL])
+    @pytest.mark.parametrize("skill", [RUN_SKILL])
     def test_run_skills_confirm_the_benchmark_version(self, skill):
         t = _text(skill)
         assert "make -s print-benchmark-version" in t
@@ -151,7 +151,7 @@ class TestSingleProtocol:
         assert "PR_REF: v" not in text
 
     def test_router_sends_existing_results_to_submit_skill(self):
-        t = _text(REPO_ROOT / ".agents/skills/run-benchmark/SKILL.md")
+        t = _text(RUN_SKILL)
         assert "already has a `submission.json`" in t
         assert "$submit-benchmark-result" in t
 

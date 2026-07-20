@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read-only host probe for the run-api-benchmark skill.
+# Read-only host probe for the run-benchmark skill.
 # Detects an available container engine and the flags the benchmark run needs on
 # this host, then prints a machine-parsable report + a human summary. It NEVER
 # mutates the system (no install, no `colima start`, no alias) — installing an
