@@ -7,7 +7,7 @@
 #   verify-calibration   Test the verifier against known fixtures (no AI needed)
 #   preflight            Validate submission.env with one tiny real call before a full run
 #   run                  Run the benchmark via Docker → out/<stamp>/submission.json (does NOT upload)
-#   run-local            Clone/verify a repo and run a local headless CLI agent
+#   run-local            Reproduce a historical non-ranking CLI artifact
 #
 # Model/auth configuration lives in submission.env (see submission.env.example). Local
 # repository, submission, and log locations are intentionally explicit Make variables.
@@ -31,7 +31,7 @@ LOCAL_LOG_DIR ?=
 REPO_URL ?= https://github.com/CodingThrust/problem-reductions.git
 LOCAL_ARGS = $(if $(LOCAL_BACKEND),--backend "$(LOCAL_BACKEND)")
 
-.PHONY: test test-unit verify-calibration verify-judgment audit install-deps help print-benchmark-version print-pr-ref runner-build runner-pull preflight run run-local score-local board publish-local serve
+.PHONY: test test-unit verify-calibration verify-budget verify-judgment audit install-deps help print-benchmark-version print-pr-ref runner-build runner-pull preflight run run-local score-local board publish-local serve
 
 ## Print this checkout's benchmark contract version.
 print-benchmark-version:
@@ -58,6 +58,10 @@ verify-judgment:
 verify-calibration:
 	python -m benchmark.verify --calibrate
 
+## Check that the frozen Top50 contract, complete pilot grid, and rendered report agree.
+verify-budget:
+	python -m benchmark.calibrate_budget --check benchmark/docs/budget-calibration.json
+
 ## Build the dockerized submission runner image (compiles pred at PR_REF + bundles the agent).
 ## JOBS controls parallel rustc jobs in the pred build (default 1 = safe on small VMs).
 runner-build:
@@ -80,8 +84,8 @@ preflight:
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in first"; exit 1; fi
 	docker run --rm --env-file "$(ENV_FILE)" $(IMAGE) --preflight
 
-## Run the bug-finding agent via Docker → writes ./out/<stamp>/submission.json (the
-## whole-repo trajectory lands alongside it). Each run gets its own timestamped dir so
+## Run the bug-finding agent via Docker → writes ./out/<stamp>/submission.json. The
+## Top50 phase histories and ledgers are embedded in that private artifact. Each run gets its own timestamped dir so
 ## successive runs never overwrite each other (override with STAMP=... to reproduce).
 ## This RUNS the benchmark locally; it does NOT submit — submitting is a separate step
 ## (upload it with benchmark.submit, see CONTRIBUTING.md). Config lives in submission.env
@@ -91,9 +95,10 @@ run:
 	  echo "No $(ENV_FILE) — copy submission.env.example and fill it in (then: make preflight)"; exit 1; fi
 	mkdir -p out
 	docker run --rm --env-file "$(ENV_FILE)" -e OUTPUT=/out/$(STAMP)/submission.json -v "$(PWD)/out:/out" $(IMAGE)
-	@echo "Wrote out/$(STAMP)/submission.json (+ trajectory) — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
+	@echo "Wrote out/$(STAMP)/submission.json — now submit it with 'python -m benchmark.submit' (see CONTRIBUTING.md)."
 
-## Lightweight host run through an installed headless agent CLI. The checkout is cloned at
+## Historical non-ranking host run through an installed headless agent CLI. It cannot enter
+## the Top50 leaderboard. The checkout is cloned at
 ## PR_REF when LOCAL_REPO_DIR is absent; an existing checkout must already match exactly.
 ## Requires explicit repo/output/log paths, local Python deps, pred, and CLI authentication.
 run-local:
@@ -152,11 +157,12 @@ help:
 	@echo "  test                Run full pytest suite"
 	@echo "  test-unit           Run unit tests only (no real repo needed)"
 	@echo "  verify-calibration  Test verifier against fixtures (no AI needed)"
+	@echo "  verify-budget       Check frozen Top50 calibration evidence offline"
 	@echo "  runner-build        Build the dockerized submission runner image"
 	@echo "  runner-pull         Pull the prebuilt runner image from GHCR (fast runner-build alternative)"
 	@echo "  preflight           Validate submission.env (1 tiny real call) before a full run"
 	@echo "  run                 Run the API backend via Docker → out/<stamp>/submission.json (not upload)"
-	@echo "  run-local           Clone/verify a repo and run a local headless CLI agent"
+	@echo "  run-local           Reproduce a historical non-ranking CLI artifact"
 	@echo "  score-local         Score SUBS_DIR submissions with the backend"
 	@echo "  board               Build site/results.json from site/results/*.json (aggregate)"
 	@echo "  publish-local       Score + stage per-submission entries + rebuild board (SUBS_DIR stays local)"

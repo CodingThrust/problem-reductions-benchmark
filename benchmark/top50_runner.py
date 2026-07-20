@@ -21,6 +21,7 @@ from benchmark.run_mini import (
     _message_text,
     _session_usage,
 )
+from benchmark.top50_budget import FROZEN_CONTRACT
 from benchmark.usage import Usage, usage_as_dict
 from benchmark.verify import Verdict, verify
 
@@ -341,7 +342,6 @@ def build_rankable_runner(
     *, contract: Top50Contract, pred_binary: str | Path,
     agent_uid: int, agent_gid: int, oracle_uid: int, oracle_gid: int, evidence_gid: int,
     api_base: str | None = None, api_key: str | None = None,
-    max_tokens: int = DEFAULT_MAX_TOKENS, model_kwargs: dict | None = None,
     verifier: Callable[[dict], Verdict] = verify,
 ) -> Top50Runner:
     """Construct the sole rankable harness after proving the required OS boundary."""
@@ -349,10 +349,13 @@ def build_rankable_runner(
         raise RuntimeError("rankable Top50 runs require the root runner privilege boundary")
     if len({agent_uid, oracle_uid}) != 2:
         raise ValueError("agent and oracle must use distinct identities")
+    inference = FROZEN_CONTRACT["inference_parameters"]
+    safety = FROZEN_CONTRACT["safety_controls"]
     executor = MiniSwePhaseExecutor(
-        api_base=api_base, api_key=api_key, max_tokens=max_tokens,
-        model_kwargs=model_kwargs, agent_uid=agent_uid, agent_gid=agent_gid,
-        evidence_gid=evidence_gid)
+        api_base=api_base, api_key=api_key, max_tokens=inference["max_tokens"],
+        model_timeout_seconds=safety["model_timeout_seconds"],
+        model_retries=safety["model_retries"], model_kwargs=None,
+        agent_uid=agent_uid, agent_gid=agent_gid, evidence_gid=evidence_gid)
     return Top50Runner(
         executor=executor, contract=contract, pred_binary=pred_binary, verifier=verifier,
         agent_uid=agent_uid, agent_gid=agent_gid, oracle_uid=oracle_uid,
@@ -442,18 +445,21 @@ class MiniSwePhaseExecutor:
 
     def __init__(self, *, api_base: str | None = None, api_key: str | None = None,
                  max_tokens: int = DEFAULT_MAX_TOKENS, model_kwargs: dict | None = None,
+                 model_timeout_seconds: int = 300, model_retries: int = 2,
                  agent_uid: int | None = None, agent_gid: int | None = None,
                  evidence_gid: int | None = None):
         self.api_base = api_base
         self.api_key = api_key
         self.max_tokens = max_tokens
         self.model_kwargs = model_kwargs
+        self.model_timeout_seconds = model_timeout_seconds
+        self.model_retries = model_retries
         self.agent_uid = os.getuid() if agent_uid is None else agent_uid
         self.agent_gid = os.getgid() if agent_gid is None else agent_gid
         self.evidence_gid = evidence_gid
         config_path = Path(__file__).with_name("top50_config.yaml")
         self.agent_config, self.model_config, _ = _load_agent_config(
-            config_path, config_path, "")
+            config_path, config_path, "", force_unlimited=False)
         self._models: dict[str, object] = {}
 
     def run_triage(self, session: TriageSession, *, repo_path: Path,
@@ -492,7 +498,9 @@ class MiniSwePhaseExecutor:
                 model_name, self.api_base, self.max_tokens,
                 model_kwargs=self.model_kwargs, api_key=self.api_key,
                 observation_template=self.model_config.get("observation_template"),
-                format_error_template=self.model_config.get("format_error_template"))
+                format_error_template=self.model_config.get("format_error_template"),
+                model_timeout_seconds=self.model_timeout_seconds,
+                model_retries=self.model_retries)
             self._models[model_name] = model
 
         class BudgetedAgent(DefaultAgent):

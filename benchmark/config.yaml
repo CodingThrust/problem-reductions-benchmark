@@ -84,7 +84,8 @@ agent:
 
   # mini-swe-agent uses 0 to mean unlimited. Cost limiting is also force-disabled by the
   # runner; the agent stops through the completion command above.
-  step_limit: 0
+  # Historical whole-repository runner only; never produces Top50 rankable results.
+  step_limit: 100
 
 environment:
   # Per-command protection against a wedged subprocess, not an agent turn budget.

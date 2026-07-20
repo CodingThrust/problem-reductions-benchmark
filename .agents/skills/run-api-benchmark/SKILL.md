@@ -1,121 +1,40 @@
 ---
 name: run-api-benchmark
-description: Configure and run this problem-reductions benchmark through a model API using the containerized mini-swe/LiteLLM backend. Use when the caller chooses an API, provider endpoint, gateway, hosted model, or container run. Guides provider configuration without collecting secrets, detects the container engine, runs preflight, produces submission.json, validates it, and uploads only when explicitly requested.
+description: Configure and run the rankable problem-reductions Self-selected Top50 benchmark through the standardized containerized Model API path.
 ---
 
-# Run the API benchmark
+# Run the rankable Top50 benchmark
 
-Run one whole-repository mini-swe session. The agent chooses rules, search depth, and when to
-stop. Do not add a step, turn, cost, or rule-count limit. The evaluation-owned `submit`
-command is the only scored certificate channel; `SUBMIT_LIMIT` defaults to 100.
+Use only the frozen `top50-evidence/v1` path: source-only triage freezes 50 rules, followed by 50 fresh sequential episodes. Each rule receives M=10 model generations, E=12 shell actions, P=24 `pred` calls, P_solve=10 solve calls, O=10000 observed characters, and exactly S=2 submit attempts. Never add or accept custom budgets, prompts, strategies, model kwargs, or coding-agent backends.
 
-Read [references/provider-config.md](references/provider-config.md) when configuring the
-provider or diagnosing API/preflight failures. Use `scripts/detect-engine.sh` before build.
+Read [references/provider-config.md](references/provider-config.md) for endpoint setup and `scripts/detect-engine.sh` before preparing the image.
 
-## Ask the API questions
+## Collect only required choices
 
-Ask only for information the caller has not already supplied. Ask in this order and wait at
-each numbered stage when its answer determines the next question. Use the product's
-structured user-input UI when available; otherwise ask the quoted question in plain text.
-Do not dump every configuration question into one message.
+1. Ask for the Model API identifier.
+2. Ask whether it uses the standard provider endpoint or a custom OpenAI-compatible `API_BASE`. Never ask the caller to paste a secret; direct them to the gitignored `submission.env`.
+3. Ask whether to keep and validate locally or upload officially. `$submit-benchmark-result` owns upload.
+4. Read `make -s print-benchmark-version`, compare it with the official [`main/VERSION`](https://github.com/CodingThrust/problem-reductions-benchmark/blob/main/VERSION), and show `Benchmark version: <checkout> (latest version: <main>)`. Wait for confirmation. If they differ, say the checkout is outdated and stop the official run.
+5. Resolve `PR_REF` with `make -s print-pr-ref`, plus a fixed `STAMP` and `out/<stamp>/submission.json`. Do not ask for budget values.
 
-1. Ask:
+## Configure and preflight
 
-   > Which API model should run the benchmark? Give its provider/model identifier, for
-   > example `openai/gpt-...`, `anthropic/claude-...`, or `openrouter/...`.
+Create `submission.env` from the example when absent. Configure `MODEL_NAME`, a provider key or `API_KEY`, and `API_BASE` only when needed. An existing `MODEL_KWARGS`, `AGENT_BACKEND`, `AGENT_CONFIG`, `AGENT_STRATEGY_FILE`, `SUBMIT_LIMIT`, or `PRB_*` budget override must be removed before a rankable run.
 
-2. Ask:
+Detect the container engine. Prefer `make runner-pull`; use `make runner-build` only when necessary. Before the first real API call, show the redacted model/endpoint, frozen contract ID and counters, target ref, output path, and upload goal, then ask for confirmation.
 
-   > Does this model use the provider's standard endpoint, or a custom OpenAI-compatible
-   > endpoint/gateway?
-
-   For a custom endpoint, ask for `API_BASE` and any non-secret `MODEL_KWARGS`. Never ask the
-   caller to paste an API key into chat. Tell them exactly which key variable to set locally
-   in the gitignored `submission.env`, then wait for confirmation that it is configured.
-
-3. Ask:
-
-   > What should happen after the run?
-   >
-   > 1. Keep and validate the result locally without uploading.
-   > 2. Upload an official submission.
-
-   Default to local-only only when the caller explicitly delegates the choice. The
-   `$submit-benchmark-result` skill owns submission validation, authentication, and upload.
-
-4. Read this checkout's benchmark version with `make -s print-benchmark-version`. Read the
-   latest version from the official repository's
-   [`main/VERSION`](https://github.com/CodingThrust/problem-reductions-benchmark/blob/main/VERSION);
-   do not use the `problem-reductions` version or guess. Show this in the caller's language
-   and wait for confirmation:
-
-   > Benchmark version: `<checkout version>` (latest version: `<main/VERSION>`)
-
-   If the versions differ, explain that the checkout is outdated and ask the caller to
-   update it before an official run. If the latest-version lookup fails, show `unknown`
-   rather than substituting the pinned `problem-reductions` version.
-
-5. Resolve the internal problem-reductions pin with `make -s print-pr-ref`, plus
-   `SUBMIT_LIMIT` (default 100) and `STAMP` (default: the Makefile timestamp). Show the
-   derived authoritative path `out/<stamp>/submission.json`; the trajectory is written
-   alongside it. Do not ask for arbitrary host output or log paths when using `make run`.
-
-## Configure safely
-
-Create `submission.env` from `submission.env.example` when absent. It is gitignored. Set or
-guide the caller to set:
-
-- `MODEL_NAME`;
-- one provider-specific key or `API_KEY`;
-- `API_BASE` and `MODEL_KWARGS` only when needed;
-- `SUBMIT_LIMIT` when non-default.
-
-This route always uses the `mini-swe` backend. If an existing env file contains
-`AGENT_BACKEND`, remove it or require it to be `mini-swe`. Never select a coding-agent CLI
-with `AGENT_BACKEND` and never run one inside the container.
-
-Do not expose secret values in command output or the final response. Do not add removed
-`AGENT_MODE`, `MAX_RULES`, or max-turn settings.
-
-## Prepare and preflight
-
-1. Run `scripts/detect-engine.sh` and parse its `KEY=VALUE` output. Read
-   [references/engines.md](references/engines.md) only if no engine is available or the RAM
-   hint is low.
-2. Prepare one image at the selected ref. Prefer the published image:
-
-   ```bash
-   make runner-pull
-   ```
-
-   Fall back to `make runner-build` only when the published image is unavailable or the
-   caller explicitly wants a local build. For Podman, use the equivalent command from
-   `references/engines.md`.
-3. Before the preflight's real API call, show the resolved model, backend `mini-swe`, API
-   endpoint with secrets redacted, confirmed benchmark version, submit limit, `STAMP`,
-   derived submission path, and upload goal. Ask for explicit confirmation.
-4. Run `make preflight`. It checks `pred`, rule sources, and one tiny LiteLLM call. Stop on
-   any failure; never proceed to a full run after a failed preflight.
+Run `make preflight`. It must reject custom execution knobs before its tiny model call, then verify `pred`, source inventory, endpoint, and credentials. Never continue after a failed preflight.
 
 ## Run and validate
 
-After preflight passes, state that the full session can consume substantial time and API
-credits and ask for explicit confirmation to start it. Then run `make run` or the equivalent
-Podman command using the detector's `RUN_FLAGS`. Pass `STAMP=<resolved-stamp>` when a fixed
-stamp was selected.
+Explain that 50 isolated episodes can use substantial API credits, then get explicit confirmation and run `make run STAMP=<stamp>`.
 
-Confirm the authoritative `submission.json` exists. For option 1, validate it locally:
+For local-only validation:
 
 ```bash
 python -m benchmark.submit --predictions <submission.json> --dry-run
 ```
 
-Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, and absolute output
-and log paths. A `run_error` means partial salvage, not a clean zero-bug completion.
+Report the contract, completed episode count, rankability, claimed/verified bug fields available locally, cap-hit diagnostics, and absolute artifact path. Time, tokens, and cost are diagnostic only.
 
-For option 2, invoke `$submit-benchmark-result` with the authoritative path. Do not validate
-it first: that skill owns validation, authentication, final confirmation, upload, scoring,
-and PR reporting. Never upload merely because the run completed.
-
-An exit code 137 means the engine needs more memory. Preserve partial outputs and read
-actual command errors before recommending changes.
+For official upload, invoke `$submit-benchmark-result`. Never upload merely because the run completed. Preserve partial checkpoints on failure; a `run_error` is not a clean zero.

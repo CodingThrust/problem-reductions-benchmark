@@ -25,8 +25,8 @@ python3 -m benchmark.submit --predictions <submission.json> --dry-run
 Stop if validation fails. Otherwise report only:
 
 - absolute path;
-- `model` and `library_commit`;
-- claimed bugs, `total_tokens_k`, and number of submit attempts;
+- `benchmark_contract`, `model`, and `library_commit`;
+- completed Top50 episode count and claimed bugs;
 - `run_error`, if present.
 
 Do not submit a result containing `run_error`. Report the error and stop.
@@ -39,6 +39,7 @@ Immediately before uploading, show this confirmation with the real values filled
 > - Destination: `intake.prb-bench.workers.dev`
 > - File: `<absolute path to submission.json>`
 > - Model: `<model>`
+> - Contract: `top50-evidence/v1`
 > - Claimed bugs: `<count>`
 >
 > This private submission file will leave the machine and be uploaded to the benchmark's

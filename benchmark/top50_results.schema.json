@@ -8,7 +8,7 @@
     "first_attempt_accepts", "second_attempt_accepts", "usage_totals",
     "artifact_sha256", "verifier_report"],
   "properties": {
-    "benchmark_contract": {"const": "top50-evidence/pilot-v1"},
+    "benchmark_contract": {"const": "top50-evidence/v1"},
     "model": {"type": "string"},
     "library_commit": {"type": "string"},
     "rankable": {"type": "boolean"},

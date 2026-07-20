@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-20T00:00:00Z",
+  "ranking_status": "non-ranking-development",
+  "method": "Human-reviewed bounded-prefix replay record from internally retained whole-repository pilot trajectories. Raw trajectories remain private; the offline checker validates this record and release consistency, not the raw replay. These statistics are not Top50 scores.",
+  "selected_contract": {
+    "contract_id": "top50-evidence/v1",
+    "status": "frozen",
+    "shortlist_size": 50,
+    "hypothesis_chars": 500,
+    "safety_controls": {
+      "model_timeout_seconds": 300,
+      "model_retries": 2
+    },
+    "inference_parameters": {
+      "max_tokens": 8192,
+      "timeout": 300,
+      "num_retries": 2
+    },
+    "triage": {
+      "model_generations": 8,
+      "shell_actions": 12,
+      "max_output_chars": 10000,
+      "command_timeout_seconds": 300
+    },
+    "episode": {
+      "model_generations": 10,
+      "shell_actions": 12,
+      "pred_calls": 24,
+      "solve_calls": 10,
+      "submit_attempts": 2,
+      "max_output_chars": 10000,
+      "pred_timeout_seconds": 300
+    }
+  },
+  "selection_rationale": "M=10 and P=24 are the smallest tested values at which the replayed stronger pilot retains its verified find. Moving down to M=6 or P=12 loses that find and shows materially higher cap pressure; moving up to M=14 or P=36 adds usage without another verified bug. E=12 and P_solve=10 cover the observed command mix without exposing an unlimited path. S=2 follows the fixed per-rule retry policy. T=8 and E_t=12 bound source-only shortlist formation. Output and watchdog ceilings are safety controls selected above observed pilot maxima and do not affect ranking.",
+  "sources": [
+    {
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "artifact_sha256": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "method": "private legacy pilot trajectory; aggregate bounded-prefix replay retained here"
+    },
+    {
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "artifact_sha256": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "method": "private legacy pilot trajectory; aggregate bounded-prefix replay retained here"
+    }
+  ],
+  "observations": [
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 1423721,
+        "shell_actions": 350,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 1615376,
+        "shell_actions": 350,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 1807031,
+        "shell_actions": 350,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 1587997,
+        "shell_actions": 550,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 1779651,
+        "shell_actions": 550,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 1971306,
+        "shell_actions": 550,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 1752272,
+        "shell_actions": 600,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 1943927,
+        "shell_actions": 600,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-haiku-4-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 2135581,
+        "shell_actions": 600,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "32237111e946206e42bb7ee36c54c09eb1d5313c8fcd4d75c2f440e94bee96d4",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 6109805,
+        "shell_actions": 350,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 6932279,
+        "shell_actions": 350,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 6,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 31,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 7754753,
+        "shell_actions": 350,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 6814783,
+        "shell_actions": 550,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 1,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 7637256,
+        "shell_actions": 550,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 1
+    },
+    {
+      "candidate": {
+        "model_generations": 10,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 1,
+      "cap_hits": {
+        "model_generations": 11,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 8459730,
+        "shell_actions": 550,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 12
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 0,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 24
+      },
+      "usage": {
+        "total_tokens": 7519760,
+        "shell_actions": 600,
+        "pred_calls": 450
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 24
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 1,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 7
+      },
+      "usage": {
+        "total_tokens": 8342234,
+        "shell_actions": 600,
+        "pred_calls": 900
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    },
+    {
+      "candidate": {
+        "model_generations": 14,
+        "pred_calls": 36
+      },
+      "model": "anthropic/claude-sonnet-5",
+      "target": "problem-reductions@aa2d1a10cffa434871d12a4d6f411147fb7e08a8",
+      "verified_bugs": 1,
+      "cap_hits": {
+        "model_generations": 3,
+        "pred_calls": 1
+      },
+      "usage": {
+        "total_tokens": 9164707,
+        "shell_actions": 600,
+        "pred_calls": 1300
+      },
+      "retries": null,
+      "infrastructure_failures": 0,
+      "token_reference": "ac475bb2cc7c6118f6405b63fc52703f4afc27588f0f4cd021d36328222316d3",
+      "cost_reference": "unavailable in retained provider artifact; not imputed",
+      "time_reference": "legacy stream has no trustworthy monotonic elapsed clock; not imputed",
+      "marginal_yield": 0
+    }
+  ]
+}

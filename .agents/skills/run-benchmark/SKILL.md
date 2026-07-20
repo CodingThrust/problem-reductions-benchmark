@@ -1,39 +1,14 @@
 ---
 name: run-benchmark
-description: Route a request to run, reproduce, smoke-test, or generate a submission for this problem-reductions benchmark. Use when the caller has not yet chosen between a model API run and an installed coding-agent CLI run. Ask the execution-route question, then hand off to run-api-benchmark or run-cli-benchmark; do not implement either backend flow here.
+description: Route a request to run, reproduce, smoke-test, or generate a submission for the problem-reductions benchmark. The current rankable route is the standardized Model API Top50 runner; coding-agent CLI execution is historical and non-ranking.
 ---
 
 # Route a benchmark run
 
-If the caller already has a `submission.json` and wants to validate or submit it, invoke
-`$submit-benchmark-result` and stop. Do not ask how to run a model when the result already
-exists.
+If the caller already has a `submission.json`, invoke `$submit-benchmark-result`.
 
-Choose exactly one execution route before asking about models, credentials, paths, or
-submission settings.
+For a current/rankable run, invoke `$run-api-benchmark`. Do not offer a backend choice: the frozen public contract is Model API only.
 
-If the caller already explicitly requested an API, container, mini-swe, Codex, Claude Code,
-or another coding-agent CLI, do not ask the route question again. Invoke the matching child
-skill immediately.
+If the caller explicitly asks to reproduce a legacy Codex, Claude Code, or other coding-agent artifact, explain that it belongs to `legacy-whole-repo`, cannot enter the Top50 table, and invoke `$run-cli-benchmark` only after they confirm they want a non-ranking historical run.
 
-Otherwise ask this question and wait:
-
-> How should the benchmark call the model?
->
-> 1. **Model API** — use the containerized mini-swe/LiteLLM runner with an API key or custom
->    endpoint.
-> 2. **Coding-agent CLI** — use an installed autonomous coding agent such as Codex or Claude
->    Code.
-
-Use the product's structured user-input UI when available; otherwise ask the same question
-in plain text. Do not combine both routes in one run.
-
-- For **Model API**, invoke `$run-api-benchmark` and follow it completely.
-- For **Coding-agent CLI**, invoke `$run-cli-benchmark` and follow it completely.
-
-The route also selects the runtime. Model API means mini-swe/LiteLLM in a container.
-Coding-agent CLI means an installed host process through `make run-local`; never place
-Codex, Claude Code, or another CLI harness inside the API container path.
-
-The child skill owns all later questions, preflight, execution, validation, and optional
-upload. Do not duplicate those workflows here.
+The child skill owns preflight, execution, validation, and optional upload.

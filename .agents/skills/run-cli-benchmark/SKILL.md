@@ -3,7 +3,11 @@ name: run-cli-benchmark
 description: Configure and run this problem-reductions benchmark through an installed autonomous coding-agent CLI harness. Use when the caller requests Codex, Claude Code, Kimi Code, OpenCode, or another CLI agent. Lists the harnesses actually supported by benchmark.run_submission.BACKENDS, routes unsupported harnesses through add-agent-harness before returning to model selection, verifies CLI authentication and pinned pred, runs one whole-repository session, validates submission.json, and uploads only when explicitly requested.
 ---
 
-# Run the CLI benchmark
+# Reproduce the historical CLI benchmark
+
+This route is permanently **non-ranking** and exists only to reproduce `legacy-whole-repo`
+artifacts. Tell the caller that coding-agent results cannot enter `top50-evidence/v1` and
+get confirmation before spending time or credits. Do not describe it as a System Track.
 
 Run one whole-repository coding-agent session with the shared benchmark prompt, verifier,
 submit ledger, and schema. This skill owns only coding-agent CLI execution. Do not add a
@@ -136,6 +140,5 @@ python -m benchmark.submit --predictions <submission.json> --dry-run
 Report `bugs_found`, `total_tokens_k`, submit attempts, any `run_error`, CLI warnings, and
 absolute output/log paths. Preserve partial results and logs on failure.
 
-For option 2, invoke `$submit-benchmark-result` with the authoritative path. Do not validate
-it first: that skill owns validation, authentication, final confirmation, upload, scoring,
-and PR reporting. Never upload merely because the run completed.
+Do not upload a historical CLI artifact as a current official submission. Validate and keep
+it locally under the legacy contract.

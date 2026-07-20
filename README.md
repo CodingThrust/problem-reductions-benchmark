@@ -1,156 +1,76 @@
 # Problem-Reductions Bug-Finding Benchmark
 
-A benchmark that measures how efficiently AI models find bugs in reduction rules from the [problem-reductions](https://github.com/CodingThrust/problem-reductions) library (290+ rules).
+This benchmark measures how well a model can prioritize likely-buggy reduction rules and turn a fixed amount of evidence gathering into independently verified counterexamples.
 
-The leaderboard is a static site (`site/`) published to **GitHub Pages**. Submitting uses a CLI (`python -m benchmark.submit`) that uploads your run to a private store; the maintainer re-verifies it with `pred` and publishes only the aggregate. See [CONTRIBUTING.md](CONTRIBUTING.md) to run and submit.
+## Current ranking contract
 
-## Current benchmark round
+The primary track is **Standardized Model API / Self-selected Top50**, contract [`top50-evidence/v1`](benchmark/top50_budget.json). The target is `problem-reductions` [`v0.6.0`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8), and the bundled `pred` version is `0.6.0`.
 
-| Contract | Current value | Ownership |
-|---|---|---|
-| Benchmark version | [`v0.6.0`](VERSION) | `VERSION` is the source of truth used by local commands and production workflows. |
-| Submission format | [`benchmark/submission.schema.json`](benchmark/submission.schema.json) | The runner writes the current structure and the scorer parses that structure directly. The payload has no schema-version field. |
-| `problem-reductions` target | [`v0.6.0` / `aa2d1a10cffa434871d12a4d6f411147fb7e08a8`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8) | Every official result is verified against this exact commit. |
-| `pred` | `0.6.0` | The runner/scorer image supplies and verifies the matching binary. |
+Each run has two phases:
 
-Do not hand-edit `library_commit` in `submission.json`. The runner records it; the intake
-client performs a structural courtesy check, and the private scorer is the authority for
-the current submission structure and round pin.
+1. Source-only triage freezes exactly 50 unique rules and a short hypothesis for each.
+2. The runner opens 50 fresh, sequential, isolated episodes in shortlist order.
 
-## What this measures
+Every episode receives the same immutable logical budget:
 
-A reduction rule maps problem A → problem B. A **bug** is a round-trip failure:
+| Counter | Limit per selected rule |
+|---|---:|
+| Model generations (`M`) | 10 |
+| Shell actions (`E`) | 12 |
+| Total `pred` calls (`P`) | 24 |
+| `pred solve` calls (`P_solve`) | 10 |
+| Submit attempts (`S`) | **2** |
+| Observed output (`O`) | 10,000 characters |
 
-```
-A  →(reduce)→  B  →(solve)→  s  →(extract)→  A'
-```
+Triage receives 8 model generations and 12 source-only actions. Unused budget never transfers between rules. Process timeouts remain fixed watchdogs for hung model or `pred` calls; elapsed time, network delay, tokens, and cost do not affect rank.
 
-The rule is correct on an instance `a` only if solving it directly agrees with solving it through the reduction, compared by **value** (optimization) or **feasibility** (decision):
-
-```
-solve(a)  ==  solve(reduce(a))
-```
-
-A mismatch is a bug. The AI finds these by constructing **counterexample certificates** — a JSON object naming the source instance `a` and the rule; the backend re-derives the bundle and round-trips it with `pred`, so the AI's claim is never trusted directly. The mismatch is reported with a derived label (`optimum_not_preserved`, `feasibility_not_preserved`, or `spurious_solution`); an optional `target_config` witness can additionally expose extraction bugs on a specific target solution (`unsound_extraction` / `suboptimal_extraction`).
-
-**Primary metric: bugs found** — the number of *distinct rules* with at least one confirmed bug, on a pinned library commit. One rule = one bug, no matter how many counterexamples (or violation types) target it. This count is fully verifiable and cannot be inflated by resubmitting certificates.
-**Secondary metric: bugs/Ktok** — token efficiency. It has a self-reported denominator (tokens), so it ranks ties and serves as reference, not as the headline.
-
-Provenance is intentionally *not* scored: on a fixed commit, a `pred`-confirmed certificate is a bug regardless of who or what produced it.
-
-## Choose a backend
-
-The benchmark has two independent execution backends:
-
-| Backend | Runtime | Repository skill |
-|---|---|---|
-| Model API | mini-swe/LiteLLM in Docker | `$run-api-benchmark` |
-| Coding-agent CLI | installed agent on the host | `$run-cli-benchmark` |
-
-Start with `$run-benchmark` when the backend is not yet chosen. A CLI agent missing from
-the supported list must first be integrated with `$add-agent-harness`.
-
-## How to add a coding-agent backend
-
-LiteLLM API models need no adapter. For a new CLI agent, use `$add-agent-harness` or follow
-the same contract manually:
-
-Implement one repository-session function, following `run_repo_codex` or
-`run_repo_claude`:
-
-```python
-def run_repo_my_agent(model, ctx, *, trajectory_dir=None, submit_session=None, **kwargs):
-    # Run one repository-wide session. Scored rows come from submit_session, not this return.
-    return {"tokens_k": 12.3, "usage": usage, "error": None}
-```
-
-Add its direct dispatch case to `_run_backend()` in `benchmark/run_submission.py`.
-The backend is supported only after its adapter tests pass and
-`harness-evaluation.json` reports `verdict: reliable`; command success alone is not enough.
-
-A run is packaged as a `submission.json` (see `benchmark/submission.schema.json`). Use
-`$submit-benchmark-result` to validate and upload an existing result without repository or
-R2 access. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-During evaluation, counterexamples use a different, agent-only command:
+The budget was selected once using a human-reviewed non-ranking development replay, with smaller and larger candidates around the chosen `M` and `P`. The checked-in record and rationale are in [budget-calibration.md](benchmark/docs/budget-calibration.md); validate their internal and release consistency offline with:
 
 ```bash
-submit certificate.json   # accepted or rejected: consumes one attempt
-submit --status           # inspect the remaining budget: free
+python -m benchmark.calibrate_budget --check benchmark/docs/budget-calibration.json
 ```
 
-The runner owns one shared counter for the complete run (default `SUBMIT_LIMIT=100`),
-verifies every call immediately, and derives scored result rows only from its accepted
-ledger. The CLI crosses Codex, Claude, mini-swe, and container sandboxes through an atomic
-file queue inside a disposable agent workspace; the authoritative budget and ledger stay
-in runner memory. Every session must successfully run the free `submit --status` probe, or
-the output is marked with `run_error` rather than reported as a clean zero. Certificates
-printed only in the agent's final response do not count.
+## Metric and fairness claim
 
-## How to run
+The primary metric is **verified distinct-rule bugs among the model's frozen Top50**. One rule counts at most once. Equal bug counts are ties—there is no token-efficiency or time tie-break.
 
-The API image contains `pred`, Python, dependencies, and the target source. The CLI backend
-instead uses those tools from the host.
+This score reflects a combined ability:
+
+- prioritize the 50 rules most likely to contain bugs;
+- form useful source-level hypotheses;
+- allocate bounded model, shell, and `pred` calls within each rule;
+- construct a valid counterexample within two submission opportunities.
+
+It does not claim to measure host speed, network quality, willingness to run longer, coding-agent tooling, repeated-seed stability, or performance on a fixed organizer-selected Top50. Fixed Top50 diagnostics, multiple seeds, and a System Track are intentionally deferred or dropped.
+
+A certificate is never trusted directly. The private scorer re-derives and replays it with pinned `pred`; only reproducible round-trip failures count.
+
+## Run the rankable track
+
+Install Docker, then:
 
 ```bash
-# Run all unit tests (no API key needed) — this exercises the backend wiring
+cp submission.env.example submission.env  # set MODEL_NAME and API credentials
+make runner-pull                           # or: make runner-build
+make preflight                             # validates frozen path + one tiny API call
+make run                                   # writes out/<timestamp>/submission.json
+python -m benchmark.submit --predictions out/<timestamp>/submission.json
+```
+
+The rankable path is deliberately narrow. It rejects custom logical limits, unlimited counters, `S != 2`, custom prompts or strategies, custom model kwargs, and coding-agent backends before a scored generation. Model and `pred` watchdogs are safety controls and are not user-selectable score dimensions.
+
+Useful local checks:
+
+```bash
 make test-unit
-
-# Test the verifier against the fixtures (no API key)
+make verify-budget
 make verify-calibration
 ```
 
-### Model API backend
+See [CONTRIBUTING.md](CONTRIBUTING.md) for artifact fields, submission, and historical-result handling.
 
-Install Docker, configure the model API in `submission.env`, then run mini-swe/LiteLLM in
-the container:
+## Historical results
 
-```bash
-cp submission.env.example submission.env
-make runner-pull   # prebuilt image from GHCR — or `make runner-build` to compile locally (~1 h)
-make preflight
-make run
-```
+Whole-repository results produced by the former contract remain visible under `legacy-whole-repo`. They use a different execution protocol and efficiency tie-break, so the site keeps them in a separate selectable table. They cannot be deduplicated, sorted, or compared into `top50-evidence/v1`.
 
-### Coding-agent CLI backend
-
-Install Python 3.12, the benchmark dependencies, the pinned `pred`, and a supported CLI.
-Authenticate the CLI, set `MODEL_NAME` in `submission.env`, and run it directly on the host:
-
-```bash
-cp submission.env.example submission.env
-make run-local \
-  LOCAL_REPO_DIR=../runs/problem-reductions-v0.6.0 \
-  LOCAL_OUTPUT=../runs/results/submission.json \
-  LOCAL_LOG_DIR=../runs/logs
-
-# Claude alternative: add LOCAL_BACKEND=claude-code
-```
-
-`run-local` clones `PR_REF` into `LOCAL_REPO_DIR` when the path is absent. If the path
-already exists, its `HEAD` must match that ref; the runner never resets or checks out an
-existing working tree. `LOCAL_OUTPUT` and `LOCAL_LOG_DIR` are deliberately separate and
-required. The CLI backend runs one self-terminating whole-repository session with the same
-run-wide `submit` budget as the API backend. There is no agent step or turn limit; the
-six-hour CLI timeout and per-command timeout only guard against hung processes.
-
-Key `make` targets:
-
-| Target | Description |
-|--------|-------------|
-| `make test-unit` | All unit tests, no API key needed |
-| `make verify-calibration` | Test verifier against the fixtures (accept + reject paths) |
-| `make verify-judgment` | Pred-free sanity tests (docs, CI, trajectory) |
-| `make preflight` | Validate the API backend with one tiny real call before a full run |
-| `make run` | Run the API backend in Docker → `out/<stamp>/submission.json` (does not upload) |
-| `make run-local` | Run a coding-agent CLI on the host → the same output schema |
-| `make score-local` | Score submissions with the zero-trust backend |
-
-## How to read the metrics
-
-| Metric | Formula | When to use |
-|--------|---------|-------------|
-| `bugs_found` | distinct rules with a confirmed bug | **Primary ranking** — fully verifiable, cannot be inflated |
-| `bugs/Ktok` | bugs ÷ tokens(K) | Tiebreak / efficiency reference — self-reported denominator |
-
-Rank by `bugs_found`. Among models that find the same number of bugs, `bugs/Ktok` breaks the tie. The efficiency metric divides by tokens, which the submitter self-reports — treat it as informative, not authoritative.
+The old host coding-agent and whole-repository runners remain in the repository only to reproduce those historical artifacts. They are not a public System Track and cannot produce rankable Top50 submissions.

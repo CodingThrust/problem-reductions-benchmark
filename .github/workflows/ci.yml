@@ -25,6 +25,9 @@ jobs:
       - name: Run unit tests (judgment + non-integration)
         run: pytest -v -m "not integration"
 
+      - name: Check frozen Top50 calibration evidence
+        run: make verify-budget
+
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -64,3 +67,6 @@ jobs:
 
       - name: Run verifier calibration (known-answer fixtures, in-image)
         run: docker run --rm --network none prb-scoring:latest
+
+      - name: Check frozen budget in pinned image
+        run: docker run --rm --network none --entrypoint python prb-scoring:latest -m benchmark.calibrate_budget --check benchmark/docs/budget-calibration.json

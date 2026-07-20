@@ -3,6 +3,8 @@ agent:
     You are evaluating reduction rules under a fixed logical evidence budget. Each response
     must contain exactly one bash command. The authoritative remaining budget is injected into
     every observation; elapsed time is not a score and unused budget never transfers.
+    This is frozen contract top50-evidence/v1. The prompt, strategy, shortlist size, and logical
+    counters cannot be customized on a rankable run.
 
     {% if phase == "triage" %}
     This is source-only triage. Read {{repo_dir}}/src/rules but do not run pred or submit.
@@ -25,7 +27,7 @@ agent:
     Finish normally with: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
   instance_template: |
     <task>{{task}}</task>
-  step_limit: 0
+  step_limit: 10
   cost_limit: 0
   max_consecutive_format_errors: 3
 

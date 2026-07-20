@@ -11,21 +11,19 @@ from collections import Counter
 from pathlib import Path
 from typing import Callable
 
+from benchmark.top50_budget import FROZEN_CONTRACT
 from benchmark.usage import Usage, usage_as_dict, usage_from_dict
 from benchmark.verify import Verdict, verify
 
-CONTRACT_ID = "top50-evidence/pilot-v1"
+CONTRACT_ID = FROZEN_CONTRACT["contract_id"]
 AGENT_MODE = "standardized-model-api"
 RUNNER_VERSION = "0.9.0"
-EXPECTED_TRIAGE_BUDGET = {
-    "model_generations": 8, "shell_actions": 12,
-    "max_output_chars": 10_000, "command_timeout_seconds": 300,
-}
-EXPECTED_EPISODE_BUDGET = {
-    "model_generations": 10, "shell_actions": 12, "pred_calls": 24,
-    "solve_calls": 10, "submit_attempts": 2, "max_output_chars": 10_000,
-    "pred_timeout_seconds": 300,
-}
+EXPECTED_TRIAGE_BUDGET = FROZEN_CONTRACT["triage"]
+EXPECTED_EPISODE_BUDGET = FROZEN_CONTRACT["episode"]
+EXPECTED_SAFETY_CONTROLS = FROZEN_CONTRACT["safety_controls"]
+EXPECTED_INFERENCE_PARAMETERS = FROZEN_CONTRACT["inference_parameters"]
+EXPECTED_SHORTLIST_SIZE = FROZEN_CONTRACT["shortlist_size"]
+EXPECTED_HYPOTHESIS_CHARS = FROZEN_CONTRACT["hypothesis_chars"]
 _REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 _COUNTERS = ("model_generations", "shell_actions", "pred_calls", "solve_calls")
 
@@ -48,7 +46,8 @@ def validate_top50_submission(
     problems: list[str] = []
     for field in ("benchmark_contract", "model", "library_commit", "runner_version",
                   "pred_version", "agent_mode", "prompt_id", "contract", "shortlist",
-                  "triage", "episodes", "status"):
+                  "triage", "episodes", "status", "budget_contract_status",
+                  "safety_controls", "inference_parameters"):
         if field not in submission:
             problems.append(f"missing required field: {field}")
     if problems:
@@ -59,6 +58,10 @@ def validate_top50_submission(
         problems.append(f"agent_mode must be {AGENT_MODE!r}")
     if submission["runner_version"] != RUNNER_VERSION:
         problems.append(f"runner_version must be {RUNNER_VERSION!r}")
+    if submission.get("budget_contract_status") != "frozen":
+        problems.append("budget_contract_status must be 'frozen'")
+    if submission.get("safety_controls") != EXPECTED_SAFETY_CONTROLS:
+        problems.append("safety_controls differ from the released watchdog settings")
     if submission.get("status") != "completed" or submission.get("run_error"):
         problems.append("Top50 run is incomplete or has run_error")
     if submission.get("rankable") is not True:
@@ -70,8 +73,8 @@ def validate_top50_submission(
     if (submitter is not None and (not isinstance(submitter, str)
                                   or not re.fullmatch(r"[A-Za-z0-9_.@-]{1,100}", submitter))):
         problems.append("submitted_by is not a bounded safe identifier")
-    if not isinstance(submission.get("inference_parameters"), dict):
-        problems.append("inference_parameters must be a normalized object")
+    if submission.get("inference_parameters") != EXPECTED_INFERENCE_PARAMETERS:
+        problems.append("inference_parameters differ from the standardized model settings")
     if submission.get("prompt_id") != expected_prompt_id():
         problems.append("prompt_id does not match the frozen Top50 prompt")
     if "submit_limit" in submission or "submit_log" in submission:
@@ -88,12 +91,14 @@ def validate_top50_submission(
         problems.append("triage budget differs from the versioned contract")
     if episode_budget != EXPECTED_EPISODE_BUDGET:
         problems.append("episode budget differs from the versioned contract")
-    if contract.get("shortlist_size") != 50:
-        problems.append("contract shortlist_size must be 50")
+    if contract.get("shortlist_size") != EXPECTED_SHORTLIST_SIZE:
+        problems.append(f"contract shortlist_size must be {EXPECTED_SHORTLIST_SIZE}")
     hypothesis_limit = contract.get("hypothesis_chars")
     if not _nonnegative_int(hypothesis_limit):
         problems.append("contract hypothesis_chars must be a non-negative integer")
         hypothesis_limit = -1
+    elif hypothesis_limit != EXPECTED_HYPOTHESIS_CHARS:
+        problems.append("contract hypothesis_chars differs from the versioned contract")
     if episode_budget.get("submit_attempts") != 2:
         problems.append("episode submit_attempts must be exactly 2")
     pred_limit = episode_budget.get("pred_calls")
@@ -104,8 +109,9 @@ def validate_top50_submission(
         problems.append("solve_calls limit exceeds pred_calls")
 
     shortlist = submission.get("shortlist")
-    if not isinstance(shortlist, list) or len(shortlist) != 50:
-        return problems + ["shortlist must contain exactly 50 entries"]
+    if not isinstance(shortlist, list) or len(shortlist) != EXPECTED_SHORTLIST_SIZE:
+        return problems + [
+            f"shortlist must contain exactly {EXPECTED_SHORTLIST_SIZE} entries"]
     rules: list[str] = []
     for index, entry in enumerate(shortlist):
         if not isinstance(entry, dict) or not isinstance(entry.get("rule"), str):

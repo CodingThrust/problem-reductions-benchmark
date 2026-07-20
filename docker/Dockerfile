@@ -29,6 +29,7 @@ RUN git clone --depth 1 --branch "${PR_REF}" \
 # Capture the exact commit that PR_REF resolved to — baked into the image so the runtime
 # records/verifies the real target version instead of a hardcoded constant.
 RUN git rev-parse HEAD > /src/PINNED_COMMIT
+RUN find src -type f -print0 | sort -z | xargs -0 sha256sum > /src/SOURCE_MANIFEST
 # The upstream release profile uses LTO + codegen-units=1, which OOMs in a
 # constrained Docker VM. Relax it for the build (pred's solve perf is ample
 # without LTO). The rustc job cap is a build ARG: default 1 keeps peak memory low
@@ -52,7 +53,8 @@ ARG PR_REF
 LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
       org.opencontainers.image.description="pred (problem-reductions ${PR_REF}) + zero-trust certificate verifier" \
       org.opencontainers.image.licenses="MIT" \
-      problem_reductions_ref="${PR_REF}"
+      problem_reductions_ref="${PR_REF}" \
+      benchmark_contract="top50-evidence/v1"
 
 RUN groupadd --gid 10003 prb-evidence \
     && groupadd --gid 10001 prb-agent \
@@ -86,6 +88,8 @@ RUN /usr/local/libexec/prb/pred --version
 # Bake the target version pins so benchmark/env_setup.py reads the *built* commit/version
 # rather than a frozen Python literal (the target tracks PR_REF, not a constant).
 COPY --from=pred-build /src/PINNED_COMMIT /app/benchmark/PINNED_COMMIT
+COPY --from=pred-build /src/PINNED_COMMIT /app/pr-src/.prb-pinned-commit
+COPY --from=pred-build /src/SOURCE_MANIFEST /app/pr-src/.prb-source-manifest
 RUN /usr/local/libexec/prb/pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
 # Prove the complete privilege boundary, not just a file mode: the dedicated agent user can
 # call both shims while an absolute-path oracle invocation is denied.
@@ -112,14 +116,6 @@ FROM runtime AS runner
 ARG PR_REF
 # Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.
 RUN pip install --no-cache-dir -r /app/benchmark/requirements.txt
-# Claude Code CLI — the optional claude-code backend (AGENT_BACKEND=claude-code).
-# Native installer, self-contained (no Node). Auth is supplied at run time via
-# CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in submission.env — never baked in.
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.local/bin:${PATH}"
-RUN claude --version
 RUN mkdir -p /out
 ENV OUTPUT=/out/submission.json
 VOLUME ["/out"]

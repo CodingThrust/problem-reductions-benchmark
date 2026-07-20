@@ -1,0 +1,30 @@
+{
+  "contract_id": "top50-evidence/v1",
+  "status": "frozen",
+  "shortlist_size": 50,
+  "hypothesis_chars": 500,
+  "safety_controls": {
+    "model_timeout_seconds": 300,
+    "model_retries": 2
+  },
+  "inference_parameters": {
+    "max_tokens": 8192,
+    "timeout": 300,
+    "num_retries": 2
+  },
+  "triage": {
+    "model_generations": 8,
+    "shell_actions": 12,
+    "max_output_chars": 10000,
+    "command_timeout_seconds": 300
+  },
+  "episode": {
+    "model_generations": 10,
+    "shell_actions": 12,
+    "pred_calls": 24,
+    "solve_calls": 10,
+    "submit_attempts": 2,
+    "max_output_chars": 10000,
+    "pred_timeout_seconds": 300
+  }
+}

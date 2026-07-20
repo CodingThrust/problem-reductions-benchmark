@@ -73,15 +73,15 @@ class TestReadme:
 
     def test_readme_has_metrics_section(self):
         t = _text(README)
-        assert "bugs/ktok" in t or "bugs_per_ktok" in t
+        assert "verified distinct-rule bugs" in t
+        assert "equal bug counts are ties" in t
 
     def test_readme_lists_current_round_contract(self):
         text = README.read_text(encoding="utf-8")
-        benchmark_version = VERSION_FILE.read_text(encoding="utf-8").strip()
-        assert f"[`{benchmark_version}`](VERSION)" in text
+        assert "top50-evidence/v1" in text
         assert PINNED_COMMIT in text
         assert f"`{PINNED_PRED_VERSION}`" in text
-        assert "no schema-version field" in text.lower()
+        assert "elapsed time" in text.lower()
 
 
 class TestGuide:
@@ -90,43 +90,43 @@ class TestGuide:
 
     def test_guide_has_certificate_format(self):
         t = _text(GUIDE)
-        assert "source" in t and "bundle" in t and "violation" in t
+        assert "certificate" in t and "pred" in t and "reproducible" in t
 
     def test_guide_has_submit_flow(self):
         # The CLI upload flow: `benchmark.submit` → private store → aggregate on Pages.
         t = _text(GUIDE)
-        assert "benchmark.submit" in t and "github pages" in t
+        assert "benchmark.submit" in t and "aggregate leaderboard" in t
 
 
 class TestBackendRouteSeparation:
     def test_env_template_does_not_select_cli_with_agent_backend(self):
         t = _text(ENV_EXAMPLE)
         assert "agent_backend=" not in t
-        assert "local_backend=codex" in t
+        assert "model api only" in t
+        assert "coding-agent" in t and "cannot enter the top50 table" in t
 
     def test_api_skill_is_container_only(self):
         t = _text(API_SKILL)
-        assert "mini-swe" in t and "runner-pull" in t
-        assert "never run one inside the container" in t
+        assert "top50-evidence/v1" in t and "runner-pull" in t
+        assert "coding-agent backends" in t
 
     def test_cli_skill_is_host_only(self):
         t = _text(CLI_SKILL)
         assert "make run-local" in t and "local_backend" in t
-        assert "do not set `agent_backend`" in t
-        assert "or start docker/podman" in t
+        assert "legacy-whole-repo" in t and "non-ranking" in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    @pytest.mark.parametrize("skill", [API_SKILL])
     def test_each_skill_exposes_only_local_and_official_goals(self, skill):
         t = _text(skill)
-        assert "keep and validate" in t
-        assert "official submission" in t
+        assert "local" in t
+        assert "official" in t
         assert "intake test" not in t
 
-    @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
+    @pytest.mark.parametrize("skill", [API_SKILL])
     def test_run_skills_delegate_upload(self, skill):
         t = _text(skill)
         assert "$submit-benchmark-result" in t
-        assert "that skill owns validation" in t
+        assert "owns upload" in t
 
     @pytest.mark.parametrize("skill", [API_SKILL, CLI_SKILL])
     def test_run_skills_confirm_the_benchmark_version(self, skill):

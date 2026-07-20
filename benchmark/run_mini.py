@@ -14,6 +14,8 @@ from benchmark.usage import extract_usage
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
 SKIP_RULES = {"mod", "traits", "graph_helpers", "analysis", "cost", "registry", "graph"}
 DEFAULT_MAX_TOKENS = 8192
+DEFAULT_MODEL_TIMEOUT_SECONDS = 300
+DEFAULT_MODEL_RETRIES = 2
 
 
 def list_rules(repo_dir: str | Path) -> list[str]:
@@ -80,12 +82,15 @@ def _session_usage(agent):
 def _build_model(model_name: str, api_base: str | None, max_tokens: int,
                  model_kwargs: dict | None = None, api_key: str | None = None,
                  observation_template: str | None = None,
-                 format_error_template: str | None = None):
+                 format_error_template: str | None = None,
+                 model_timeout_seconds: int = DEFAULT_MODEL_TIMEOUT_SECONDS,
+                 model_retries: int = DEFAULT_MODEL_RETRIES):
     from minisweagent.models.litellm_model import LitellmModel
 
     # A hung API call must fail fast and retry — never freeze a whole-repo session
     # indefinitely. User-supplied MODEL_KWARGS still wins on any key.
-    kwargs = {"timeout": 300, "num_retries": 2, **dict(model_kwargs or {})}
+    kwargs = {"timeout": model_timeout_seconds,
+              "num_retries": model_retries, **dict(model_kwargs or {})}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
     if api_base:
@@ -101,8 +106,9 @@ def _build_model(model_name: str, api_base: str | None, max_tokens: int,
 
 
 def _load_agent_config(config_path: str | Path | None, default_file: Path,
-                       strategy: str | None) -> tuple[dict, dict, str]:
-    """Load prompts while force-disabling mini-swe's hidden cost/step limits."""
+                       strategy: str | None, *, force_unlimited: bool = True
+                       ) -> tuple[dict, dict, str]:
+    """Load prompts; legacy callers may force-disable mini-swe's hidden step limit."""
     config_file = Path(config_path) if config_path else default_file
     config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
     if strategy is None:
@@ -111,7 +117,8 @@ def _load_agent_config(config_path: str | Path | None, default_file: Path,
     agent_config = dict(config.get("agent", {}))
     # 0 means unlimited in mini-swe-agent. The completion command in the prompt is the
     # normal exit; the runner only retains per-command/process timeouts for wedged tools.
-    agent_config["step_limit"] = 0
+    if force_unlimited:
+        agent_config["step_limit"] = 0
     agent_config["cost_limit"] = 0
     return agent_config, config.get("model", {}) or {}, strategy
 

@@ -259,8 +259,8 @@
       <div class="meta">
         <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0" target="_blank" rel="noopener" title="problem-reductions library version (pinned)">library <b>v0.6.0</b><i class="dot"></i></a>
         <div class="metarow">
-          <span><b>100 attempts</b> / model</span>
-          <span><b id="rulecount">253</b> rules</span>
+          <span><b>50 rules</b> / model</span>
+          <span><b>2 submits</b> / selected rule</span>
         </div>
       </div>
     </div>
@@ -275,7 +275,7 @@
       <span class="hint">Click a row for its run stats →</span>
     </div>
     <table class="lb" id="lb-table"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
-    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Submitted rules</b> = rules sent through the bounded submit command. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
+    <p class="note"><b>Primary Top50 metric</b> = verified distinct-rule bugs under the frozen logical evidence budget. Ties remain ties; tokens, cost, and elapsed time are diagnostics only. Select the historical contract to view old whole-repository results separately.</p>
   </section>
 
   <section class="tab" id="tab-tasks">
@@ -296,16 +296,16 @@
   <section class="tab" id="tab-how">
     <div class="prose">
       <h2>From your model to the leaderboard</h2>
-      <p>Give a model one whole-repository session and see how many bugs it can find in the library's
-         problem reductions. You run it on your own model and key; we independently re-check every bug
-         before it scores.</p>
+      <p>The model first freezes the 50 rules it considers most bug-prone, then investigates each
+         rule in a fresh isolated episode with the same logical budget. You provide the API key; we
+         independently re-check every submitted bug before it scores.</p>
     </div>
 
     <div class="lane you">You run it</div>
     <div class="flow">
       <div class="fnode"><div class="fdot">1</div><div class="fcard"><h4>Get the runner</h4><p>One Docker image: the solver (<code>pred</code>) plus the rule library, pinned to the benchmark version.</p></div></div>
       <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key.</p></div></div>
-      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model chooses which rules to probe and when to stop; each submitted find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
+      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Choose 50, then investigate</h4><p>Source-only triage freezes a Top50. Each rule then gets 10 model generations, 12 shell actions, 24 <code>pred</code> calls (10 solves), and exactly two submit attempts.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
       <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>Upload <code>submission.json</code> with <code>benchmark.submit</code>. No web form.</p></div></div>
     </div>
 
@@ -314,7 +314,7 @@
     <div class="lane we">We score it</div>
     <div class="flow">
       <div class="fnode"><div class="fdot we">5</div><div class="fcard"><h4>Re-verified from scratch</h4><p>We re-derive every claimed bug with our own solver and keep only the ones that reproduce.</p><span class="eq good">only reproducible bugs are scored</span></div></div>
-      <div class="fnode"><div class="fdot done">✓</div><div class="fcard outcome"><h4>Ranked on the leaderboard</h4><p>Models are ordered by confirmed distinct-rule bugs, then bugs per 1K tokens as the efficiency tie-break.</p></div></div>
+      <div class="fnode"><div class="fdot done">✓</div><div class="fcard outcome"><h4>Ranked on the leaderboard</h4><p>Models are ordered only by confirmed distinct-rule bugs at the same frozen contract. Equal bug counts are tied.</p></div></div>
     </div>
 
     <div class="defs">
@@ -324,7 +324,7 @@
       </div>
       <div class="def">
         <h4>Why it is fair</h4>
-        <p>Every model targets the same repository version and gets the same 100-attempt certificate channel. Agents stop themselves, and real token usage is recorded. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+        <p>Every model uses the same target, prompt, Top50 size, per-rule logical counters, and two submit opportunities. Wall-clock time, network delay, tokens, and cost never break ties.</p>
       </div>
     </div>
   </section>
@@ -356,7 +356,7 @@ PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACC
 
   <section class="tab" id="tab-about">
     <h3 class="about-h">About the benchmark</h3>
-    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets one whole-repository session with the same bounded submission channel, and every claimed bug is independently re-verified server-side.</p>
+    <p class="about-p">A controlled measurement of how well a model prioritizes likely-buggy rules and turns bounded evidence into verified counterexamples. Every claimed bug is independently re-verified server-side.</p>
     <div class="panel" style="margin-top:26px">
       <h3>How to cite</h3>
       <pre class="cmd" style="margin-top:12px">@misc{TODO_citation_key,
@@ -398,7 +398,7 @@ document.getElementById("tabs").addEventListener("click",e=>{
   const meta=document.querySelector(".meta"); if(meta)meta.style.display=b.dataset.tab==="leaderboard"?"":"none";
 });
 
-const LB_COLS=[
+const LEGACY_COLS=[
   {key:"rank",label:"#"},
   {key:"model",label:"Model"},
   {key:"bugs",label:"Bugs",num:true},
@@ -406,10 +406,22 @@ const LB_COLS=[
   {key:"tokens",label:"Tokens (K)",num:true,sortBy:"tokensNum"},
   {key:"eff",label:"Bugs / Ktok",num:true,sortBy:"effNum"},
 ];
-const RIGHT=new Set(["bugs","tokens","eff"]);
+const TOP50_COLS=[
+  {key:"rank",label:"#"},
+  {key:"model",label:"Model"},
+  {key:"bugs",label:"Verified bugs",num:true},
+  {key:"bugs10",label:"Bugs @10",num:true},
+  {key:"bugs25",label:"Bugs @25",num:true},
+  {key:"attempts",label:"1st / 2nd accepts",sortBy:"firstAccepts"},
+  {key:"predBug",label:"Pred / bug",num:true},
+];
+const RIGHT=new Set(["bugs","tokens","eff","bugs10","bugs25","predBug"]);
+const selectedTrack=()=>document.getElementById("lb-track").value||"top50-evidence/v1";
+const isTop50Track=()=>selectedTrack().startsWith("top50-evidence/");
+const lbColumns=()=>isTop50Track()?TOP50_COLS:LEGACY_COLS;
 
 function buildLbRows(){
-  const track=document.getElementById("lb-track").value||"legacy-whole-repo";
+  const track=selectedTrack();
   const top50=track.startsWith("top50-evidence/");
   const ranked=RESULTS.filter(r=>(r.benchmark_contract||"legacy-whole-repo")===track)
     .sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||
@@ -422,11 +434,14 @@ function buildLbRows(){
     const rank=top50&&i&&bugs===lastBugs?lastRank:i+1;lastBugs=bugs;lastRank=rank;
     return {rank,model:short(r.model),_model:r.model,bugs,
       reachFrac:frac,tested,tokensNum:r.total_tokens_k||0,
-      effNum:r.efficiency_bugs_per_ktok||0};
+      effNum:r.efficiency_bugs_per_ktok||0,
+      bugs10:r.bugs_at_10||0,bugs25:r.bugs_at_25||0,
+      firstAccepts:r.first_attempt_accepts||0,secondAccepts:r.second_attempt_accepts||0,
+      predBug:r.pred_calls_per_bug==null?0:r.pred_calls_per_bug};
   });
 }
 function renderLbHead(){
-  document.getElementById("lb-head").innerHTML=LB_COLS.map(c=>{
+  document.getElementById("lb-head").innerHTML=lbColumns().map(c=>{
     const sk=c.sortBy||c.key, on=lbSort.key===sk, ind=on?(lbSort.dir<0?"↓":"↑"):"";
     const cls=[on?"sorted":"",RIGHT.has(c.key)?"n":""].filter(Boolean).join(" ");
     return `<th data-sk="${sk}" class="${cls}">${c.label}<span class="ind">${ind}</span></th>`;
@@ -440,6 +455,11 @@ function renderLbBody(){
     if(typeof av==="number"&&typeof bv==="number")return (av-bv)*d;
     return String(av).localeCompare(String(bv))*d;});
   document.getElementById("lb-body").innerHTML=rows.map(r=>{
+    if(isTop50Track())return `<tr class="${r.rank===1?'lead':''} ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
+      <td class="rank">${r.rank}</td><td class="model">${esc(r.model)}</td>
+      <td class="n bugs"><span class="${r.bugs?'':'zero'}">${r.bugs}</span></td>
+      <td class="n">${r.bugs10}</td><td class="n">${r.bugs25}</td>
+      <td>${r.firstAccepts} / ${r.secondAccepts}</td><td class="n">${r.predBug||'—'}</td></tr>`;
     const pct=Math.round(r.reachFrac*100);
     return `<tr class="${r.rank===1?'lead':''} ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
       <td class="rank">${r.rank}</td>
@@ -449,7 +469,7 @@ function renderLbBody(){
       <td class="n">${Math.round(r.tokensNum).toLocaleString()}</td>
       <td class="n">${r.effNum.toFixed(4)}</td>
     </tr>`;
-  }).join("")||`<tr><td colspan="6" class="empty">No models match.</td></tr>`;
+  }).join("")||`<tr><td colspan="${lbColumns().length}" class="empty">No models match.</td></tr>`;
 }
 let scatterPts=[];
 function hexA(hex,a){hex=String(hex||'').replace('#','');if(hex.length===3)hex=hex.split('').map(c=>c+c).join('');const n=parseInt(hex||'2563eb',16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;}
@@ -536,11 +556,17 @@ function renderInspector(model){
   const row=lbRows.find(r=>r._model===model); if(!row)return;
   document.getElementById("drawer-title").textContent=row.model;
   const sub=document.getElementById("drawer-sub"), el=document.getElementById("inspect-body");
-  sub.textContent=`${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules submitted · ${Math.round(row.tokensNum)}K tok`;
+  sub.textContent=isTop50Track()?`${row.bugs} verified bug(s) · frozen Self-selected Top50`:
+    `${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules submitted · ${Math.round(row.tokensNum)}K tok`;
   // Aggregate-only by design: the leaderboard never reveals WHICH rules a model found bugs
   // in. On a public library commit a pred-confirmed certificate counts regardless of who
   // produced it, so publishing the rules/certificates would be a free answer key.
-  el.innerHTML=`<dl class="stats">
+  el.innerHTML=isTop50Track()?`<dl class="stats">
+    <div><dt>Verified bugs</dt><dd>${row.bugs}</dd></div>
+    <div><dt>Bugs @10 / @25</dt><dd>${row.bugs10} / ${row.bugs25}</dd></div>
+    <div><dt>1st / 2nd accepts</dt><dd>${row.firstAccepts} / ${row.secondAccepts}</dd></div>
+    <div><dt>Pred calls / bug</dt><dd>${row.predBug||'—'}</dd></div>
+  </dl>`:`<dl class="stats">
     <div><dt>Confirmed bugs</dt><dd>${row.bugs}</dd></div>
     <div><dt>Rules reached</dt><dd>${row.tested}<em>/${TOTAL}</em></dd></div>
     <div><dt>Tokens</dt><dd>${Math.round(row.tokensNum).toLocaleString()}K</dd></div>
@@ -582,7 +608,7 @@ document.getElementById("drawer-scrim").addEventListener("click",closeDrawer);
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer();});
 document.getElementById("task-search").addEventListener("input",renderTasks);
 document.getElementById("lb-track").addEventListener("change",()=>{
-  buildLbRows();renderLbBody();
+  lbSort={key:"bugs",dir:-1};buildLbRows();renderLbHead();renderLbBody();
 });
 document.querySelectorAll("#task-table thead th").forEach(th=>th.addEventListener("click",()=>{
   const k=th.dataset.k; taskSort={key:k,dir:taskSort.key===k?-taskSort.dir:1}; renderTasks();
@@ -593,7 +619,7 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res;TASKS=tasks;TOTAL=tasks.length||TOTAL_DEFAULT;
-  const tracks=[...new Set(RESULTS.map(r=>r.benchmark_contract||"legacy-whole-repo"))].sort();
+  const tracks=[...new Set(["top50-evidence/v1", ...RESULTS.map(r=>r.benchmark_contract||"legacy-whole-repo")])].sort();
   const trackSelect=document.getElementById("lb-track");
   trackSelect.innerHTML=tracks.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
   const newest=tracks.find(t=>t.startsWith("top50-evidence/"));if(newest)trackSelect.value=newest;
