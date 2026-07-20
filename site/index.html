@@ -270,6 +270,7 @@
     <div id="lb-banner"></div>
 
     <div class="controls">
+      <select id="lb-track" aria-label="Benchmark contract"></select>
       <input class="search" id="lb-search" placeholder="filter models…">
       <span class="hint">Click a row for its run stats →</span>
     </div>
@@ -408,11 +409,18 @@ const LB_COLS=[
 const RIGHT=new Set(["bugs","tokens","eff"]);
 
 function buildLbRows(){
-  const ranked=RESULTS.slice()
-    .sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||(b.efficiency_bugs_per_ktok||0)-(a.efficiency_bugs_per_ktok||0));
+  const track=document.getElementById("lb-track").value||"legacy-whole-repo";
+  const top50=track.startsWith("top50-evidence/");
+  const ranked=RESULTS.filter(r=>(r.benchmark_contract||"legacy-whole-repo")===track)
+    .sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||
+      (top50?String(a.model).localeCompare(String(b.model)):
+        (b.efficiency_bugs_per_ktok||0)-(a.efficiency_bugs_per_ktok||0)));
+  let lastBugs=null,lastRank=0;
   lbRows=ranked.map((r,i)=>{
     const tested=r.rules_tested||0, frac=TOTAL?Math.min(tested/TOTAL,1):0;
-    return {rank:i+1,model:short(r.model),_model:r.model,bugs:r.bugs_found||0,
+    const bugs=r.bugs_found||0;
+    const rank=top50&&i&&bugs===lastBugs?lastRank:i+1;lastBugs=bugs;lastRank=rank;
+    return {rank,model:short(r.model),_model:r.model,bugs,
       reachFrac:frac,tested,tokensNum:r.total_tokens_k||0,
       effNum:r.efficiency_bugs_per_ktok||0};
   });
@@ -573,6 +581,9 @@ document.getElementById("drawer-x").addEventListener("click",closeDrawer);
 document.getElementById("drawer-scrim").addEventListener("click",closeDrawer);
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer();});
 document.getElementById("task-search").addEventListener("input",renderTasks);
+document.getElementById("lb-track").addEventListener("change",()=>{
+  buildLbRows();renderLbBody();
+});
 document.querySelectorAll("#task-table thead th").forEach(th=>th.addEventListener("click",()=>{
   const k=th.dataset.k; taskSort={key:k,dir:taskSort.key===k?-taskSort.dir:1}; renderTasks();
 }));
@@ -582,6 +593,10 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res;TASKS=tasks;TOTAL=tasks.length||TOTAL_DEFAULT;
+  const tracks=[...new Set(RESULTS.map(r=>r.benchmark_contract||"legacy-whole-repo"))].sort();
+  const trackSelect=document.getElementById("lb-track");
+  trackSelect.innerHTML=tracks.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  const newest=tracks.find(t=>t.startsWith("top50-evidence/"));if(newest)trackSelect.value=newest;
   const rc=document.getElementById("rulecount"); if(rc)rc.textContent=TOTAL;
   if(RESULTS.some(r=>r.placeholder))
     document.getElementById("lb-banner").innerHTML=`<div class="banner">Showing placeholder data — real runs pending.</div>`;

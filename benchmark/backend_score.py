@@ -25,6 +25,7 @@ from pathlib import Path
 from benchmark.env_setup import pinned_commit
 from benchmark.submit import validate_submission
 from benchmark.submit_ledger import has_submit_ledger
+from benchmark.top50_contract import is_top50_submission
 from benchmark.verify_submission import leaderboard_entry, score_submission
 
 STATUS_SUFFIX = ".status.json"
@@ -93,7 +94,10 @@ def write_board_entries(results_dir: Path, board_dir: Path) -> list[str]:
             scored = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if "results" not in scored or "model" not in scored or scored.get("test"):
+        if (("results" not in scored and not is_top50_submission(scored))
+                or "model" not in scored or scored.get("test")):
+            continue
+        if is_top50_submission(scored) and not scored.get("rankable"):
             continue
         slug = board_slug(scored, p.stem)
         (board_dir / f"{slug}.json").write_text(
@@ -191,7 +195,7 @@ def _validate_for_scoring(submission: object, *, official: bool,
     problems = validate_submission(submission)
 
     if official:
-        if not has_submit_ledger(submission):
+        if not is_top50_submission(submission) and not has_submit_ledger(submission):
             problems.append("official submissions require submit_limit and submit_log")
         target_commit = expected_commit or pinned_commit()
         if submission.get("library_commit") != target_commit:
@@ -243,16 +247,29 @@ def score_one(sub_path: Path, results_dir: Path, repo_dir: str | None = None, *,
 
 def _dedup_best(entries: list[dict]) -> list[dict]:
     """Keep the best entry per model (max bugs, tie-break efficiency), ranked desc."""
-    best: dict[str, dict] = {}
+    best: dict[tuple[str, str], dict] = {}
     for e in entries:
         m = e["model"]
-        cur = best.get(m)
-        key = (e.get("bugs_found", 0), e.get("efficiency_bugs_per_ktok", 0.0))
-        if cur is None or key > (cur.get("bugs_found", 0), cur.get("efficiency_bugs_per_ktok", 0.0)):
-            best[m] = e
-    return sorted(best.values(),
-                  key=lambda e: (e.get("bugs_found", 0), e.get("efficiency_bugs_per_ktok", 0.0)),
-                  reverse=True)
+        contract = e.get("benchmark_contract", "legacy-whole-repo")
+        group = (contract, m)
+        cur = best.get(group)
+        if contract.startswith("top50-evidence/"):
+            better = cur is None or e.get("bugs_found", 0) > cur.get("bugs_found", 0)
+        else:
+            key = (e.get("bugs_found", 0), e.get("efficiency_bugs_per_ktok", 0.0))
+            better = cur is None or key > (
+                cur.get("bugs_found", 0), cur.get("efficiency_bugs_per_ktok", 0.0))
+        if better:
+            best[group] = e
+    return sorted(
+        best.values(),
+        key=lambda e: (
+            e.get("benchmark_contract", "legacy-whole-repo"),
+            -e.get("bugs_found", 0),
+            (0 if str(e.get("benchmark_contract", "")).startswith("top50-evidence/")
+             else -e.get("efficiency_bugs_per_ktok", 0.0)),
+            e.get("model", ""),
+        ))
 
 
 def aggregate_leaderboard(results_dir: Path) -> list[dict]:
@@ -266,7 +283,9 @@ def aggregate_leaderboard(results_dir: Path) -> list[dict]:
             scored = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if "results" not in scored or "model" not in scored:
+        if ("results" not in scored and not is_top50_submission(scored)) or "model" not in scored:
+            continue
+        if is_top50_submission(scored) and not scored.get("rankable"):
             continue
         # Test submissions are scored + kept privately, but never published to the public
         # leaderboard — skip them here so an end-to-end test can't pollute production.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 from pathlib import Path
@@ -17,19 +18,35 @@ from benchmark.top50_runner import (
     TriageBudget,
     build_rankable_runner,
 )
+from benchmark.top50_contract import (
+    AGENT_MODE,
+    CONTRACT_ID,
+    RUNNER_VERSION,
+    EXPECTED_EPISODE_BUDGET,
+    EXPECTED_TRIAGE_BUDGET,
+    expected_prompt_id,
+)
 
 
 def pilot_contract() -> Top50Contract:
     """Return explicitly provisional values; issue #68 freezes the public contract."""
     return Top50Contract(
         triage=TriageBudget(
-            model_generations=int(os.environ.get("PRB_TRIAGE_GENERATIONS", "8")),
-            shell_actions=int(os.environ.get("PRB_TRIAGE_ACTIONS", "12"))),
+            model_generations=int(os.environ.get(
+                "PRB_TRIAGE_GENERATIONS", str(EXPECTED_TRIAGE_BUDGET["model_generations"]))),
+            shell_actions=int(os.environ.get(
+                "PRB_TRIAGE_ACTIONS", str(EXPECTED_TRIAGE_BUDGET["shell_actions"]))),
+            max_output_chars=EXPECTED_TRIAGE_BUDGET["max_output_chars"],
+            command_timeout_seconds=EXPECTED_TRIAGE_BUDGET["command_timeout_seconds"]),
         episode=EvidenceBudget(
-            model_generations=int(os.environ.get("PRB_EPISODE_GENERATIONS", "10")),
-            shell_actions=int(os.environ.get("PRB_EPISODE_ACTIONS", "12")),
-            pred_calls=int(os.environ.get("PRB_PRED_CALLS", "24")),
-            solve_calls=int(os.environ.get("PRB_SOLVE_CALLS", "10")),
+            model_generations=int(os.environ.get(
+                "PRB_EPISODE_GENERATIONS", str(EXPECTED_EPISODE_BUDGET["model_generations"]))),
+            shell_actions=int(os.environ.get(
+                "PRB_EPISODE_ACTIONS", str(EXPECTED_EPISODE_BUDGET["shell_actions"]))),
+            pred_calls=int(os.environ.get(
+                "PRB_PRED_CALLS", str(EXPECTED_EPISODE_BUDGET["pred_calls"]))),
+            solve_calls=int(os.environ.get(
+                "PRB_SOLVE_CALLS", str(EXPECTED_EPISODE_BUDGET["solve_calls"]))),
             submit_attempts=2,
             max_output_chars=int(os.environ.get("PRB_MAX_OUTPUT_CHARS", "10000")),
             pred_timeout_seconds=int(os.environ.get("PRB_PRED_TIMEOUT_SECONDS", "300"))),
@@ -55,12 +72,14 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
     if len(inventory) < 50:
         raise ValueError(f"canonical inventory has only {len(inventory)} runnable rules")
     pred_binary = find_pred_binary()
-    verify_pred_version(pred_binary)
+    pred_version = verify_pred_version(pred_binary)
     contract = pilot_contract()
     if fake:
         runner = Top50Runner(
             executor=_FakeExecutor(), contract=contract, pred_binary=pred_binary)
     else:
+        if model_kwargs:
+            raise ValueError("rankable Top50 runs do not accept custom model kwargs")
         runner = build_rankable_runner(
             contract=contract, pred_binary=pred_binary,
             agent_uid=int(os.environ["PRB_AGENT_UID"]),
@@ -69,12 +88,19 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
             oracle_gid=int(os.environ["PRB_ORACLE_GID"]),
             evidence_gid=int(os.environ["PRB_EVIDENCE_GID"]),
             api_base=api_base, api_key=api_key, model_kwargs=model_kwargs)
-    result = runner.run(model=model, repo_path=repo, inventory=inventory, output=output)
-    result["library_commit"] = pinned_commit()
-    result["budget_contract_status"] = "pilot-unfrozen"
-    # Rewrite once with provenance added after the runner's final checkpoint.
-    Path(output).write_text(json.dumps(result, indent=2), encoding="utf-8")
-    return result
+    metadata = {
+        "benchmark_contract": CONTRACT_ID,
+        "library_commit": pinned_commit(),
+        "runner_version": RUNNER_VERSION,
+        "pred_version": pred_version,
+        "agent_mode": AGENT_MODE,
+        "prompt_id": expected_prompt_id(),
+        "budget_contract_status": "pilot-unfrozen",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "inference_parameters": model_kwargs or {},
+    }
+    return runner.run(model=model, repo_path=repo, inventory=inventory,
+                      output=output, metadata=metadata)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -75,6 +75,11 @@ ENV PRED_BINARY=/usr/local/libexec/prb/pred \
 
 WORKDIR /app
 COPY benchmark/ ./benchmark/
+# The scorer and Top50 triage share the exact pinned source-rule inventory. Keeping it in
+# the runtime image lets official scoring reject invented/renamed shortlist entries.
+COPY --from=pred-build /src/src /app/pr-src/src
+COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
+ENV REPO_DIR=/app/pr-src
 
 # Fail the build if pred can't run (catches a missing runtime lib early).
 RUN /usr/local/libexec/prb/pred --version
@@ -115,13 +120,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/root/.local/bin:${PATH}"
 RUN claude --version
-# The agent reads rule sources from REPO_DIR/src/rules — copy just the source tree
-# (not target/) from the build stage. pred itself is a self-contained binary on PATH.
-COPY --from=pred-build /src/src /app/pr-src/src
-COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
 RUN mkdir -p /out
-ENV REPO_DIR=/app/pr-src \
-    OUTPUT=/out/submission.json
+ENV OUTPUT=/out/submission.json
 VOLUME ["/out"]
 # Build-time sanity that the assembled runner imports and runs (no API/pred calls).
 RUN python -m benchmark.run_top50 --fake --model fake/check \

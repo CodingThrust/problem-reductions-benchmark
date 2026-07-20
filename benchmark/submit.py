@@ -48,6 +48,10 @@ def validate_submission(sub: dict) -> list[str]:
     New runs prove provenance through the bounded submit ledger. Legacy runs must carry a
     certificate plus a trajectory on the row or envelope.
     """
+    from benchmark.top50_contract import is_top50_submission, validate_top50_submission
+    if is_top50_submission(sub):
+        return validate_top50_submission(sub)
+
     problems: list[str] = []
     if not isinstance(sub, dict):
         return ["submission is not a JSON object"]

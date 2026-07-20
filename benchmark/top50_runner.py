@@ -237,7 +237,9 @@ class Top50Runner:
         self._rankable_contract = _rankable_token is _RANKABLE_TOKEN
 
     def run(self, *, model: str, repo_path: str | Path,
-            inventory: list[str] | tuple[str, ...], output: str | Path | None = None) -> dict:
+            inventory: list[str] | tuple[str, ...], output: str | Path | None = None,
+            metadata: dict | None = None) -> dict:
+        self._result_metadata = copy.deepcopy(metadata or {})
         repo_path = Path(repo_path).resolve()
         canonical = tuple(inventory)
         with TriageSession(
@@ -331,6 +333,7 @@ class Top50Runner:
         }
         if run_error:
             result["run_error"] = run_error
+        result.update(copy.deepcopy(getattr(self, "_result_metadata", {})))
         return result
 
 

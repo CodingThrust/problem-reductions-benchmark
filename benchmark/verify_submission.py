@@ -20,7 +20,6 @@ CLI:
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
 from benchmark.submit_ledger import (accepted_certificate_index, certificate_key,
@@ -79,6 +78,10 @@ def score_submission(submission: dict, repo_dir: str | None = None) -> tuple[dic
     Returns (scored, report); ``scored`` is results.schema.json-shaped and ``report`` is a
     per-certificate list of {rule, violation, accepted, reason, provenance}.
     """
+    from benchmark.top50_contract import is_top50_submission, score_top50_submission
+    if is_top50_submission(submission):
+        return score_top50_submission(submission, repo_dir)
+
     rescored: list[dict] = []
     report: list[dict] = []
     ledger_problem = submit_ledger_error(submission)
@@ -173,6 +176,10 @@ def leaderboard_entry(submission: dict, scored: dict) -> dict:
     private scored result the maintainer holds; the leaderboard shows only how many each
     model found.
     """
+    from benchmark.top50_contract import is_top50_submission, top50_public_entry
+    if is_top50_submission(submission) or is_top50_submission(scored):
+        return top50_public_entry(submission, scored)
+
     return {
         "model": scored["model"],
         "library_commit": scored.get("library_commit", "unknown"),

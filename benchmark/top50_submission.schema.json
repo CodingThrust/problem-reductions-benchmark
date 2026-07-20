@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "top50_submission.schema.json",
+  "title": "Top50EvidenceSubmission",
+  "type": "object",
+  "required": ["benchmark_contract", "model", "library_commit", "runner_version",
+    "pred_version", "agent_mode", "prompt_id", "status", "contract", "shortlist",
+    "triage", "episodes", "inference_parameters"],
+  "properties": {
+    "benchmark_contract": {"const": "top50-evidence/pilot-v1"},
+    "model": {"type": "string", "minLength": 1},
+    "library_commit": {"type": "string", "minLength": 1},
+    "runner_version": {"const": "0.9.0"},
+    "pred_version": {"type": "string", "minLength": 1},
+    "agent_mode": {"const": "standardized-model-api"},
+    "prompt_id": {"type": "string", "minLength": 64, "maxLength": 64},
+    "status": {"enum": ["completed", "run_error"]},
+    "rankable": {"type": "boolean"},
+    "contract": {"type": "object"},
+    "shortlist": {"type": "array", "minItems": 50, "maxItems": 50},
+    "triage": {"type": "object"},
+    "episodes": {"type": "array", "minItems": 50, "maxItems": 50},
+    "inference_parameters": {"type": "object"},
+    "run_error": {"type": "string"}
+  }
+}
