@@ -11,11 +11,13 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-function submissionRequest(headers = {}) {
+function submissionRequest(headers = {}, submission = {
+  model: "test/model", submitted_by: "claimed", shortlist: [], triage: {}, episodes: [],
+}) {
   return new Request("https://intake.example/submit", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify({ model: "test/model", submitted_by: "claimed", results: [] }),
+    body: JSON.stringify(submission),
   });
 }
 
@@ -135,5 +137,19 @@ test("rejects unauthenticated requests", async () => {
   const response = await worker.fetch(submissionRequest(), env);
 
   assert.equal(response.status, 401);
+  assert.equal(writes.length, 0);
+});
+
+test("rejects an incomplete submission shape", async () => {
+  const auth = await accessToken();
+  const { env, writes } = environment({
+    TEAM_DOMAIN: auth.teamDomain,
+    POLICY_AUD: auth.expectedAudience,
+  });
+  const response = await worker.fetch(submissionRequest(
+    { "cf-access-jwt-assertion": auth.token },
+    { model: "test/model", episodes: [] },
+  ), env);
+  assert.equal(response.status, 400);
   assert.equal(writes.length, 0);
 });

@@ -1,8 +1,6 @@
 """Shared pytest fixtures for benchmark tests."""
 
-import json
 import pytest
-from pathlib import Path
 
 
 # ── Minimal valid certificate components ──────────────────────────────────────

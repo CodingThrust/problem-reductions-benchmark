@@ -16,8 +16,11 @@ from pathlib import Path
 
 ALLOWED_KEYS = {
     "model", "library_commit", "bugs_found", "rules_tested",
-    "total_tokens_k", "usage_totals", "efficiency_bugs_per_ktok",
+    "total_tokens_k", "usage_totals",
     "submitted_by", "placeholder",
+    "runner_version", "pred_version", "rankable",
+    "bugs_at_10", "bugs_at_25", "bugs_at_50", "first_attempt_accepts",
+    "second_attempt_accepts", "pred_calls_per_bug", "cap_hits",
     # per-submission entry files (site/results/<slug>.json) also carry provenance tags
     "timestamp", "submission_id",
 }

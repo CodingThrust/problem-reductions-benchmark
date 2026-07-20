@@ -45,9 +45,8 @@ node_modules/
 .pytest_cache/
 .venv/
 
-# Local agent/CLI state and personal artifacts (not project docs — those live in
+# Local tooling state and personal artifacts (not project docs — those live in
 # README.md, CONTRIBUTING.md, and benchmark/docs/)
-.claude/
 /docs/
 /reports/
 

@@ -29,6 +29,7 @@ RUN git clone --depth 1 --branch "${PR_REF}" \
 # Capture the exact commit that PR_REF resolved to — baked into the image so the runtime
 # records/verifies the real target version instead of a hardcoded constant.
 RUN git rev-parse HEAD > /src/PINNED_COMMIT
+RUN find src -type f -print0 | sort -z | xargs -0 sha256sum > /src/SOURCE_MANIFEST
 # The upstream release profile uses LTO + codegen-units=1, which OOMs in a
 # constrained Docker VM. Relax it for the build (pred's solve perf is ample
 # without LTO). The rustc job cap is a build ARG: default 1 keeps peak memory low
@@ -46,7 +47,7 @@ RUN CARGO_PROFILE_RELEASE_LTO=off \
 FROM python:3.12-slim-bookworm AS runtime
 # Runtime libs pred may dynamically link (HiGHS uses OpenMP / libstdc++) — ref-independent,
 # so keep before ARG to preserve the cache across ref bumps.
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libstdc++6 passwd \
     && rm -rf /var/lib/apt/lists/*
 ARG PR_REF
 LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
@@ -54,18 +55,44 @@ LABEL org.opencontainers.image.title="problem-reductions-benchmark" \
       org.opencontainers.image.licenses="MIT" \
       problem_reductions_ref="${PR_REF}"
 
-COPY --from=pred-build /src/target/release/pred /usr/local/bin/pred
-ENV PRED_BINARY=pred PYTHONUNBUFFERED=1
+RUN groupadd --gid 10003 prb-evidence \
+    && groupadd --gid 10001 prb-agent \
+    && groupadd --gid 10002 prb-oracle \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin prb-agent \
+    && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin prb-oracle \
+    && usermod -a -G prb-evidence prb-agent \
+    && usermod -a -G prb-evidence prb-oracle \
+    && install -d -o root -g prb-oracle -m 0750 /usr/local/libexec/prb
+COPY --from=pred-build /src/target/release/pred /usr/local/libexec/prb/pred
+RUN chown root:prb-oracle /usr/local/libexec/prb/pred \
+    && chmod 0750 /usr/local/libexec/prb/pred
+ENV PRED_BINARY=/usr/local/libexec/prb/pred \
+    PRB_AGENT_UID=10001 \
+    PRB_AGENT_GID=10001 \
+    PRB_ORACLE_UID=10002 \
+    PRB_ORACLE_GID=10002 \
+    PRB_EVIDENCE_GID=10003 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 COPY benchmark/ ./benchmark/
+# The scorer and Top50 triage share the exact pinned source-rule inventory. Keeping it in
+# the runtime image lets official scoring reject invented/renamed shortlist entries.
+COPY --from=pred-build /src/src /app/pr-src/src
+COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
+ENV REPO_DIR=/app/pr-src
 
 # Fail the build if pred can't run (catches a missing runtime lib early).
-RUN pred --version
+RUN /usr/local/libexec/prb/pred --version
 # Bake the target version pins so benchmark/env_setup.py reads the *built* commit/version
 # rather than a frozen Python literal (the target tracks PR_REF, not a constant).
 COPY --from=pred-build /src/PINNED_COMMIT /app/benchmark/PINNED_COMMIT
-RUN pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
+COPY --from=pred-build /src/PINNED_COMMIT /app/pr-src/.prb-pinned-commit
+COPY --from=pred-build /src/SOURCE_MANIFEST /app/pr-src/.prb-source-manifest
+RUN /usr/local/libexec/prb/pred --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 > /app/benchmark/PINNED_VERSION
+# Prove the complete privilege boundary, not just a file mode: the dedicated agent user can
+# call both shims while an absolute-path oracle invocation is denied.
+RUN python -m benchmark.privilege_smoke
 
 # Default: run the verifier calibration (fixtures) as a self-test.
 # Override CMD to verify a certificate, e.g. (run with NO network — the verifier only needs
@@ -88,24 +115,11 @@ FROM runtime AS runner
 ARG PR_REF
 # Agent stack. requirements.txt pins mini-swe-agent (which pulls litellm) + anthropic.
 RUN pip install --no-cache-dir -r /app/benchmark/requirements.txt
-# Claude Code CLI — the optional claude-code backend (AGENT_BACKEND=claude-code).
-# Native installer, self-contained (no Node). Auth is supplied at run time via
-# CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in submission.env — never baked in.
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.local/bin:${PATH}"
-RUN claude --version
-# The agent reads rule sources from REPO_DIR/src/rules — copy just the source tree
-# (not target/) from the build stage. pred itself is a self-contained binary on PATH.
-COPY --from=pred-build /src/src /app/pr-src/src
-COPY --from=pred-build /src/Cargo.toml /app/pr-src/Cargo.toml
 RUN mkdir -p /out
-ENV REPO_DIR=/app/pr-src \
-    OUTPUT=/out/submission.json
+ENV OUTPUT=/out/submission.json
 VOLUME ["/out"]
 # Build-time sanity that the assembled runner imports and runs (no API/pred calls).
-RUN python -m benchmark.run_submission --fake --model fake/check \
+RUN python -m benchmark.run_top50 --fake --model fake/check \
     --output /tmp/buildcheck.json && rm -f /tmp/buildcheck.json
-ENTRYPOINT ["python", "-m", "benchmark.run_submission"]
+ENTRYPOINT ["python", "-m", "benchmark.run_top50"]
 CMD []

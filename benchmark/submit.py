@@ -12,7 +12,7 @@ public repo — it travels over HTTPS through GitHub-backed Cloudflare Access.
     # → prints the submission id returned by the endpoint
 
 The client validates the file locally FIRST (valid JSON, required envelope fields, and —
-mirroring submission.schema.json — a valid bounded ledger for current submissions) so a
+mirroring submission.schema.json — valid bounded ledgers) so a
 malformed run fails fast, before it hits the endpoint or burns quota.
 The endpoint re-checks and the backend re-verifies with pred regardless; this is just a
 courtesy gate. Use ``--dry-run`` to validate without sending.
@@ -31,11 +31,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from benchmark.submit_ledger import submit_ledger_error
-
-REQUIRED_ENVELOPE = ("model", "library_commit", "bugs_found", "total_tokens_k",
-                     "rules_tested", "results")
-
 
 def load_submission(path: Path) -> dict:
     """Read + JSON-parse a submission file (raises on missing/invalid)."""
@@ -43,81 +38,9 @@ def load_submission(path: Path) -> dict:
 
 
 def validate_submission(sub: dict) -> list[str]:
-    """Client-side courtesy check. Returns a list of problems ([] == ok).
-
-    New runs prove provenance through the bounded submit ledger. Legacy runs must carry a
-    certificate plus a trajectory on the row or envelope.
-    """
-    problems: list[str] = []
-    if not isinstance(sub, dict):
-        return ["submission is not a JSON object"]
-    for field in REQUIRED_ENVELOPE:
-        if field not in sub:
-            problems.append(f"missing required field: {field}")
-
-    if "model" in sub and (not isinstance(sub["model"], str) or not sub["model"].strip()):
-        problems.append("model must be a non-empty string")
-    if "library_commit" in sub and not isinstance(sub["library_commit"], str):
-        problems.append("library_commit must be a string")
-    bugs_found = sub.get("bugs_found")
-    if ("bugs_found" in sub
-            and (not isinstance(bugs_found, int) or isinstance(bugs_found, bool)
-                 or bugs_found < 0)):
-        problems.append("bugs_found must be a non-negative integer")
-    rules_tested = sub.get("rules_tested")
-    if ("rules_tested" in sub
-            and (not isinstance(rules_tested, int) or isinstance(rules_tested, bool)
-                 or rules_tested < 0)):
-        problems.append("rules_tested must be a non-negative integer")
-    tokens_k = sub.get("total_tokens_k")
-    if ("total_tokens_k" in sub
-            and (not isinstance(tokens_k, (int, float)) or isinstance(tokens_k, bool)
-                 or tokens_k < 0)):
-        problems.append("total_tokens_k must be a non-negative number")
-
-    usage_totals = sub.get("usage_totals")
-    if usage_totals is not None:
-        if not isinstance(usage_totals, dict):
-            problems.append("usage_totals must be an object")
-        else:
-            for bucket in ("input", "output", "cache_read", "cache_write"):
-                value = usage_totals.get(bucket, 0)
-                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                    problems.append(
-                        f"usage_totals.{bucket} must be a non-negative integer")
-
-    results = sub.get("results")
-    if not isinstance(results, list):
-        problems.append("results must be a list")
-        return problems
-    envelope_traj = bool(sub.get("trajectory"))
-    for i, row in enumerate(results):
-        if not isinstance(row, dict):
-            problems.append(f"results[{i}] is not an object")
-            continue
-        if not isinstance(row.get("rule"), str) or not row.get("rule", "").strip():
-            problems.append(f"results[{i}].rule must be a non-empty string")
-        if not isinstance(row.get("result"), str):
-            problems.append(f"results[{i}].result must be a string")
-        row_tokens = row.get("tokens_k")
-        if (not isinstance(row_tokens, (int, float)) or isinstance(row_tokens, bool)
-                or row_tokens < 0):
-            problems.append(f"results[{i}].tokens_k must be a non-negative number")
-        certificate = row.get("certificate")
-        if certificate is not None and not isinstance(certificate, dict):
-            problems.append(f"results[{i}].certificate must be an object")
-        if row.get("result") == "bug_found":
-            rule = row.get("rule", "?")
-            if not row.get("certificate"):
-                problems.append(f"results[{i}] ({rule}): bug_found row has no certificate")
-            if ("submit_log" not in sub
-                    and not row.get("trajectory") and not envelope_traj):
-                problems.append(f"results[{i}] ({rule}): bug_found row has no trajectory "
-                                "(required as provenance — on the row or the envelope)")
-
-    if ledger_problem := submit_ledger_error(sub):
-        problems.append(ledger_problem)
-    return problems
+    """Run the current benchmark artifact validator as a local courtesy check."""
+    from benchmark.top50_contract import validate_top50_submission
+    return validate_top50_submission(sub)
 
 
 def _post(url: str, payload: bytes, auth_headers: dict[str, str],
@@ -164,7 +87,8 @@ def submit(path: Path, url: str | None, *, access_token: str | None = None,
     if mark_test:
         sub["test"] = True
 
-    bugs = sum(1 for r in sub.get("results", []) if r.get("result") == "bug_found")
+    bugs = sum(1 for episode in sub.get("episodes", [])
+               if episode.get("status") == "bug_found")
     if dry_run:
         return {"status": "dry-run (not sent)", "model": sub.get("model"),
                 "claimed_bugs": bugs, "bytes": len(path.read_bytes())}

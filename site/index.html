@@ -95,12 +95,6 @@
   td.bugs span{font-family:var(--sans);font-size:20px;font-weight:700;color:var(--ink);letter-spacing:-.02em;}
   td.bugs span.zero{color:var(--dim);font-weight:500;}
   tr.lead td.bugs span{color:var(--accent);}
-  td.reach{width:210px;}
-  .reach .bar{height:7px;background:#eef1f5;border-radius:99px;overflow:hidden;margin-bottom:5px;}
-  .reach .bar i{display:block;height:100%;background:var(--accent);opacity:.85;border-radius:99px;}
-  tr.lead .reach .bar i{opacity:1;}
-  .reach .rl{font-family:var(--sans);font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
-  .reach .rl em{color:var(--faint);font-style:normal;}
   td.empty,.empty{font-size:13px;color:var(--faint);padding:26px 16px;text-align:center;}
   .note{font-size:12.5px;color:var(--muted);margin:14px 2px 0;line-height:1.7;}
   .note b{color:var(--ink);font-weight:600;}
@@ -113,10 +107,6 @@
     box-shadow:0 1px 3px rgba(16,23,41,.05);}
   .panel h3{font-size:17px;font-weight:700;margin:0 0 3px;letter-spacing:-.01em;}
   .panel .sub{font-size:12px;color:var(--faint);margin:0 0 16px;}
-  .chart-panel{margin-top:4px;padding:20px 24px 18px;}
-  .panel-head{margin-bottom:6px;}
-  .panel-head h3{font-size:16px;}
-  .panel-head .sub{margin:4px 0 0;max-width:72ch;line-height:1.5;}
   .hint{font-size:12px;color:var(--faint);margin-left:auto;white-space:nowrap;}
 
   /* inspector drawer */
@@ -229,7 +219,6 @@
     .wrap{padding:0 16px 60px;}
     nav.tabs{gap:2px;overflow-x:auto;}
     .stat{min-width:46%;}
-    td.reach{display:none;}
     table.lb thead th:nth-child(4){display:none;}
   }
 </style>
@@ -259,8 +248,8 @@
       <div class="meta">
         <a class="ver" href="https://github.com/CodingThrust/problem-reductions/releases/tag/v0.6.0" target="_blank" rel="noopener" title="problem-reductions library version (pinned)">library <b>v0.6.0</b><i class="dot"></i></a>
         <div class="metarow">
-          <span><b>100 attempts</b> / model</span>
-          <span><b id="rulecount">253</b> rules</span>
+          <span><b>50 rules</b> / model</span>
+          <span><b>2 submits</b> / selected rule</span>
         </div>
       </div>
     </div>
@@ -274,7 +263,7 @@
       <span class="hint">Click a row for its run stats →</span>
     </div>
     <table class="lb" id="lb-table"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
-    <p class="note"><b>Bugs</b> = distinct rules with a confirmed counterexample. <b>Submitted rules</b> = rules sent through the bounded submit command. <b>Bugs / Ktok</b> = efficiency tie-break.</p>
+    <p class="note"><b>Primary Top50 metric</b> = verified distinct-rule bugs under the frozen logical evidence budget. Ties remain ties; tokens, cost, and elapsed time are diagnostics only.</p>
   </section>
 
   <section class="tab" id="tab-tasks">
@@ -295,16 +284,16 @@
   <section class="tab" id="tab-how">
     <div class="prose">
       <h2>From your model to the leaderboard</h2>
-      <p>Give a model one whole-repository session and see how many bugs it can find in the library's
-         problem reductions. You run it on your own model and key; we independently re-check every bug
-         before it scores.</p>
+      <p>The model first freezes the 50 rules it considers most bug-prone, then investigates each
+         rule in a fresh isolated episode with the same logical budget. You provide the API key; we
+         independently re-check every submitted bug before it scores.</p>
     </div>
 
     <div class="lane you">You run it</div>
     <div class="flow">
       <div class="fnode"><div class="fdot">1</div><div class="fcard"><h4>Get the runner</h4><p>One Docker image: the solver (<code>pred</code>) plus the rule library, pinned to the benchmark version.</p></div></div>
       <div class="fnode"><div class="fdot">2</div><div class="fcard"><h4>Plug in any model</h4><p>OpenAI, Anthropic, DeepSeek, a self-hosted endpoint — you bring the API key.</p></div></div>
-      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Hunt for bugs</h4><p>Your model chooses which rules to probe and when to stop; each submitted find is checked by the solver on the spot.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
+      <div class="fnode"><div class="fdot">3</div><div class="fcard"><h4>Choose 50, then investigate</h4><p>Source-only triage freezes a Top50. Each rule then gets 10 model generations, 12 shell actions, 24 <code>pred</code> calls (10 solves), and exactly two submit attempts.</p><span class="eq">a bug = solve(x) ≠ solve(reduce(x))</span></div></div>
       <div class="fnode"><div class="fdot">4</div><div class="fcard"><h4>Submit from the command line</h4><p>Upload <code>submission.json</code> with <code>benchmark.submit</code>. No web form.</p></div></div>
     </div>
 
@@ -313,7 +302,7 @@
     <div class="lane we">We score it</div>
     <div class="flow">
       <div class="fnode"><div class="fdot we">5</div><div class="fcard"><h4>Re-verified from scratch</h4><p>We re-derive every claimed bug with our own solver and keep only the ones that reproduce.</p><span class="eq good">only reproducible bugs are scored</span></div></div>
-      <div class="fnode"><div class="fdot done">✓</div><div class="fcard outcome"><h4>Ranked on the leaderboard</h4><p>Models are ordered by confirmed distinct-rule bugs, then bugs per 1K tokens as the efficiency tie-break.</p></div></div>
+      <div class="fnode"><div class="fdot done">✓</div><div class="fcard outcome"><h4>Ranked on the leaderboard</h4><p>Models are ordered only by confirmed distinct-rule bugs at the same frozen contract. Equal bug counts are tied.</p></div></div>
     </div>
 
     <div class="defs">
@@ -323,7 +312,7 @@
       </div>
       <div class="def">
         <h4>Why it is fair</h4>
-        <p>Every model targets the same repository version and gets the same 100-attempt certificate channel. Agents stop themselves, and real token usage is recorded. Ranking is by <b>confirmed distinct-rule bugs</b>, with <b>bugs per 1K tokens</b> as the efficiency tie-break.</p>
+        <p>Every model uses the same target, prompt, Top50 size, per-rule logical counters, and two submit opportunities. Wall-clock time, network delay, tokens, and cost never break ties.</p>
       </div>
     </div>
   </section>
@@ -355,7 +344,7 @@ PRB_ACCESS_TOKEN="$(cloudflared access login --no-verbose --auto-close "$PRB_ACC
 
   <section class="tab" id="tab-about">
     <h3 class="about-h">About the benchmark</h3>
-    <p class="about-p">An open measurement of how many bugs a model can find in the <b>problem-reductions</b> library. Every model gets one whole-repository session with the same bounded submission channel, and every claimed bug is independently re-verified server-side.</p>
+    <p class="about-p">A controlled measurement of how well a model prioritizes likely-buggy rules and turns bounded evidence into verified counterexamples. Every claimed bug is independently re-verified server-side.</p>
     <div class="panel" style="margin-top:26px">
       <h3>How to cite</h3>
       <pre class="cmd" style="margin-top:12px">@misc{TODO_citation_key,
@@ -386,7 +375,6 @@ const short=m=>(m||"").split("/").pop();
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 let RESULTS=[],TASKS=[],TOTAL=TOTAL_DEFAULT;
 let lbRows=[],lbSort={key:"bugs",dir:-1},selectedModel=null;
-const cssv=v=>getComputedStyle(document.body).getPropertyValue(v).trim();
 
 document.getElementById("tabs").addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
@@ -400,21 +388,25 @@ document.getElementById("tabs").addEventListener("click",e=>{
 const LB_COLS=[
   {key:"rank",label:"#"},
   {key:"model",label:"Model"},
-  {key:"bugs",label:"Bugs",num:true},
-  {key:"reach",label:"Submitted rules",sortBy:"reachFrac"},
-  {key:"tokens",label:"Tokens (K)",num:true,sortBy:"tokensNum"},
-  {key:"eff",label:"Bugs / Ktok",num:true,sortBy:"effNum"},
+  {key:"bugs",label:"Verified bugs",num:true},
+  {key:"bugs10",label:"Bugs @10",num:true},
+  {key:"bugs25",label:"Bugs @25",num:true},
+  {key:"attempts",label:"1st / 2nd accepts",sortBy:"firstAccepts"},
+  {key:"predBug",label:"Pred / bug",num:true},
 ];
-const RIGHT=new Set(["bugs","tokens","eff"]);
+const RIGHT=new Set(["bugs","bugs10","bugs25","predBug"]);
 
 function buildLbRows(){
-  const ranked=RESULTS.slice()
-    .sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||(b.efficiency_bugs_per_ktok||0)-(a.efficiency_bugs_per_ktok||0));
+  const ranked=RESULTS.slice().sort((a,b)=>(b.bugs_found||0)-(a.bugs_found||0)||
+    String(a.model).localeCompare(String(b.model)));
+  let lastBugs=null,lastRank=0;
   lbRows=ranked.map((r,i)=>{
-    const tested=r.rules_tested||0, frac=TOTAL?Math.min(tested/TOTAL,1):0;
-    return {rank:i+1,model:short(r.model),_model:r.model,bugs:r.bugs_found||0,
-      reachFrac:frac,tested,tokensNum:r.total_tokens_k||0,
-      effNum:r.efficiency_bugs_per_ktok||0};
+    const bugs=r.bugs_found||0;
+    const rank=i&&bugs===lastBugs?lastRank:i+1;lastBugs=bugs;lastRank=rank;
+    return {rank,model:short(r.model),_model:r.model,bugs,
+      bugs10:r.bugs_at_10||0,bugs25:r.bugs_at_25||0,
+      firstAccepts:r.first_attempt_accepts||0,secondAccepts:r.second_attempt_accepts||0,
+      predBug:r.pred_calls_per_bug==null?0:r.pred_calls_per_bug};
   });
 }
 function renderLbHead(){
@@ -432,111 +424,28 @@ function renderLbBody(){
     if(typeof av==="number"&&typeof bv==="number")return (av-bv)*d;
     return String(av).localeCompare(String(bv))*d;});
   document.getElementById("lb-body").innerHTML=rows.map(r=>{
-    const pct=Math.round(r.reachFrac*100);
     return `<tr class="${r.rank===1?'lead':''} ${r._model===selectedModel?'selected':''}" data-model="${encodeURIComponent(r._model)}">
-      <td class="rank">${r.rank}</td>
-      <td class="model">${esc(r.model)}</td>
+      <td class="rank">${r.rank}</td><td class="model">${esc(r.model)}</td>
       <td class="n bugs"><span class="${r.bugs?'':'zero'}">${r.bugs}</span></td>
-      <td class="reach"><div class="bar"><i style="width:${pct}%"></i></div><span class="rl">${r.tested}<em>/${TOTAL}</em></span></td>
-      <td class="n">${Math.round(r.tokensNum).toLocaleString()}</td>
-      <td class="n">${r.effNum.toFixed(4)}</td>
-    </tr>`;
-  }).join("")||`<tr><td colspan="6" class="empty">No models match.</td></tr>`;
+      <td class="n">${r.bugs10}</td><td class="n">${r.bugs25}</td>
+      <td>${r.firstAccepts} / ${r.secondAccepts}</td><td class="n">${r.predBug||'—'}</td></tr>`;
+  }).join("")||`<tr><td colspan="${LB_COLS.length}" class="empty">No models match.</td></tr>`;
 }
-let scatterPts=[];
-function hexA(hex,a){hex=String(hex||'').replace('#','');if(hex.length===3)hex=hex.split('').map(c=>c+c).join('');const n=parseInt(hex||'2563eb',16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;}
-function renderScatter(){
-  const host=document.getElementById("scatter"); if(!host)return; host.innerHTML='';
-  const pts=lbRows;
-  if(!pts.length){host.innerHTML='<div class="empty">No ranked runs yet.</div>';return;}
-  host.style.position='relative';
-  const cw=Math.max(320,host.clientWidth||720), W=cw, H=Math.min(460,Math.max(320,Math.round(cw*0.56)));
-  const dpr=window.devicePixelRatio||1;
-  const cv=document.createElement('canvas'); cv.width=W*dpr; cv.height=H*dpr; cv.style.cssText=`width:${W}px;height:${H}px;display:block`;
-  const ov=document.createElement('canvas'); ov.width=W*dpr; ov.height=H*dpr; ov.style.cssText=`width:${W}px;height:${H}px;display:block;position:absolute;left:0;top:0;pointer-events:none`;
-  host.appendChild(cv); host.appendChild(ov);
-  const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr);
-  const octx=ov.getContext('2d'); octx.scale(dpr,dpr);
-  const padL=60,padB=52,padT=26,padR=30;
-  const ACC=cssv('--accent')||'#2563eb', INK=cssv('--ink')||'#0f1729', MUT=cssv('--muted')||'#5b6573',
-        LINE=cssv('--line')||'#edeff3', LINE2=cssv('--line2')||'#e0e4ea', CARD=cssv('--card')||'#ffffff', MONO=cssv('--sans')||'system-ui,sans-serif';
-  const maxB=Math.max(3,...pts.map(p=>p.bugs)), maxTd=Math.max(10,...pts.map(p=>p.tokensNum));
-  const maxBax=maxB+(maxB<=3?0.6:maxB*0.14), maxTax=maxTd*1.08;
-  const sx=t=>padL+(t/maxTax)*(W-padL-padR), sy=b=>H-padB-(b/maxBax)*(H-padB-padT);
-  const fr=pts.filter(p=>p.bugs>0).sort((a,b)=>a.tokensNum-b.tokensNum||b.bugs-a.bugs);
-  const front=[];let best=-1;for(const p of fr){if(p.bugs>best){front.push(p);best=p.bugs;}}
-  const onFront=new Set(front.map(p=>p._model));
-  const stepB=Math.max(1,Math.ceil(maxB/6));
-  // grid
-  ctx.textBaseline='middle';
-  for(let i=0;i<=maxB;i+=stepB){const y=Math.round(sy(i))+.5;
-    ctx.strokeStyle=i===0?LINE2:LINE; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
-    ctx.fillStyle=MUT; ctx.font='12px '+MONO; ctx.textAlign='right'; ctx.fillText(i,padL-10,sy(i));}
-  ctx.textAlign='center';
-  for(let i=1;i<=4;i++){const t=maxTax*i/4,x=Math.round(sx(t))+.5;
-    ctx.strokeStyle=LINE; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();}
-  ctx.strokeStyle=LINE2; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(padL+.5,padT); ctx.lineTo(padL+.5,H-padB); ctx.stroke();
-  for(let i=0;i<=4;i++){const t=maxTax*i/4; ctx.fillStyle=MUT; ctx.font='12px '+MONO; ctx.fillText(Math.round(t),sx(t),H-padB+17);}
-  // axis titles
-  ctx.fillStyle=MUT; ctx.font='12.5px '+MONO; ctx.textAlign='center';
-  ctx.fillText('tokens spent (K) \u2192',(padL+W-padR)/2,H-8);
-  ctx.save(); ctx.translate(15,(padT+H-padB)/2); ctx.rotate(-Math.PI/2); ctx.fillText('bugs found \u2192',0,0); ctx.restore();
-  // frontier band + line
-  if(front.length>1){
-    const grad=ctx.createLinearGradient(0,padT,0,H-padB);
-    grad.addColorStop(0,hexA(ACC,.15)); grad.addColorStop(1,hexA(ACC,.012));
-    ctx.beginPath(); front.forEach((p,i)=>{const x=sx(p.tokensNum),y=sy(p.bugs); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-    ctx.lineTo(sx(front[front.length-1].tokensNum),sy(0)); ctx.lineTo(sx(front[0].tokensNum),sy(0)); ctx.closePath();
-    ctx.fillStyle=grad; ctx.fill();
-    ctx.beginPath(); front.forEach((p,i)=>{const x=sx(p.tokensNum),y=sy(p.bugs); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-    ctx.strokeStyle=ACC; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
-  }
-  function drawPoint(c,p,hover){
-    const x=sx(p.tokensNum),y=sy(p.bugs),f=onFront.has(p._model);
-    if(f){c.beginPath();c.arc(x,y,hover?8:6.5,0,7);c.fillStyle=ACC;c.fill();c.lineWidth=2.5;c.strokeStyle=CARD;c.stroke();}
-    else{c.beginPath();c.arc(x,y,hover?7:5.5,0,7);c.fillStyle=CARD;c.fill();c.lineWidth=2;c.globalAlpha=hover?1:.75;c.strokeStyle=hover?ACC:MUT;c.stroke();c.globalAlpha=1;}
-  }
-  scatterPts=[];
-  pts.forEach(p=>{scatterPts.push({x:sx(p.tokensNum),y:sy(p.bugs),p}); if(!onFront.has(p._model))drawPoint(ctx,p,false);});
-  front.forEach(p=>drawPoint(ctx,p,false));
-  ctx.font='600 11px '+MONO; ctx.textBaseline='middle';
-  front.forEach(p=>{const x=sx(p.tokensNum),y=sy(p.bugs),flip=x>W*0.62;
-    ctx.fillStyle=INK; ctx.textAlign=flip?'right':'left'; ctx.fillText(p.model,flip?x-12:x+12,y);});
-  // hover overlay + tooltip
-  let tip=host.querySelector('.cv-tip');
-  if(!tip){tip=document.createElement('div'); tip.className='cv-tip'; host.appendChild(tip);
-    tip.style.cssText='position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;font-family:var(--sans);font-size:12px;'+
-      'background:var(--ink);color:#fff;padding:7px 10px;border-radius:8px;white-space:nowrap;z-index:6;transform:translate(-50%,calc(-100% - 13px));box-shadow:0 8px 22px -8px rgba(0,0,0,.45);line-height:1.5;';}
-  cv.onmousemove=ev=>{const r=cv.getBoundingClientRect(),mx=ev.clientX-r.left,my=ev.clientY-r.top;
-    let hit=null,dn=22; for(const s of scatterPts){const d=Math.hypot(s.x-mx,s.y-my); if(d<dn){dn=d;hit=s;}}
-    octx.clearRect(0,0,W,H);
-    if(hit){
-      octx.strokeStyle=hexA(ACC,.5); octx.lineWidth=1; octx.setLineDash([3,3]);
-      octx.beginPath(); octx.moveTo(hit.x,hit.y); octx.lineTo(hit.x,H-padB); octx.moveTo(hit.x,hit.y); octx.lineTo(padL,hit.y); octx.stroke(); octx.setLineDash([]);
-      drawPoint(octx,hit.p,true);
-      tip.style.opacity='1'; tip.style.left=hit.x+'px'; tip.style.top=hit.y+'px';
-      tip.innerHTML=`<b>${esc(hit.p.model)}</b><br>${hit.p.bugs} bugs \u00b7 ${Math.round(hit.p.tokensNum)}K tok`;
-      cv.style.cursor='pointer';
-    }else{tip.style.opacity='0'; cv.style.cursor='default';}
-  };
-  cv.onmouseleave=()=>{octx.clearRect(0,0,W,H); tip.style.opacity='0';};
-}
-let _scTO; window.addEventListener('resize',()=>{clearTimeout(_scTO);_scTO=setTimeout(()=>{if(lbRows.length)renderScatter();},150);});
 function openDrawer(){document.getElementById("drawer").classList.add("open");document.getElementById("drawer-scrim").classList.add("open");document.getElementById("drawer").setAttribute("aria-hidden","false");}
 function closeDrawer(){document.getElementById("drawer").classList.remove("open");document.getElementById("drawer-scrim").classList.remove("open");document.getElementById("drawer").setAttribute("aria-hidden","true");selectedModel=null;renderLbBody();}
 function renderInspector(model){
   const row=lbRows.find(r=>r._model===model); if(!row)return;
   document.getElementById("drawer-title").textContent=row.model;
   const sub=document.getElementById("drawer-sub"), el=document.getElementById("inspect-body");
-  sub.textContent=`${row.bugs} confirmed bug(s) · ${row.tested}/${TOTAL} rules submitted · ${Math.round(row.tokensNum)}K tok`;
+  sub.textContent=`${row.bugs} verified bug(s) · frozen Self-selected Top50`;
   // Aggregate-only by design: the leaderboard never reveals WHICH rules a model found bugs
   // in. On a public library commit a pred-confirmed certificate counts regardless of who
   // produced it, so publishing the rules/certificates would be a free answer key.
   el.innerHTML=`<dl class="stats">
-    <div><dt>Confirmed bugs</dt><dd>${row.bugs}</dd></div>
-    <div><dt>Rules reached</dt><dd>${row.tested}<em>/${TOTAL}</em></dd></div>
-    <div><dt>Tokens</dt><dd>${Math.round(row.tokensNum).toLocaleString()}K</dd></div>
-    <div><dt>Bugs / Ktok</dt><dd>${row.effNum.toFixed(4)}</dd></div>
+    <div><dt>Verified bugs</dt><dd>${row.bugs}</dd></div>
+    <div><dt>Bugs @10 / @25</dt><dd>${row.bugs10} / ${row.bugs25}</dd></div>
+    <div><dt>1st / 2nd accepts</dt><dd>${row.firstAccepts} / ${row.secondAccepts}</dd></div>
+    <div><dt>Pred calls / bug</dt><dd>${row.predBug||'—'}</dd></div>
   </dl>`;
   openDrawer();
 }

@@ -17,12 +17,11 @@ Test categories:
 import subprocess
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from benchmark.env_setup import (
     PINNED_COMMIT,
     PINNED_PRED_VERSION,
-    clone_or_verify_repo,
     find_pred_binary,
     pred_version,
     setup_env,
@@ -30,65 +29,6 @@ from benchmark.env_setup import (
     verify_pred_version,
 )
 
-
-def _git(*args, cwd=None) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                            check=True)
-    return result.stdout.strip()
-
-
-def _source_repo(tmp_path: Path) -> tuple[Path, str]:
-    source = tmp_path / "source"
-    _git("init", str(source))
-    _git("config", "user.email", "tests@example.com", cwd=source)
-    _git("config", "user.name", "Tests", cwd=source)
-    (source / "README.md").write_text("v1\n", encoding="utf-8")
-    _git("add", "README.md", cwd=source)
-    _git("commit", "-m", "v1", cwd=source)
-    _git("tag", "v1.0.0", cwd=source)
-    return source, _git("rev-parse", "HEAD", cwd=source)
-
-
-class TestCloneOrVerifyRepo:
-    def test_clones_requested_ref_and_returns_full_commit(self, tmp_path):
-        source, commit = _source_repo(tmp_path)
-        destination = tmp_path / "checkouts" / "target"
-
-        actual = clone_or_verify_repo(destination, "v1.0.0", str(source))
-
-        assert actual == commit
-        assert _git("rev-parse", "HEAD", cwd=destination) == commit
-
-    def test_reuses_exact_existing_checkout_without_mutating_it(self, tmp_path):
-        source, commit = _source_repo(tmp_path)
-        destination = tmp_path / "target"
-        clone_or_verify_repo(destination, "v1.0.0", str(source))
-
-        assert clone_or_verify_repo(destination, "v1.0.0", str(source)) == commit
-
-    def test_clones_raw_commit_ref(self, tmp_path):
-        source, commit = _source_repo(tmp_path)
-        destination = tmp_path / "target"
-
-        assert clone_or_verify_repo(destination, commit, str(source)) == commit
-
-    def test_rejects_existing_checkout_at_another_commit(self, tmp_path):
-        source, _ = _source_repo(tmp_path)
-        destination = tmp_path / "target"
-        clone_or_verify_repo(destination, "v1.0.0", str(source))
-        _git("config", "user.email", "tests@example.com", cwd=destination)
-        _git("config", "user.name", "Tests", cwd=destination)
-        (destination / "README.md").write_text("v2\n", encoding="utf-8")
-        _git("commit", "-am", "v2", cwd=destination)
-
-        with pytest.raises(ValueError, match="resolves to"):
-            clone_or_verify_repo(destination, "v1.0.0", str(source))
-
-    def test_rejects_existing_non_git_directory(self, tmp_path):
-        destination = tmp_path / "target"
-        destination.mkdir()
-        with pytest.raises(ValueError, match="not a git checkout"):
-            clone_or_verify_repo(destination, "v1.0.0", "unused")
 
 
 # ── pred version pin (mock subprocess so no real pred needed) ──────────────────
@@ -137,6 +77,7 @@ class TestFindPredBinary:
     def test_pred_found_returns_path(self, monkeypatch, tmp_path):
         fake_pred = tmp_path / "pred"
         fake_pred.touch()
+        fake_pred.chmod(0o755)
         monkeypatch.setattr("shutil.which", lambda name: str(fake_pred))
         result = find_pred_binary()
         assert result == fake_pred

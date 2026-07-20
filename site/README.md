@@ -1,8 +1,9 @@
 # Leaderboard site
 
 Static leaderboard (`index.html`, no app server) published to **GitHub Pages** by
-`.github/workflows/publish-on-merge.yml`. Every model gets one whole-repository session and
-the same bounded certificate-submission channel; every bug is re-verified by `pred`.
+`.github/workflows/publish-on-merge.yml`. The primary table gives every model the same frozen
+Self-selected Top50 logical evidence budget and bounded certificate-submission channel;
+every bug is re-verified by `pred`.
 
 `index.html` reads two data files served alongside it:
 

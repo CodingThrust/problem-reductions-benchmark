@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Benchmark"
+  short_description: "Configure and run the benchmark"
+  default_prompt: "Use $run-benchmark to configure and run the benchmark."
