@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Callable
 
 from benchmark.submit_session import SubmissionSession
+from benchmark.observation_policy import (ObservationConfig, ObservationStore,
+                                          metadata_dict)
 from benchmark.process_control import ProcessLimits, run_capped_process, terminate_process_group
 from benchmark.verify import (CPU_LIMIT_SECONDS, FSIZE_LIMIT_BYTES, MEM_LIMIT_BYTES,
                               Verdict, verify)
@@ -120,6 +122,7 @@ class PredGatewaySession:
         oracle_uid: int | None = None,
         oracle_gid: int | None = None,
         oracle_extra_groups: tuple[int, ...] = (),
+        observation_store: ObservationStore | None = None,
     ):
         if (oracle_uid is None) != (oracle_gid is None):
             raise ValueError("oracle_uid and oracle_gid must be provided together")
@@ -129,6 +132,7 @@ class PredGatewaySession:
         self.oracle_uid = oracle_uid
         self.oracle_gid = oracle_gid
         self.oracle_extra_groups = oracle_extra_groups
+        self.observation_store = observation_store
         self._ledger: list[dict] = []
         self._responses: dict[str, tuple[str, dict]] = {}
         self._cache: dict[tuple[str, ...], dict] = {}
@@ -346,7 +350,7 @@ class PredGatewaySession:
         record_index = self._append_pred_record(
             request_id, args, command, bool(counters), "running", self.budget_state.status())
         try:
-            result = self._run_pred(args, cwd)
+            result = self._run_pred(args, cwd, request_id=request_id)
         except OSError as error:
             model_caused = error.errno == errno.E2BIG
             if counters and not model_caused:
@@ -399,14 +403,16 @@ class PredGatewaySession:
             return self.workdir
         return cwd
 
-    def _run_pred(self, args: list[str], cwd: Path) -> dict:
+    def _run_pred(self, args: list[str], cwd: Path, *, request_id: str) -> dict:
         result = run_capped_process(
             [str(self.pred_binary), *args],
             shell=False,
             cwd=cwd,
             env=None,
             timeout=self.budget_state.budget.pred_timeout_seconds,
-            max_output_chars=self.budget_state.budget.max_output_chars,
+            max_output_chars=(self.observation_store.config.archive_chars
+                              if self.observation_store is not None
+                              else self.budget_state.budget.max_output_chars),
             uid=self.oracle_uid,
             gid=self.oracle_gid,
             extra_groups=self.oracle_extra_groups,
@@ -422,11 +428,27 @@ class PredGatewaySession:
         if result.timed_out:
             stderr += ("\n" if stderr and not stderr.endswith("\n") else "")
             stderr += "pred process timed out\n"
+        observation = None
+        stdout = result.stdout
+        if self.observation_store is not None:
+            packaged = self.observation_store.package(
+                kind="pred", command="pred " + shlex.join(args),
+                returncode=result.returncode, timed_out=result.timed_out,
+                stdout=result.stdout, stderr=stderr,
+                original_chars=result.original_chars, original_lines=result.original_lines,
+                archive_truncated=result.capture_truncated,
+                observation_id=f"pred-{request_id}")
+            observation = metadata_dict(packaged)
+            if result.returncode == 0:
+                stdout, stderr = packaged.preview, ""
+            else:
+                stdout, stderr = "", packaged.preview
         return {
             "returncode": result.returncode,
-            "stdout": result.stdout,
+            "stdout": stdout,
             "stderr": stderr,
             "timed_out": result.timed_out,
+            "observation": observation,
         }
 
     def _track_process(self, process) -> None:
@@ -456,6 +478,8 @@ class PredGatewaySession:
             self._ledger[index]["outcome"] = outcome
             self._ledger[index]["returncode"] = response["returncode"]
             self._ledger[index]["budget"] = copy.deepcopy(response["budget"])
+            if response.get("observation") is not None:
+                self._ledger[index]["observation"] = copy.deepcopy(response["observation"])
 
     def _write_response(self, request_id: str, response: dict) -> None:
         assert self._outbox_fd is not None
@@ -488,6 +512,7 @@ class EvidenceBudgetSession:
         oracle_uid: int | None = None,
         oracle_gid: int | None = None,
         evidence_gid: int | None = None,
+        observation_config: ObservationConfig | None = None,
     ):
         if not rule:
             raise ValueError("rule must be non-empty")
@@ -507,6 +532,8 @@ class EvidenceBudgetSession:
         self.oracle_uid = oracle_uid
         self.oracle_gid = oracle_gid
         self.evidence_gid = evidence_gid
+        self.observation_config = observation_config or ObservationConfig(
+            preview_chars=budget.max_output_chars)
         self.submit: SubmissionSession | None = None
         self.pred: PredGatewaySession | None = None
         self._scratch: Path | None = None
@@ -514,6 +541,8 @@ class EvidenceBudgetSession:
         self._event_lock = threading.RLock()
         self._model_events: list[dict] = []
         self._shell_events: list[dict] = []
+        self._observations: list[dict] = []
+        self.observations: ObservationStore | None = None
 
     @property
     def workdir(self) -> Path:
@@ -531,6 +560,12 @@ class EvidenceBudgetSession:
             ))
             self._scratch = self.submit.workdir / "scratch"
             self._scratch.mkdir(mode=0o700)
+            self.observations = ObservationStore(
+                self.submit.workdir / "observations",
+                config=self.observation_config,
+                relative_from=self._scratch,
+                readable_gid=self.evidence_gid,
+            )
             self.pred = stack.enter_context(PredGatewaySession(
                 pred_binary=self.pred_binary,
                 workdir=self._scratch,
@@ -538,6 +573,7 @@ class EvidenceBudgetSession:
                 oracle_uid=self.oracle_uid,
                 oracle_gid=self.oracle_gid,
                 oracle_extra_groups=((self.evidence_gid,) if self.evidence_gid is not None else ()),
+                observation_store=self.observations,
             ))
             if self.agent_uid is not None and self.agent_gid is not None:
                 self._prepare_agent_access(self.agent_uid, self.agent_gid)
@@ -586,6 +622,20 @@ class EvidenceBudgetSession:
             })
         return admitted
 
+    def record_shell_observation(self, command: str, metadata: dict | None) -> None:
+        if metadata is None:
+            return
+        with self._event_lock:
+            self._observations.append(copy.deepcopy(metadata))
+            for event in reversed(self._shell_events):
+                if event.get("command") == command and "observation_id" not in event:
+                    event["observation_id"] = metadata["observation_id"]
+                    if event.get("charged") is True:
+                        event["outcome"] = ("timeout" if metadata["timed_out"] else
+                                            "completed" if metadata["returncode"] == 0 else
+                                            "nonzero_exit")
+                    break
+
     def status(self) -> dict:
         if self.submit is None:
             raise RuntimeError("evidence budget session is not active")
@@ -604,14 +654,21 @@ class EvidenceBudgetSession:
         with self._event_lock:
             model_events = copy.deepcopy(self._model_events)
             shell_events = copy.deepcopy(self._shell_events)
+        pred_ledger = self.pred.ledger
+        observations = copy.deepcopy(self._observations)
+        observations.extend(copy.deepcopy(record["observation"])
+                            for record in pred_ledger if "observation" in record)
+        observations.sort(key=lambda item: item["observation_id"])
         return {
             "rule": self.rule,
             "budget": asdict(self.budget),
+            "observation_policy": asdict(self.observation_config),
             "status": self.status(),
-            "pred": self.pred.ledger,
+            "pred": pred_ledger,
             "submit": self.submit.attempts,
             "model_generations": model_events,
             "shell_actions": shell_events,
+            "observations": observations,
         }
 
 

@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import re
+import shlex
 from collections import Counter
 from pathlib import Path
 from typing import Callable
@@ -17,11 +18,12 @@ from benchmark.verify import Verdict, verify
 
 CONTRACT_ID = FROZEN_CONTRACT["contract_id"]
 AGENT_MODE = "standardized-model-api"
-RUNNER_VERSION = "0.9.0"
+RUNNER_VERSION = "0.10.0"
 EXPECTED_TRIAGE_BUDGET = FROZEN_CONTRACT["triage"]
 EXPECTED_EPISODE_BUDGET = FROZEN_CONTRACT["episode"]
 EXPECTED_SAFETY_CONTROLS = FROZEN_CONTRACT["safety_controls"]
 EXPECTED_INFERENCE_PARAMETERS = FROZEN_CONTRACT["inference_parameters"]
+EXPECTED_OBSERVATION = FROZEN_CONTRACT["observation"]
 EXPECTED_SHORTLIST_SIZE = FROZEN_CONTRACT["shortlist_size"]
 EXPECTED_HYPOTHESIS_CHARS = FROZEN_CONTRACT["hypothesis_chars"]
 _REQUEST_ID = re.compile(r"[0-9a-f]{32}")
@@ -47,7 +49,7 @@ def validate_top50_submission(
     for field in ("benchmark_contract", "model", "library_commit", "runner_version",
                   "pred_version", "agent_mode", "prompt_id", "contract", "shortlist",
                   "triage", "episodes", "status", "budget_contract_status",
-                  "safety_controls", "inference_parameters"):
+                  "safety_controls", "inference_parameters", "observation_policy"):
         if field not in submission:
             problems.append(f"missing required field: {field}")
     if problems:
@@ -75,6 +77,8 @@ def validate_top50_submission(
         problems.append("submitted_by is not a bounded safe identifier")
     if submission.get("inference_parameters") != EXPECTED_INFERENCE_PARAMETERS:
         problems.append("inference_parameters differ from the standardized model settings")
+    if submission.get("observation_policy") != EXPECTED_OBSERVATION:
+        problems.append("observation_policy differs from the versioned contract")
     if submission.get("prompt_id") != expected_prompt_id():
         problems.append("prompt_id does not match the frozen Top50 prompt")
     if "submit_limit" in submission or "submit_log" in submission:
@@ -85,12 +89,15 @@ def validate_top50_submission(
         return problems + ["contract must be an object"]
     triage_budget = contract.get("triage")
     episode_budget = contract.get("episode")
+    observation_contract = contract.get("observation")
     if not isinstance(triage_budget, dict) or not isinstance(episode_budget, dict):
         return problems + ["contract triage and episode budgets must be objects"]
     if triage_budget != EXPECTED_TRIAGE_BUDGET:
         problems.append("triage budget differs from the versioned contract")
     if episode_budget != EXPECTED_EPISODE_BUDGET:
         problems.append("episode budget differs from the versioned contract")
+    if observation_contract != EXPECTED_OBSERVATION:
+        problems.append("observation contract differs from the versioned contract")
     if contract.get("shortlist_size") != EXPECTED_SHORTLIST_SIZE:
         problems.append(f"contract shortlist_size must be {EXPECTED_SHORTLIST_SIZE}")
     hypothesis_limit = contract.get("hypothesis_chars")
@@ -136,6 +143,7 @@ def validate_top50_submission(
     else:
         if triage_ledger.get("budget") != triage_budget:
             problems.append("triage ledger budget differs from contract")
+        _validate_observation_ledger(triage_ledger, "triage", problems)
         frozen = triage_ledger.get("shortlist")
         if frozen != shortlist:
             problems.append("top-level shortlist differs from frozen triage shortlist")
@@ -175,6 +183,7 @@ def validate_top50_submission(
             problems.append(f"{label} contains an oversized message")
         _validate_status(ledger.get("status"), episode_budget, label, problems)
         _validate_episode_events(ledger, label, problems)
+        _validate_observation_ledger(ledger, label, problems)
         _validate_pred_ledger(ledger, label, seen_request_ids, problems)
         _validate_submit_ledger(ledger, expected_rule, label, seen_request_ids, problems)
         accepted_attempts = [attempt for attempt in ledger.get("submit", [])
@@ -386,6 +395,118 @@ def _validate_episode_events(ledger, label, problems) -> None:
                       if isinstance(event, dict))
         if charged != status.get(field, {}).get("used"):
             problems.append(f"{label} {field} charged count differs from status")
+
+
+def _validate_observation_ledger(ledger: dict, label: str, problems: list[str]) -> None:
+    if ledger.get("observation_policy") != EXPECTED_OBSERVATION:
+        problems.append(f"{label} observation policy differs from contract")
+    records = ledger.get("observations")
+    if not isinstance(records, list):
+        problems.append(f"{label} observations must be a list")
+        return
+    shell_events = (ledger.get("events", []) if label == "triage"
+                    else ledger.get("shell_actions", []))
+    shell_events = [event for event in shell_events if isinstance(event, dict)
+                    and (label != "triage" or event.get("type") == "shell_action")]
+    pred_records = ledger.get("pred", []) if label != "triage" else []
+    maximum = len(shell_events) + (len(pred_records) if isinstance(pred_records, list) else 0)
+    if len(records) > maximum:
+        problems.append(f"{label} observation ledger exceeds its logical bound")
+    seen: set[str] = set()
+    record_by_id: dict[str, dict] = {}
+    required = {
+        "observation_id", "kind", "command", "policy_id", "raw_log", "returncode",
+        "timed_out", "original_chars", "original_lines", "preview_chars", "archive_chars",
+        "preview_compacted", "archive_truncated",
+    }
+    for record in records:
+        if not isinstance(record, dict) or set(record) != required:
+            problems.append(f"{label} has malformed observation metadata")
+            continue
+        observation_id = record["observation_id"]
+        if (not isinstance(observation_id, str)
+                or not re.fullmatch(r"(?:shell-[0-9]{4}|pred-[0-9a-f]{32})", observation_id)):
+            problems.append(f"{label} has invalid observation id")
+            continue
+        if observation_id in seen:
+            problems.append(f"{label} has invalid observation id")
+            continue
+        seen.add(observation_id)
+        record_by_id[observation_id] = record
+        if record["policy_id"] != EXPECTED_OBSERVATION["policy_id"]:
+            problems.append(f"{label} observation policy id is inconsistent")
+        if (not _nonnegative_int(record["preview_chars"])
+                or record["preview_chars"] > EXPECTED_OBSERVATION["preview_chars"]):
+            problems.append(f"{label} observation preview exceeds contract")
+        if (not _nonnegative_int(record["archive_chars"])
+                or record["archive_chars"] > EXPECTED_OBSERVATION["archive_chars"]):
+            problems.append(f"{label} observation archive exceeds contract")
+        if not _nonnegative_int(record["original_chars"]):
+            problems.append(f"{label} observation original size is invalid")
+        if not _nonnegative_int(record["original_lines"]):
+            problems.append(f"{label} observation original line count is invalid")
+        if (record["kind"] not in ("shell", "pred")
+                or not isinstance(record["command"], str)
+                or type(record["returncode"]) is not int
+                or not isinstance(record["timed_out"], bool)
+                or not isinstance(record["preview_compacted"], bool)
+                or not isinstance(record["archive_truncated"], bool)):
+            problems.append(f"{label} observation fields have invalid types")
+        expected_path = f"../observations/{observation_id}.log"
+        if record["raw_log"] != expected_path:
+            problems.append(f"{label} observation raw-log reference is invalid")
+
+    referenced: list[str] = []
+    for event in shell_events:
+        observation_id = event.get("observation_id")
+        record = record_by_id.get(observation_id)
+        if record is None:
+            problems.append(f"{label} shell event is missing its observation")
+            continue
+        referenced.append(observation_id)
+        if record["kind"] != "shell" or record["command"] != event.get("command"):
+            problems.append(f"{label} shell observation does not match its event")
+        if not _observation_matches_outcome(record, event.get("outcome")):
+            problems.append(f"{label} shell observation outcome is inconsistent")
+    if isinstance(pred_records, list):
+        for pred_record in pred_records:
+            if not isinstance(pred_record, dict):
+                continue
+            embedded = pred_record.get("observation")
+            requires_observation = pred_record.get("outcome") in {
+                "completed", "nonzero_exit", "timeout"}
+            if embedded is None:
+                if requires_observation:
+                    problems.append(f"{label} pred record is missing its observation")
+                continue
+            if not isinstance(embedded, dict):
+                problems.append(f"{label} pred observation is malformed")
+                continue
+            observation_id = embedded.get("observation_id")
+            referenced.append(observation_id)
+            if (record_by_id.get(observation_id) != embedded
+                    or embedded.get("kind") != "pred"
+                    or not _pred_command_matches(embedded, pred_record)
+                    or embedded.get("returncode") != pred_record.get("returncode")
+                    or not _observation_matches_outcome(embedded, pred_record.get("outcome"))):
+                problems.append(f"{label} pred observation does not match its record")
+    if len(referenced) != len(set(referenced)) or set(referenced) != set(record_by_id):
+        problems.append(f"{label} observation ledger is not bijective with action records")
+
+
+def _observation_matches_outcome(record: dict, outcome: object) -> bool:
+    return {
+        "completed": record["returncode"] == 0 and record["timed_out"] is False,
+        "nonzero_exit": record["returncode"] != 0 and record["timed_out"] is False,
+        "timeout": record["returncode"] == 124 and record["timed_out"] is True,
+        "budget_exhausted": record["returncode"] == 75 and record["timed_out"] is False,
+    }.get(outcome, False)
+
+
+def _pred_command_matches(observation: dict, pred_record: dict) -> bool:
+    args = pred_record.get("args")
+    return (isinstance(args, list) and all(isinstance(arg, str) for arg in args)
+            and observation.get("command") == "pred " + shlex.join(args))
 
 
 def _validate_submit_ledger(ledger, expected_rule, label, seen_ids, problems) -> None:

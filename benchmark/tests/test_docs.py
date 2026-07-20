@@ -78,7 +78,7 @@ class TestReadme:
 
     def test_readme_lists_current_round_contract(self):
         text = README.read_text(encoding="utf-8")
-        assert "top50-evidence/v1" in text
+        assert "top50-evidence/v2" in text
         assert PINNED_COMMIT in text
         assert f"`{PINNED_PRED_VERSION}`" in text
         assert "elapsed time" in text.lower()
@@ -107,7 +107,7 @@ class TestBackendRouteSeparation:
 
     def test_api_skill_is_container_only(self):
         t = _text(API_SKILL)
-        assert "top50-evidence/v1" in t and "runner-pull" in t
+        assert "top50-evidence/v2" in t and "runner-pull" in t
         assert "coding-agent backends" in t
 
     def test_cli_skill_is_host_only(self):

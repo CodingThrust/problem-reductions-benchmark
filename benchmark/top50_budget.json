@@ -1,5 +1,5 @@
 {
-  "contract_id": "top50-evidence/v1",
+  "contract_id": "top50-evidence/v2",
   "status": "frozen",
   "shortlist_size": 50,
   "hypothesis_chars": 500,
@@ -11,6 +11,11 @@
     "max_tokens": 8192,
     "timeout": 300,
     "num_retries": 2
+  },
+  "observation": {
+    "policy_id": "terminal-diagnostics/v1",
+    "preview_chars": 10000,
+    "archive_chars": 1048576
   },
   "triage": {
     "model_generations": 8,

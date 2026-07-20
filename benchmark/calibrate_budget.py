@@ -146,9 +146,13 @@ def render_report(evidence: dict) -> str:
         f"P={episode['pred_calls']} total `pred` calls, "
         f"P_solve={episode['solve_calls']} solve calls, S={episode['submit_attempts']} "
         f"submit attempts, E={episode['shell_actions']} shell actions, and "
-        f"O={episode['max_output_chars']} observed characters per rule. Triage is "
+        f"O={episode['max_output_chars']} automatically previewed characters per action. Triage is "
         f"T={contract['triage']['model_generations']} generations and "
         f"E_t={contract['triage']['shell_actions']} source-only actions.",
+        "",
+        f"Terminal output uses `{contract['observation']['policy_id']}` with a "
+        f"{contract['observation']['preview_chars']}-character automatic preview and a bounded "
+        f"{contract['observation']['archive_chars']}-character raw archive per command.",
         "",
         f"Model calls have a fixed {safety['model_timeout_seconds']}-second watchdog and "
         f"{safety['model_retries']} transport retries. Command and `pred` watchdogs are also "
@@ -255,7 +259,7 @@ def check(path: str | Path) -> list[str]:
     submission_schema = load_json(ROOT / "top50_submission.schema.json")
     properties = submission_schema.get("properties", {})
     expected_artifact_contract = {key: contract[key] for key in
-                                  ("triage", "episode", "shortlist_size",
+                                  ("triage", "episode", "observation", "shortlist_size",
                                    "hypothesis_chars")}
     if properties.get("contract", {}).get("const") != expected_artifact_contract:
         errors.append("top50_submission.schema.json has stale logical limits")
@@ -264,6 +268,8 @@ def check(path: str | Path) -> list[str]:
     if properties.get("inference_parameters", {}).get("const") != contract[
             "inference_parameters"]:
         errors.append("top50_submission.schema.json has stale inference parameters")
+    if properties.get("observation_policy", {}).get("const") != contract["observation"]:
+        errors.append("top50_submission.schema.json has stale observation policy")
     if not errors and REPORT_PATH.read_text(encoding="utf-8") != render_report(evidence):
         errors.append("budget-calibration.md does not match the machine-readable evidence")
     return errors

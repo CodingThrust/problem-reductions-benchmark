@@ -11,6 +11,7 @@ from pathlib import Path
 
 from benchmark.env_setup import find_pred_binary, pinned_commit, verify_pred_version
 from benchmark.evidence_budget import EvidenceBudget
+from benchmark.observation_policy import ObservationConfig
 from benchmark.run_mini import list_rules
 from benchmark.top50_runner import (
     PhaseResult,
@@ -24,6 +25,7 @@ from benchmark.top50_contract import (
     CONTRACT_ID,
     RUNNER_VERSION,
     EXPECTED_EPISODE_BUDGET,
+    EXPECTED_OBSERVATION,
     EXPECTED_INFERENCE_PARAMETERS,
     EXPECTED_SAFETY_CONTROLS,
     EXPECTED_HYPOTHESIS_CHARS,
@@ -84,6 +86,7 @@ def frozen_contract() -> Top50Contract:
     return Top50Contract(
         triage=TriageBudget(**EXPECTED_TRIAGE_BUDGET),
         episode=EvidenceBudget(**EXPECTED_EPISODE_BUDGET),
+        observation=ObservationConfig(**EXPECTED_OBSERVATION),
         shortlist_size=EXPECTED_SHORTLIST_SIZE,
         hypothesis_chars=EXPECTED_HYPOTHESIS_CHARS,
     )
@@ -148,6 +151,7 @@ def run(*, model: str, repo_dir: str | Path, output: str | Path,
         "safety_controls": EXPECTED_SAFETY_CONTROLS,
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "inference_parameters": EXPECTED_INFERENCE_PARAMETERS,
+        "observation_policy": EXPECTED_OBSERVATION,
     }
     return runner.run(model=model, repo_path=repo, inventory=inventory,
                       output=output, metadata=metadata)

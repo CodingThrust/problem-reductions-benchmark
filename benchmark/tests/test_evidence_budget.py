@@ -117,6 +117,11 @@ def test_concurrent_pred_clients_cannot_overspend(tmp_path):
         assert sum(result.returncode == 0 for result in results) == 4
         assert sum(result.returncode == 75 for result in results) == 16
         assert session.status()["pred_calls"] == {"used": 4, "limit": 4, "remaining": 0}
+        observed = [record for record in session.pred.ledger if "observation" in record]
+        assert all(record["observation"]["observation_id"] ==
+                   f"pred-{record['request_id']}" for record in observed)
+        assert {item["observation_id"] for item in session.ledger()["observations"]} == {
+            record["observation"]["observation_id"] for record in observed}
 
 
 def test_free_commands_are_cached_and_do_not_charge(tmp_path):
@@ -167,6 +172,7 @@ def test_gateway_infrastructure_failure_releases_reservation(tmp_path):
 
 
 def test_pred_output_is_drained_but_observation_is_capped(tmp_path):
+    raw_log = None
     with EvidenceBudgetSession(
         rule="r1", budget=_budget(pred=1, solve=0), pred_binary=_fake_pred(tmp_path),
         verifier=lambda cert: Verdict(False, "no bug"),
@@ -174,7 +180,16 @@ def test_pred_output_is_drained_but_observation_is_capped(tmp_path):
         result = _run("pred", "spam", cwd=session.workdir)
         assert result.returncode == 0
         assert len(result.stdout) <= 1024
-        assert "characters elided" in result.stdout
+        assert "chars omitted" in result.stdout
+        observation = session.pred.ledger[0]["observation"]
+        assert observation["policy_id"] == "terminal-diagnostics/v1"
+        assert observation["original_chars"] == 5001
+        assert observation["preview_chars"] <= 1024
+        raw_log = (session.workdir / observation["raw_log"]).resolve()
+        assert raw_log.is_file()
+        assert len(raw_log.read_text()) == 5001
+        assert session.ledger()["observations"] == [observation]
+    assert raw_log is not None and not raw_log.exists()
 
 
 def test_submit_budget_is_two_per_rule_and_acceptance_closes_episode(tmp_path):
@@ -331,7 +346,21 @@ def test_agent_shell_output_has_one_combined_cap(tmp_path):
 
     assert result.returncode == 0
     assert len(result.stdout) <= 512
-    assert "characters elided" in result.stdout
+    assert "bounded archive" in result.stdout
+
+
+def test_split_stdout_stderr_capture_is_deterministic(tmp_path):
+    from benchmark.process_control import run_capped_process
+
+    command = ["python3", "-c",
+               "import sys; print('x' * 5000); print('y' * 5000, file=sys.stderr)"]
+    results = [run_capped_process(
+        command, shell=False, cwd=str(tmp_path), env=dict(os.environ), timeout=5,
+        max_output_chars=1024) for _ in range(3)]
+    signatures = {(result.stdout, result.stderr, result.original_chars,
+                   result.original_lines, result.capture_truncated) for result in results}
+    assert len(signatures) == 1
+    assert len(results[0].stdout) + len(results[0].stderr) <= 1024
 
 
 def test_budget_contract_rejects_invalid_values():

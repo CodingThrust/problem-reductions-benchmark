@@ -17,6 +17,7 @@ from benchmark.top50_runner import (
     format_status,
 )
 from benchmark.evidence_budget import EvidenceBudget
+from benchmark.observation_policy import ObservationConfig
 from benchmark.verify import Verdict
 
 
@@ -29,10 +30,11 @@ def _fake_pred(tmp_path: Path) -> Path:
 
 def _contract() -> Top50Contract:
     return Top50Contract(
-        triage=TriageBudget(model_generations=3, shell_actions=3),
+        triage=TriageBudget(model_generations=3, shell_actions=3, max_output_chars=1024),
         episode=EvidenceBudget(
             model_generations=2, shell_actions=2, pred_calls=1, solve_calls=0,
             submit_attempts=2, max_output_chars=1024, pred_timeout_seconds=2),
+        observation=ObservationConfig(preview_chars=1024),
     )
 
 
@@ -175,6 +177,32 @@ def test_observation_status_reports_every_authoritative_counter(tmp_path):
         assert expected in text
 
 
+def test_triage_builtin_and_error_results_use_observation_policy(tmp_path):
+    import os
+    from benchmark.top50_runner import TriageEnvironment, TriageSession
+
+    inventory = tuple(f"rule_{index:02d}" for index in range(60))
+    with TriageSession(inventory=inventory, budget=TriageBudget(2, 3)) as session:
+        shortlist = session.workdir / "shortlist.json"
+        shortlist.write_text(json.dumps(list(inventory[:50])))
+        environment = TriageEnvironment(session, uid=os.getuid(), gid=os.getgid())
+        outputs = [
+            environment.execute({"command": "commit-top50 shortlist.json"}),
+            environment.execute({"command": "'"}),
+            environment.execute({"command": "commit-top50"}),
+            environment.execute({"command": "pwd"}),
+        ]
+
+        assert [output["returncode"] for output in outputs] == [0, 2, 2, 75]
+        assert all("policy=terminal-diagnostics/v1" in output["output"]
+                   and "[raw log:" in output["output"] for output in outputs)
+        ledger = session.ledger()
+        shell_events = [event for event in ledger["events"]
+                        if event.get("type") == "shell_action"]
+        assert len(ledger["observations"]) == len(shell_events) == 4
+        assert all(event.get("observation_id") for event in shell_events)
+
+
 def test_rankable_contract_is_fixed_to_model_api_surface():
     executor = FakeExecutor()
     assert not hasattr(executor, "backend")
@@ -221,3 +249,83 @@ def test_successful_shell_cannot_leave_background_process(tmp_path):
     assert result.returncode == 0
     time.sleep(0.4)
     assert not sentinel.exists()
+
+
+def test_agent_can_inspect_read_only_raw_observation_with_charged_action(tmp_path):
+    import os
+    import re
+    from benchmark.agent_environment import run_as_agent, sanitized_agent_env
+    from benchmark.evidence_budget import EvidenceBudgetSession
+
+    with EvidenceBudgetSession(
+        rule="rule_00", budget=_contract().episode, pred_binary=_fake_pred(tmp_path),
+        verifier=lambda cert: Verdict(False, "no bug"),
+    ) as session:
+        first_command = "printf 'important evidence\\n'"
+        assert session.admit_shell_action(first_command)
+        first = run_as_agent(
+            first_command, cwd=str(session.workdir), env=sanitized_agent_env(), timeout=2,
+            uid=os.getuid(), gid=os.getgid(), observation_store=session.observations)
+        session.record_shell_observation(first_command, first.observation_metadata)
+        reference = re.search(r"\[raw log: ([^;]+);", first.stdout).group(1)
+        second_command = f"cat {reference}"
+        assert session.admit_shell_action(second_command)
+        second = run_as_agent(
+            second_command, cwd=str(session.workdir), env=sanitized_agent_env(), timeout=2,
+            uid=os.getuid(), gid=os.getgid(), observation_store=session.observations)
+        session.record_shell_observation(second_command, second.observation_metadata)
+
+        assert "important evidence" in second.stdout
+        assert session.status()["shell_actions"]["used"] == 2
+        assert len(session.ledger()["observations"]) == 2
+        raw = (session.workdir / reference).resolve()
+        assert raw.stat().st_mode & 0o060 in (0, 0o040)
+
+
+@pytest.mark.integration
+def test_distinct_agent_identity_cannot_mutate_or_reach_previous_raw_log(tmp_path):
+    import os
+    import sys
+    if os.geteuid() != 0 or not sys.platform.startswith("linux"):
+        pytest.skip("requires the rankable Linux root privilege boundary")
+    from benchmark.agent_environment import run_as_agent, sanitized_agent_env
+    from benchmark.evidence_budget import EvidenceBudgetSession
+
+    agent_uid, agent_gid, evidence_gid = 61_001, 61_001, 61_003
+    common = {
+        "uid": agent_uid, "gid": agent_gid, "extra_groups": (evidence_gid,),
+        "env": sanitized_agent_env(), "timeout": 2,
+    }
+    old_raw = None
+    with EvidenceBudgetSession(
+        rule="rule_00", budget=_contract().episode, pred_binary=_fake_pred(tmp_path),
+        verifier=lambda cert: Verdict(False, "no bug"),
+        agent_uid=agent_uid, agent_gid=agent_gid,
+        oracle_uid=0, oracle_gid=0, evidence_gid=evidence_gid,
+        observation_config=_contract().observation,
+    ) as session:
+        command = "printf 'protected evidence\\n'"
+        assert session.admit_shell_action(command)
+        first = run_as_agent(
+            command, cwd=str(session.workdir), observation_store=session.observations, **common)
+        session.record_shell_observation(command, first.observation_metadata)
+        old_raw = (session.workdir / first.observation_metadata["raw_log"]).resolve()
+        assert run_as_agent(
+            f"cat {old_raw}", cwd=str(session.workdir), **common).returncode == 0
+        assert run_as_agent(
+            f"printf x >> {old_raw}", cwd=str(session.workdir), **common).returncode != 0
+        assert run_as_agent(
+            f"rm {old_raw}", cwd=str(session.workdir), **common).returncode != 0
+        assert run_as_agent(
+            f"mv {old_raw} {old_raw}.moved", cwd=str(session.workdir), **common).returncode != 0
+    assert old_raw is not None and not old_raw.exists()
+
+    with EvidenceBudgetSession(
+        rule="rule_01", budget=_contract().episode, pred_binary=_fake_pred(tmp_path),
+        verifier=lambda cert: Verdict(False, "no bug"),
+        agent_uid=agent_uid, agent_gid=agent_gid,
+        oracle_uid=0, oracle_gid=0, evidence_gid=evidence_gid,
+        observation_config=_contract().observation,
+    ) as second:
+        assert run_as_agent(
+            f"cat {old_raw}", cwd=str(second.workdir), **common).returncode != 0

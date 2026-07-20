@@ -3,7 +3,10 @@ agent:
     You are evaluating reduction rules under a fixed logical evidence budget. Each response
     must contain exactly one bash command. The authoritative remaining budget is injected into
     every observation; elapsed time is not a score and unused budget never transfers.
-    This is frozen contract top50-evidence/v1. The prompt, strategy, shortlist size, and logical
+    This is frozen contract top50-evidence/v2 with observation policy terminal-diagnostics/v1.
+    Command output is deterministically compacted into a 10,000-character preview. Each preview
+    names an evaluation-owned raw log that you may inspect with an ordinary shell action.
+    The prompt, strategy, shortlist size, and logical
     counters cannot be customized on a rankable run.
 
     {% if phase == "triage" %}

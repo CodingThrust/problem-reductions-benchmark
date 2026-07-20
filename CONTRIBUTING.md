@@ -1,6 +1,6 @@
 # Submitting a model run
 
-The current public comparison accepts one execution protocol: **Standardized Model API / Self-selected Top50** under frozen contract `top50-evidence/v1`.
+The current public comparison accepts one execution protocol: **Standardized Model API / Self-selected Top50** under frozen contract `top50-evidence/v2`.
 
 ```text
 source-only triage → frozen Top50 → 50 isolated rule episodes → private submission
@@ -32,7 +32,7 @@ Preflight first checks that no forbidden execution knob is present, verifies the
 - 50 unique frozen rules;
 - per rule: 10 model generations, 12 shell actions, 24 `pred` calls, at most 10 solves;
 - exactly two charged submit attempts per rule;
-- 10,000 observed characters per rule.
+- a 10,000-character deterministic terminal preview per action, with a read-only bounded raw log.
 
 The runner owns these counters. A model receives authoritative remaining-budget state after each action, cannot transfer unused budget, and cannot invoke the verifier directly. Each rule starts with fresh model history and a fresh submission ledger.
 
@@ -64,7 +64,7 @@ The score should be read as joint **prioritization + bounded diagnosis + certifi
 
 ## Release checks
 
-Before changing the frozen contract or target version, add a new versioned contract and a new non-ranking calibration. Do not silently edit `top50-evidence/v1`.
+Before changing the frozen contract or target version, add a new versioned contract and a new non-ranking calibration. Do not silently edit `top50-evidence/v2`.
 
 ```bash
 pytest -v -m "not integration"

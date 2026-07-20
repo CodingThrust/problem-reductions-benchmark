@@ -28,45 +28,80 @@ class ProcessResult:
     stdout: str
     stderr: str
     timed_out: bool
+    original_chars: int
+    original_lines: int
+    capture_truncated: bool
+
+
+class _StreamCapture:
+    def __init__(self, limit: int):
+        retained_limit = max(0, limit - 160)
+        self.head_limit = retained_limit // 2
+        self.tail_limit = retained_limit - self.head_limit
+        self.total = 0
+        self.newlines = 0
+        self.ends_newline = True
+        self.head: list[str] = []
+        self.head_chars = 0
+        self.tail: list[str] = []
+        self.tail_chars = 0
+
+    def add(self, chunk: str) -> None:
+        self.total += len(chunk)
+        self.newlines += chunk.count("\n")
+        self.ends_newline = chunk.endswith("\n")
+        head_remaining = self.head_limit - self.head_chars
+        if head_remaining:
+            piece = chunk[:head_remaining]
+            self.head.append(piece)
+            self.head_chars += len(piece)
+            chunk = chunk[len(piece):]
+        if chunk and self.tail_limit:
+            self.tail.append(chunk)
+            self.tail_chars += len(chunk)
+            while self.tail_chars > self.tail_limit:
+                excess = self.tail_chars - self.tail_limit
+                if len(self.tail[0]) <= excess:
+                    self.tail_chars -= len(self.tail.pop(0))
+                else:
+                    self.tail[0] = self.tail[0][excess:]
+                    self.tail_chars -= excess
+
+    def result(self) -> tuple[str, int, bool]:
+        retained = "".join(self.head + self.tail)
+        truncated = self.total > len(retained)
+        if truncated:
+            retained += f"\n... bounded archive: {self.total - len(retained)} characters omitted ...\n"
+        lines = self.newlines + int(self.total > 0 and not self.ends_newline)
+        return retained, lines, truncated
 
 
 class _CombinedCapture:
-    def __init__(self, limit: int):
-        self.limit = limit
-        self.remaining = limit
-        self.total = 0
-        self.totals = {"stdout": 0, "stderr": 0}
-        self.parts = {"stdout": [], "stderr": []}
-        self._lock = threading.Lock()
+    def __init__(self, limit: int, *, split_streams: bool):
+        stdout_limit = limit // 2 if split_streams else limit
+        stderr_limit = limit - stdout_limit if split_streams else 0
+        self.streams = {
+            "stdout": _StreamCapture(stdout_limit),
+            "stderr": _StreamCapture(stderr_limit),
+        }
+
+    @property
+    def total(self) -> int:
+        return sum(stream.total for stream in self.streams.values())
 
     def drain(self, stream, key: str) -> None:
+        capture = self.streams[key]
         while True:
             chunk = stream.read(64 * 1024)
             if not chunk:
                 break
-            with self._lock:
-                self.total += len(chunk)
-                self.totals[key] += len(chunk)
-                if self.remaining:
-                    piece = chunk[:self.remaining]
-                    self.parts[key].append(piece)
-                    self.remaining -= len(piece)
+            capture.add(chunk)
 
-    def result(self) -> tuple[str, str]:
-        stdout = "".join(self.parts["stdout"])
-        stderr = "".join(self.parts["stderr"])
-        retained = len(stdout) + len(stderr)
-        if self.total > retained:
-            marker = f"\n... {self.total - retained} characters elided ...\n"
-            keep = max(0, self.limit - len(marker))
-            if self.totals["stdout"] > len(stdout):
-                stdout = stdout[:keep] + marker[:self.limit - min(len(stdout), keep)]
-                stderr = ""
-            else:
-                stdout = stdout[:keep]
-                stderr_keep = max(0, keep - len(stdout))
-                stderr = stderr[:stderr_keep] + marker[:self.limit - len(stdout) - stderr_keep]
-        return stdout, stderr
+    def result(self) -> tuple[str, str, int, bool]:
+        stdout, stdout_lines, stdout_truncated = self.streams["stdout"].result()
+        stderr, stderr_lines, stderr_truncated = self.streams["stderr"].result()
+        return (stdout, stderr, stdout_lines + stderr_lines,
+                stdout_truncated or stderr_truncated)
 
 
 def run_capped_process(
@@ -114,7 +149,7 @@ def run_capped_process(
         on_start(process)
     try:
         _apply_limits(process.pid, limits)
-        capture = _CombinedCapture(max_output_chars)
+        capture = _CombinedCapture(max_output_chars, split_streams=not combine_stderr)
         assert process.stdout is not None
         readers = [threading.Thread(target=capture.drain, args=(process.stdout, "stdout"),
                                     daemon=True)]
@@ -139,12 +174,15 @@ def run_capped_process(
             terminate_process_group(process)
         for reader in readers:
             reader.join()
-        stdout, stderr = capture.result()
+        stdout, stderr, original_lines, capture_truncated = capture.result()
         return ProcessResult(
             returncode=124 if timed_out else process.returncode,
             stdout=stdout,
             stderr=stderr,
             timed_out=timed_out,
+            original_chars=capture.total,
+            original_lines=original_lines,
+            capture_truncated=capture_truncated,
         )
     finally:
         if on_finish is not None:

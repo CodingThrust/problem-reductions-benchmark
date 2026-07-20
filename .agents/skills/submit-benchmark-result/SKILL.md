@@ -39,7 +39,7 @@ Immediately before uploading, show this confirmation with the real values filled
 > - Destination: `intake.prb-bench.workers.dev`
 > - File: `<absolute path to submission.json>`
 > - Model: `<model>`
-> - Contract: `top50-evidence/v1`
+> - Contract: `top50-evidence/v2`
 > - Claimed bugs: `<count>`
 >
 > This private submission file will leave the machine and be uploaded to the benchmark's

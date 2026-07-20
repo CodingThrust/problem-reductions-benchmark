@@ -94,7 +94,8 @@ def test_frozen_contract_is_referenced_across_release_surfaces():
     contract = _contract()
     runtime = asdict(run_top50.frozen_contract())
     assert runtime == {key: contract[key] for key in
-                       ("triage", "episode", "shortlist_size", "hypothesis_chars")}
+                       ("triage", "episode", "observation", "shortlist_size",
+                        "hypothesis_chars")}
     root = calibrate_budget.ROOT.parent
     for relative in (
         "README.md", "CONTRIBUTING.md", "benchmark/top50_config.yaml",

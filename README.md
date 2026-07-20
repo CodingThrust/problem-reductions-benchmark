@@ -4,7 +4,7 @@ This benchmark measures how well a model can prioritize likely-buggy reduction r
 
 ## Current ranking contract
 
-The primary track is **Standardized Model API / Self-selected Top50**, contract [`top50-evidence/v1`](benchmark/top50_budget.json). The target is `problem-reductions` [`v0.6.0`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8), and the bundled `pred` version is `0.6.0`.
+The primary track is **Standardized Model API / Self-selected Top50**, contract [`top50-evidence/v2`](benchmark/top50_budget.json). The target is `problem-reductions` [`v0.6.0`](https://github.com/CodingThrust/problem-reductions/commit/aa2d1a10cffa434871d12a4d6f411147fb7e08a8), and the bundled `pred` version is `0.6.0`.
 
 Each run has two phases:
 
@@ -20,9 +20,11 @@ Every episode receives the same immutable logical budget:
 | Total `pred` calls (`P`) | 24 |
 | `pred solve` calls (`P_solve`) | 10 |
 | Submit attempts (`S`) | **2** |
-| Observed output (`O`) | 10,000 characters |
+| Automatic preview per action (`O`) | 10,000 characters |
 
 Triage receives 8 model generations and 12 source-only actions. Unused budget never transfers between rules. Process timeouts remain fixed watchdogs for hung model or `pred` calls; elapsed time, network delay, tokens, and cost do not affect rank.
+
+Every terminal result uses the frozen `terminal-diagnostics/v1` policy: deterministic noise and repetition removal, diagnostic-aware head/tail selection, and a 10,000-character model preview. A separately bounded 1 MiB raw log remains read-only inside the current episode and can be inspected using a normal charged shell action.
 
 The budget was selected once using a human-reviewed non-ranking development replay, with smaller and larger candidates around the chosen `M` and `P`. The checked-in record and rationale are in [budget-calibration.md](benchmark/docs/budget-calibration.md); validate their internal and release consistency offline with:
 
@@ -71,6 +73,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for artifact fields, submission, and hist
 
 ## Historical results
 
-Whole-repository results produced by the former contract remain visible under `legacy-whole-repo`. They use a different execution protocol and efficiency tie-break, so the site keeps them in a separate selectable table. They cannot be deduplicated, sorted, or compared into `top50-evidence/v1`.
+Whole-repository results produced by the former contract remain visible under `legacy-whole-repo`. They use a different execution protocol and efficiency tie-break, so the site keeps them in a separate selectable table. They cannot be deduplicated, sorted, or compared into `top50-evidence/v2`.
 
 The old host coding-agent and whole-repository runners remain in the repository only to reproduce those historical artifacts. They are not a public System Track and cannot produce rankable Top50 submissions.

@@ -416,7 +416,7 @@ const TOP50_COLS=[
   {key:"predBug",label:"Pred / bug",num:true},
 ];
 const RIGHT=new Set(["bugs","tokens","eff","bugs10","bugs25","predBug"]);
-const selectedTrack=()=>document.getElementById("lb-track").value||"top50-evidence/v1";
+const selectedTrack=()=>document.getElementById("lb-track").value||"top50-evidence/v2";
 const isTop50Track=()=>selectedTrack().startsWith("top50-evidence/");
 const lbColumns=()=>isTop50Track()?TOP50_COLS:LEGACY_COLS;
 
@@ -619,7 +619,7 @@ Promise.all([
   fetch("tasks.json").then(r=>r.json()).catch(()=>[]),
 ]).then(([res,tasks])=>{
   RESULTS=res;TASKS=tasks;TOTAL=tasks.length||TOTAL_DEFAULT;
-  const tracks=[...new Set(["top50-evidence/v1", ...RESULTS.map(r=>r.benchmark_contract||"legacy-whole-repo")])].sort();
+  const tracks=[...new Set(["top50-evidence/v2", ...RESULTS.map(r=>r.benchmark_contract||"legacy-whole-repo")])].sort();
   const trackSelect=document.getElementById("lb-track");
   trackSelect.innerHTML=tracks.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
   const newest=tracks.find(t=>t.startsWith("top50-evidence/"));if(newest)trackSelect.value=newest;

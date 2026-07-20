@@ -1,12 +1,14 @@
 # Top50 budget calibration
 
-Contract: `top50-evidence/v1` (`frozen`)
+Contract: `top50-evidence/v2` (`frozen`)
 
 This is a human-reviewed, non-ranking bounded-prefix replay record from internally retained pilot trajectories. Raw trajectories remain private; this offline checker validates the checked-in record and release consistency, not the raw replay. It is not a public score, a multi-seed experiment, or a claim that elapsed time is model ability.
 
 ## Selected contract
 
-The release freezes M=10 model generations, P=24 total `pred` calls, P_solve=10 solve calls, S=2 submit attempts, E=12 shell actions, and O=10000 observed characters per rule. Triage is T=8 generations and E_t=12 source-only actions.
+The release freezes M=10 model generations, P=24 total `pred` calls, P_solve=10 solve calls, S=2 submit attempts, E=12 shell actions, and O=10000 automatically previewed characters per action. Triage is T=8 generations and E_t=12 source-only actions.
+
+Terminal output uses `terminal-diagnostics/v1` with a 10000-character automatic preview and a bounded 1048576-character raw archive per command.
 
 Model calls have a fixed 300-second watchdog and 2 transport retries. Command and `pred` watchdogs are also fixed safety controls. They are recorded but are outside the logical budget and never enter the score.
 

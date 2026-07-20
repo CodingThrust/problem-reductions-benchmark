@@ -12,8 +12,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from benchmark.agent_environment import make_agent_environment, run_as_agent, sanitized_agent_env
+from benchmark.agent_environment import (make_agent_environment, package_shell_result,
+                                         run_as_agent, sanitized_agent_env)
 from benchmark.evidence_budget import EvidenceBudget, EvidenceBudgetSession, EvidenceBudgetState
+from benchmark.observation_policy import ObservationConfig, ObservationStore
 from benchmark.run_mini import (
     DEFAULT_MAX_TOKENS,
     _build_model,
@@ -48,6 +50,7 @@ class TriageBudget:
 class Top50Contract:
     triage: TriageBudget
     episode: EvidenceBudget
+    observation: ObservationConfig = ObservationConfig()
     shortlist_size: int = TOP50_SIZE
     hypothesis_chars: int = DEFAULT_HYPOTHESIS_CHARS
 
@@ -56,6 +59,10 @@ class Top50Contract:
             raise ValueError("the rankable contract requires exactly 50 rules")
         if self.hypothesis_chars <= 0:
             raise ValueError("hypothesis_chars must be positive")
+        caps = {self.triage.max_output_chars, self.episode.max_output_chars,
+                self.observation.preview_chars}
+        if len(caps) != 1:
+            raise ValueError("triage, episode, and observation preview caps must match")
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,9 @@ class TriageSession:
     def __init__(self, *, inventory: tuple[str, ...], budget: TriageBudget,
                  shortlist_size: int = TOP50_SIZE,
                  hypothesis_chars: int = DEFAULT_HYPOTHESIS_CHARS,
-                 agent_uid: int | None = None, agent_gid: int | None = None):
+                 agent_uid: int | None = None, agent_gid: int | None = None,
+                 evidence_gid: int | None = None,
+                 observation_config: ObservationConfig | None = None):
         if len(set(inventory)) != len(inventory):
             raise ValueError("canonical inventory contains duplicates")
         if (agent_uid is None) != (agent_gid is None):
@@ -98,6 +107,9 @@ class TriageSession:
         self.hypothesis_chars = hypothesis_chars
         self.agent_uid = agent_uid
         self.agent_gid = agent_gid
+        self.evidence_gid = evidence_gid
+        self.observation_config = observation_config or ObservationConfig(
+            preview_chars=budget.max_output_chars)
         evidence = EvidenceBudget(
             model_generations=budget.model_generations,
             shell_actions=budget.shell_actions,
@@ -112,6 +124,8 @@ class TriageSession:
         self._workdir: Path | None = None
         self._shortlist: tuple[ShortlistEntry, ...] | None = None
         self._events: list[dict] = []
+        self._observations: list[dict] = []
+        self.observations: ObservationStore | None = None
         self._lock = threading.RLock()
 
     @property
@@ -129,6 +143,9 @@ class TriageSession:
         self._tmpdir = Path(tempfile.mkdtemp(prefix="prb-triage-", dir="/tmp")).resolve()
         self._workdir = self._tmpdir / "work"
         self._workdir.mkdir(mode=0o700)
+        self.observations = ObservationStore(
+            self._tmpdir / "observations", config=self.observation_config,
+            relative_from=self._workdir, readable_gid=self.evidence_gid)
         if self.agent_uid is not None and self.agent_gid is not None:
             self._tmpdir.chmod(0o711)
             os.chown(self._workdir, self.agent_uid, self.agent_gid)
@@ -187,6 +204,8 @@ class TriageSession:
     def ledger(self) -> dict:
         with self._lock:
             return {"budget": asdict(self.budget), "status": self.status(),
+                    "observation_policy": asdict(self.observation_config),
+                    "observations": copy.deepcopy(self._observations),
                     "events": copy.deepcopy(self._events),
                     "shortlist": ([asdict(entry) for entry in self._shortlist]
                                   if self._shortlist is not None else None)}
@@ -219,6 +238,21 @@ class TriageSession:
                                  "charged": charged, "outcome": outcome,
                                  "budget": self.status(), **extra})
 
+    def record_shell_observation(self, command: str, metadata: dict | None) -> None:
+        if metadata is None:
+            return
+        with self._lock:
+            self._observations.append(copy.deepcopy(metadata))
+            for event in reversed(self._events):
+                if (event.get("type") == "shell_action" and event.get("command") == command
+                        and "observation_id" not in event):
+                    event["observation_id"] = metadata["observation_id"]
+                    if event.get("charged") is True:
+                        event["outcome"] = ("timeout" if metadata["timed_out"] else
+                                            "completed" if metadata["returncode"] == 0 else
+                                            "nonzero_exit")
+                    break
+
 
 class Top50Runner:
     """Freeze one self-selected Top50, then execute 50 fresh sequential episodes."""
@@ -250,6 +284,8 @@ class Top50Runner:
             hypothesis_chars=self.contract.hypothesis_chars,
             agent_uid=self.identities["agent_uid"],
             agent_gid=self.identities["agent_gid"],
+            evidence_gid=self.identities["evidence_gid"],
+            observation_config=self.contract.observation,
         ) as triage:
             try:
                 triage_result = self.executor.run_triage(
@@ -279,6 +315,7 @@ class Top50Runner:
                     pred_binary=self.pred_binary,
                     verifier=self.verifier,
                     **self.identities,
+                    observation_config=self.contract.observation,
                 ) as episode:
                     phase = self.executor.run_episode(
                         episode, repo_path=repo_path, entry=entry,
@@ -324,6 +361,7 @@ class Top50Runner:
                          and len(episodes) == self.contract.shortlist_size),
             "contract": {"triage": asdict(self.contract.triage),
                          "episode": asdict(self.contract.episode),
+                         "observation": asdict(self.contract.observation),
                          "shortlist_size": self.contract.shortlist_size,
                          "hypothesis_chars": self.contract.hypothesis_chars},
             "shortlist": ([asdict(entry) for entry in shortlist] if shortlist else None),
@@ -391,30 +429,42 @@ class TriageEnvironment:
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict:
         command = action.get("command", "")
         if not self.session.admit_shell_action(command):
-            return {"output": "shell action budget exhausted\n", "returncode": 75,
-                    "exception_info": ""}
+            return package_shell_result(
+                self.session, command, output="shell action budget exhausted\n", returncode=75)
         try:
             words = shlex.split(command)
         except ValueError as error:
-            return {"output": str(error), "returncode": 2, "exception_info": ""}
+            return package_shell_result(
+                self.session, command, output=str(error) + "\n", returncode=2)
         if words and words[0] == "commit-top50":
             if len(words) != 2:
-                return {"output": "usage: commit-top50 SHORTLIST.json\n", "returncode": 2,
-                        "exception_info": ""}
+                return package_shell_result(
+                    self.session, command, output="usage: commit-top50 SHORTLIST.json\n",
+                    returncode=2)
             accepted, message = self.session.commit_file(words[1])
-            return {"output": message + "\n", "returncode": 0 if accepted else 2,
-                    "exception_info": ""}
+            return package_shell_result(
+                self.session, command, output=message + "\n",
+                returncode=0 if accepted else 2)
         try:
             result = run_as_agent(
                 command, cwd=cwd or str(self.session.workdir), env=sanitized_agent_env(),
                 timeout=timeout or self.session.budget.command_timeout_seconds,
                 uid=self.uid, gid=self.gid, extra_groups=self.extra_groups,
-                max_output_chars=self.session.budget.max_output_chars)
+                max_output_chars=self.session.budget.max_output_chars,
+                observation_store=self.session.observations)
+            self.session.record_shell_observation(command, result.observation_metadata)
             return {"output": result.stdout, "returncode": result.returncode,
                     "exception_info": ""}
         except Exception as error:
-            return {"output": getattr(error, "output", "") or "", "returncode": -1,
-                    "exception_info": f"{type(error).__name__}: {error}"}
+            raw_output = getattr(error, "output", "") or ""
+            metadata = getattr(error, "observation_metadata", None)
+            if metadata is not None:
+                self.session.record_shell_observation(command, metadata)
+                return {"output": raw_output, "returncode": -1,
+                        "exception_info": f"{type(error).__name__}: {error}"}
+            return package_shell_result(
+                self.session, command, output=raw_output, returncode=-1,
+                exception_info=f"{type(error).__name__}: {error}")
 
     def get_template_vars(self, **kwargs) -> dict:
         return {"cwd": str(self.session.workdir), **kwargs}

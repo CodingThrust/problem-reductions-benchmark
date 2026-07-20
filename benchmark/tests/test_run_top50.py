@@ -30,7 +30,7 @@ def test_fake_entrypoint_uses_50_isolated_episodes(tmp_path, monkeypatch):
     assert result["rankable"] is False
     artifact = json.loads(output.read_text())
     assert artifact["budget_contract_status"] == "frozen"
-    assert artifact["benchmark_contract"] == "top50-evidence/v1"
+    assert artifact["benchmark_contract"] == "top50-evidence/v2"
 
 
 @pytest.mark.parametrize("forbidden", ["--backend", "--config", "--strategy-file"])

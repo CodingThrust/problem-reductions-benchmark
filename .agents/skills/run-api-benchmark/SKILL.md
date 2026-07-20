@@ -5,7 +5,7 @@ description: Configure and run the rankable problem-reductions Self-selected Top
 
 # Run the rankable Top50 benchmark
 
-Use only the frozen `top50-evidence/v1` path: source-only triage freezes 50 rules, followed by 50 fresh sequential episodes. Each rule receives M=10 model generations, E=12 shell actions, P=24 `pred` calls, P_solve=10 solve calls, O=10000 observed characters, and exactly S=2 submit attempts. Never add or accept custom budgets, prompts, strategies, model kwargs, or coding-agent backends.
+Use only the frozen `top50-evidence/v2` path: source-only triage freezes 50 rules, followed by 50 fresh sequential episodes. Each rule receives M=10 model generations, E=12 shell actions, P=24 `pred` calls, P_solve=10 solve calls, O=10000 observed characters, and exactly S=2 submit attempts. Never add or accept custom budgets, prompts, strategies, model kwargs, or coding-agent backends.
 
 Read [references/provider-config.md](references/provider-config.md) for endpoint setup and `scripts/detect-engine.sh` before preparing the image.
 
